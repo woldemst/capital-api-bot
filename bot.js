@@ -4,9 +4,10 @@ import WebSocket from "ws";
 import { SMA, EMA, RSI, BollingerBands } from "technicalindicators";
 
 // --- Configuration ---
-const { API_KEY, API_IDENTIFIER, API_PASSWORD, BASE_URL } = process.env;
-
-const WS_URL = "wss://stream-capital.backend-capital.com";
+const { API_KEY, API_IDENTIFIER, API_PASSWORD } = process.env;
+const BASE_URL = process.env.BASE_URL || "https://demo-api-capital.backend-capital.com";
+const API_PATH = "/api/v1";
+const WS_URL = "wss://demo-stream-capital.backend-capital.com";
 const SYMBOLS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD"];
 const LEVERAGE = 30;
 const RISK_PER_TRADE = 0.02;
@@ -18,8 +19,15 @@ let cst, xsecurity;
 // --- Utils ---
 async function startSession() {
   try {
+    // Log environment variables (without exposing sensitive data)
+    console.log("API_KEY exists:", !!process.env.API_KEY);
+    console.log("API_IDENTIFIER exists:", !!process.env.API_IDENTIFIER);
+    console.log("API_PASSWORD exists:", !!process.env.API_PASSWORD);
+    console.log("BASE_URL:", process.env.BASE_URL);
+    
+    // Prepare request with proper format and correct endpoint
     const response = await axios.post(
-      `${BASE_URL}/session`,
+      `${BASE_URL}${API_PATH}/session`,
       {
         identifier: API_IDENTIFIER,
         password: API_PASSWORD,
@@ -32,13 +40,26 @@ async function startSession() {
         }
       }
     );
+    
     console.log("Session started", response.data);
-
+    
+    // Store the session tokens
     cst = response.headers['cst'];
     xsecurity = response.headers['x-security-token'];
+    
+    if (!cst || !xsecurity) {
+      console.error("Warning: Session tokens not received in response headers");
+      console.log("Response headers:", response.headers);
+    }
+    
     return response.data;
   } catch (error) {
     console.error("Failed to start session:", error.response ? error.response.data : error.message);
+    console.log("Request config:", error.config);
+    if (error.response) {
+      console.log("Response status:", error.response.status);
+      console.log("Response headers:", error.response.headers);
+    }
     throw error;
   }
 }
