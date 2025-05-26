@@ -73,7 +73,8 @@ export async function getAccountInfo() {
 // Get historical price data
 export async function getHistorical(symbol, resolution, count) {
   try {
-    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
+    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>
+`);
 
     // Map resolution string to API format
     const resolutionMap = {
@@ -90,8 +91,14 @@ export async function getHistorical(symbol, resolution, count) {
 
     // Format the symbol for the API (replace / with _)
     const formattedSymbol = symbol.replace("/", "_");
-
-    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${formattedSymbol}/${apiResolution}/LAST/${count}`, {
+    
+    // Try the correct endpoint format for Capital.com API
+    // The API expects /prices/{epic} format
+    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${formattedSymbol}`, {
+      params: {
+        resolution: apiResolution,
+        max: count
+      },
       headers: {
         "X-SECURITY-TOKEN": xsecurity,
         CST: cst,
@@ -99,19 +106,7 @@ export async function getHistorical(symbol, resolution, count) {
       },
     });
 
-    console.log(`Received historical data for ${symbol}`);
-
-    // Transform the response data into the format expected by calcIndicators
-    const bars = response.data.prices.map((price) => ({
-      time: new Date(price.snapshotTime).getTime(),
-      open: parseFloat(price.openPrice.bid),
-      high: parseFloat(price.highPrice.bid),
-      low: parseFloat(price.lowPrice.bid),
-      close: parseFloat(price.closePrice.bid),
-      volume: price.lastTradedVolume,
-    }));
-
-    return bars;
+    return response.data;
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
     throw error;
