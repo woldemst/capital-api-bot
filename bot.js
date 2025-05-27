@@ -1,9 +1,10 @@
 import { calcIndicators, analyzeTrend } from "./indicators.js";
-import { SYMBOLS, PROFIT_THRESHOLD, MAX_OPEN_TRADES } from "./config.js";
+import { API_KEY, API_PATH, BASE_URL, SYMBOLS, PROFIT_THRESHOLD, MAX_OPEN_TRADES } from "./config.js";
 import { startSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens } from "./api.js";
 import logger from "./utils/logger.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
+import axios from "axios";
 
 // Main bot function
 async function run() {
@@ -21,63 +22,79 @@ async function run() {
     logger.info(`Current open trades: ${JSON.stringify(openTrades)}`);
     tradingService.setOpenTrades(openTrades);
 
-    // Test historical data function
-    try {
-      const m1Data = await getHistorical('EUR_USD', "m1", 100);
-      logger.info(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
-    } catch (error) {
-      logger.error("Error testing historical data:", error.message);
-    }
+    // Test historical data  function
+    // try {
+    //   const m1Data = await getHistorical("EUR_USD", "m1", 100);
+    //   logger.info(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
+    // } catch (error) {
+    //   logger.error("Error testing historical data:", error.message);
+    // }
 
     // Get session tokens for WebSocket
     const tokens = getSessionTokens();
 
-    // Connect to WebSocket for real-time price updates
-    webSocketService.connect(tokens, SYMBOLS, async (data) => {
-      try {
-        logger.info("Raw WebSocket message received:");
-        const rawMessage = data.toString();
-        logger.info(rawMessage);
-
-        const msg = JSON.parse(rawMessage);
-        logger.info(`Parsed message: ${JSON.stringify(msg)}`);
-
-        // Check if it's a price update message
-        if (msg.epic) {
-          const symbol = msg.epic.replace("_", "/");
-          const bid = msg.bid;
-          const ask = msg.offer;
-          
-          // Log price update
-          logger.price(symbol, bid, ask);
-
-          // Process price for trading decisions
-          await tradingService.processPrice(symbol, bid, ask, getHistorical, MAX_OPEN_TRADES);
+    try {
+      const response = await axios.get(
+        // "https://api-capital.backend-capital.com/api/v1/history/activity?from=2025-05-25T15:09:47&to=2025-05-26T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic=EUR_USD",
+        `${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`,
+        {
+          headers: {
+            "X-SECURITY-TOKEN": tokens.xsecurity,
+            CST: tokens.cst,
+          },
         }
-      } catch (error) {
-        logger.error("Error processing WebSocket message:", error.message);
-      }
-    });
+      );
+      console.log(response.data);
+    } catch (error) {
+      console.error("Error fetching activity:", error.response?.data || error.message);
+    }
+
+    // Connect to WebSocket for real-time price updates
+    // webSocketService.connect(tokens, SYMBOLS, async (data) => {
+    //   try {
+    //     logger.info("Raw WebSocket message received:");
+    //     const rawMessage = data.toString();
+    //     logger.info(rawMessage);
+
+    //     const msg = JSON.parse(rawMessage);
+    //     logger.info(`Parsed message: ${JSON.stringify(msg)}`);
+
+    //     // Check if it's a price update message
+    //     if (msg.epic) {
+    //       const symbol = msg.epic.replace("_", "/");
+    //       const bid = msg.bid;
+    //       const ask = msg.offer;
+
+    //       // Log price update
+    //       logger.price(symbol, bid, ask);
+
+    //       // Process price for trading decisions
+    //       await tradingService.processPrice(symbol, bid, ask, getHistorical, MAX_OPEN_TRADES);
+    //     }
+    //   } catch (error) {
+    //     logger.error("Error processing WebSocket message:", error.message);
+    //   }
+    // });
 
     // Periodically update account info and check profit threshold
-    setInterval(async () => {
-      try {
-        const accountData = await getAccountInfo();
-        const currentBalance = accountData.accounts[0].balance;
-        tradingService.setAccountBalance(currentBalance);
+    // setInterval(async () => {
+    //   try {
+    //     const accountData = await getAccountInfo();
+    //     const currentBalance = accountData.accounts[0].balance;
+    //     tradingService.setAccountBalance(currentBalance);
 
-        // Check if profit threshold has been reached
-        const initialBalance = parseFloat(process.env.INITIAL_BALANCE || currentBalance);
-        const profitPercentage = (currentBalance - initialBalance) / initialBalance;
+    //     // Check if profit threshold has been reached
+    //     const initialBalance = parseFloat(process.env.INITIAL_BALANCE || currentBalance);
+    //     const profitPercentage = (currentBalance - initialBalance) / initialBalance;
 
-        if (profitPercentage >= PROFIT_THRESHOLD) {
-          logger.info(`Profit threshold of ${PROFIT_THRESHOLD * 100}% reached! Increasing position size`);
-          tradingService.setProfitThresholdReached(true);
-        }
-      } catch (error) {
-        logger.error("Error updating account info:", error.message);
-      }
-    }, 5 * 60 * 1000); // Every 5 minutes
+    //     if (profitPercentage >= PROFIT_THRESHOLD) {
+    //       logger.info(`Profit threshold of ${PROFIT_THRESHOLD * 100}% reached! Increasing position size`);
+    //       tradingService.setProfitThresholdReached(true);
+    //     }
+    //   } catch (error) {
+    //     logger.error("Error updating account info:", error.message);
+    //   }
+    // }, 5 * 60 * 1000); // Every 5 minutes
   } catch (error) {
     logger.error("Error in main bot execution:", error.message);
     throw error;
