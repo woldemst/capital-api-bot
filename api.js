@@ -73,8 +73,7 @@ export async function getAccountInfo() {
 // Get historical price data
 export async function getHistorical(symbol, resolution, count) {
   try {
-    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>
-`);
+    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
 
     // Map resolution string to API format
     const resolutionMap = {
@@ -91,13 +90,13 @@ export async function getHistorical(symbol, resolution, count) {
 
     // Format the symbol for the API (replace / with _)
     const formattedSymbol = symbol.replace("/", "_");
-    
-    // Try the correct endpoint format for Capital.com API
-    // The API expects /prices/{epic} format
-    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${formattedSymbol}`, {
+
+    // Use the correct endpoint format for Capital.com API
+    // const response = await axios.get(`${BASE_URL}${API_PATH}/prices/CFD/${formattedSymbol}`, {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/EUR_USD`, {
       params: {
         resolution: apiResolution,
-        max: count
+        max: count,
       },
       headers: {
         "X-SECURITY-TOKEN": xsecurity,

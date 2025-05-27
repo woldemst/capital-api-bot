@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { WS_BASE_URL } from "../config.js";
+import { WS_BASE_URL, API_KEY } from "../config.js";
 import logger from "../utils/logger.js";
 
 class WebSocketService {
@@ -16,7 +16,10 @@ class WebSocketService {
     logger.info(`Connecting to WebSocket: ${wsUrl}`);
     
     this.ws = new WebSocket(wsUrl, {
-      headers: { "X-SECURITY-TOKEN": xsecurity, CST: cst },
+      headers: { 
+        "X-SECURITY-TOKEN": xsecurity, 
+        CST: cst
+      },
     });
 
     this.ws.on("open", () => {
@@ -26,12 +29,15 @@ class WebSocketService {
       // Subscribe to price updates for each symbol
       const formattedSymbols = symbols.map((s) => s.replace("/", "_"));
 
-      // Send subscription message
+      // Send subscription message with authentication tokens
       const subscriptionMessage = {
         destination: "marketData.subscribe",
         correlationId: "1",
         payload: {
           epics: formattedSymbols,
+          clientToken: xsecurity,
+          cst: cst,
+          apiKey: API_KEY
         },
       };
 
