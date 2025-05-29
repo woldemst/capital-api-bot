@@ -28,32 +28,18 @@ async function run() {
     const tokens = getSessionTokens();
 
     // Test historical data  function
-    // try {
-    //   const m1Data = await getHistorical("EUR_USD", "m1", 100);
-    //   logger.info(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
-    // } catch (error) {
-    //   logger.error("Error testing historical data:", error.message);
-    // }
+    try {
+      const m1Data = await getHistorical("EUR_USD", "MINUTE", 50, '2025-05-25T15:09:47', '2025-05-26T15:10:05');
+      console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
+    } catch (error) {
+      console.error("Error testing historical data:", error.message);
+    }
 
     
     
 
 
-    // try {
-    //   const response = await axios.get(
-    //     // "https://api-capital.backend-capital.com/api/v1/history/activity?from=2025-05-25T15:09:47&to=2025-05-26T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic=EUR_USD",
-    //     `${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`,
-    //     {
-    //       headers: {
-    //         "X-SECURITY-TOKEN": tokens.xsecurity,
-    //         CST: tokens.cst,
-    //       },
-    //     }
-    //   );
-    //   console.log(response.data);
-    // } catch (error) {
-    //   console.error("Error fetching activity:", error.response?.data || error.message);
-    // }
+
 
 
     // Connect to WebSocket for real-time price updates
@@ -103,9 +89,9 @@ async function run() {
     //   }
     // }, 5 * 60 * 1000); // Every 5 minutes
   } catch (error) {
-    logger.error("Error in main bot execution:", error.message);
+    console.error("Error in main bot execution:", error.message);
     throw error;
   }
 }
 
-run().catch((error) => logger.error("Unhandled error:", error));
+run().catch((error) => console.error("Unhandled error:", error));

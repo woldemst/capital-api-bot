@@ -97,42 +97,35 @@ export const getOpenPositions = async () => {
   }
 };
 
-
-
 // Get historical price data
-export async function getHistorical(symbol, resolution, count) {
+export async function getHistorical(symbol, resolution, count, from, to) {
   try {
-    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
-
+    
     // Map resolution string to API format
-    const resolutionMap = {
-      m1: "MINUTE",
-      m5: "MINUTE_5",
-      m15: "MINUTE_15",
-      m30: "MINUTE_30",
-      h1: "HOUR",
-      h4: "HOUR_4",
-      d1: "DAY",
-    };
-
-    const apiResolution = resolutionMap[resolution] || "MINUTE";
-
-    // Format the symbol for the API (replace / with _)
-    const formattedSymbol = symbol.replace("/", "_");
-
-    // Use the correct endpoint format for Capital.com API
+    // const resolutionMap = {
+      //   m1: "MINUTE",
+      //   m5: "MINUTE_5",
+      //   m15: "MINUTE_15",
+      //   m30: "MINUTE_30",
+      //   h1: "HOUR",
+      //   h4: "HOUR_4",
+      //   d1: "DAY",
+      // };
+      
+      console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
     // const response = await axios.get(`${BASE_URL}${API_PATH}/prices/CFD/${formattedSymbol}`, {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/EUR_USD`, {
-      params: {
-        resolution: apiResolution,
-        max: count,
-      },
-      headers: {
-        "X-SECURITY-TOKEN": xsecurity,
-        CST: cst,
-        "X-CAP-API-KEY": API_KEY,
-      },
-    });
+    const response = await axios.get(
+      `${BASE_URL}${API_PATH}/history/activity?from=${from}&to=${to}&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic=${symbol}`,
+      {
+        headers: getHeaders(),
+        params: {
+          resolution: resolution,
+          max: count,
+        },
+      }
+    );
+
+    //     `${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`,
 
     return response.data;
   } catch (error) {
