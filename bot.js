@@ -1,7 +1,7 @@
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import { API_KEY, API_PATH, BASE_URL, SYMBOLS, PROFIT_THRESHOLD, MAX_OPEN_TRADES } from "./config.js";
-import { startSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens } from "./api.js";
-import logger from "./utils/logger.js";
+import { startSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens,  getSeesionDetails } from "./api.js";
+
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import axios from "axios";
@@ -11,16 +11,21 @@ async function run() {
   try {
     // Start session and get account info
     await startSession();
-    const accountData = await getAccountInfo();
-    const accountBalance = accountData.accounts[0].balance;
-    logger.info(`Initial account balance: ${JSON.stringify(accountBalance)}`);
-    tradingService.setAccountBalance(accountBalance);
 
+    // !!! NOT DELETE
+    // Get account info
+    // const accountData = await getAccountInfo();
+    // const accountBalance = accountData.accounts[0].balance;
+
+    // !!! NOT DELETE
     // Get open positions
-    const positions = await getOpenPositions();
-    const openTrades = positions.positions.map((pos) => pos.market.epic.replace("_", "/"));
-    logger.info(`Current open trades: ${JSON.stringify(openTrades)}`);
-    tradingService.setOpenTrades(openTrades);
+    // await getOpenPositions();
+
+    // !!! NOT DELETE
+    // Get session details 
+    // await getSeesionDetails();
+    
+    const tokens = getSessionTokens();
 
     // Test historical data  function
     // try {
@@ -30,24 +35,26 @@ async function run() {
     //   logger.error("Error testing historical data:", error.message);
     // }
 
-    // Get session tokens for WebSocket
-    const tokens = getSessionTokens();
+    
+    
 
-    try {
-      const response = await axios.get(
-        // "https://api-capital.backend-capital.com/api/v1/history/activity?from=2025-05-25T15:09:47&to=2025-05-26T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic=EUR_USD",
-        `${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`,
-        {
-          headers: {
-            "X-SECURITY-TOKEN": tokens.xsecurity,
-            CST: tokens.cst,
-          },
-        }
-      );
-      console.log(response.data);
-    } catch (error) {
-      console.error("Error fetching activity:", error.response?.data || error.message);
-    }
+
+    // try {
+    //   const response = await axios.get(
+    //     // "https://api-capital.backend-capital.com/api/v1/history/activity?from=2025-05-25T15:09:47&to=2025-05-26T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic=EUR_USD",
+    //     `${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`,
+    //     {
+    //       headers: {
+    //         "X-SECURITY-TOKEN": tokens.xsecurity,
+    //         CST: tokens.cst,
+    //       },
+    //     }
+    //   );
+    //   console.log(response.data);
+    // } catch (error) {
+    //   console.error("Error fetching activity:", error.response?.data || error.message);
+    // }
+
 
     // Connect to WebSocket for real-time price updates
     // webSocketService.connect(tokens, SYMBOLS, async (data) => {

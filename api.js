@@ -3,8 +3,19 @@ import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD } from "./con
 
 let cst, xsecurity;
 
+// Base headers for API requests
+const getHeaders = (includeContentType = false) => {
+  const baseHeaders = {
+    "X-SECURITY-TOKEN": xsecurity,
+    "X-CAP-API-KEY": API_KEY,
+    CST: cst,
+  };
+
+  return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
+};
+
 // Start a new session with the API
-export async function startSession() {
+export const startSession = async () => {
   try {
     // Log environment variables (without exposing sensitive data)
     // console.log("API_KEY exists:", !!API_KEY);
@@ -39,6 +50,8 @@ export async function startSession() {
       console.log("Response headers:", response.headers);
     }
 
+    console.log("cst:", cst, "\nxsecurity:", xsecurity, "\n");
+
     return response.data;
   } catch (error) {
     console.error("Failed to start session:", error.response ? error.response.data : error.message);
@@ -49,26 +62,42 @@ export async function startSession() {
     }
     throw error;
   }
-}
+};
+
+export const getSeesionDetails = async () => {
+  try {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/session`, { headers: getHeaders() });
+    console.log("session details:", response.data);
+  } catch (error) {
+    console.error("session details:", error.response?.data || error.message);
+  }
+};
 
 // Get account information
-export async function getAccountInfo() {
+export const getAccountInfo = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/accounts`, {
-      headers: {
-        "X-SECURITY-TOKEN": xsecurity,
-        CST: cst,
-        "X-CAP-API-KEY": API_KEY,
-      },
-    });
-
+    const response = await axios.get(`${BASE_URL}${API_PATH}/accounts`, { headers: getHeaders() });
     console.log("<========= Account info received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
     console.error("Error getting account info:", error.response ? error.response.data : error.message);
     throw error;
   }
-}
+};
+
+// Get open positions
+export const getOpenPositions = async () => {
+  try {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/positions`, { headers: getHeaders() });
+    console.log("<========= Open positions received =========>\n", response.data, "\n\n");
+    return response.data;
+  } catch (error) {
+    console.error("Error getting open positions:", error.response ? error.response.data : error.message);
+    throw error;
+  }
+};
+
+
 
 // Get historical price data
 export async function getHistorical(symbol, resolution, count) {
@@ -108,25 +137,6 @@ export async function getHistorical(symbol, resolution, count) {
     return response.data;
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
-    throw error;
-  }
-}
-
-// Get open positions
-export async function getOpenPositions() {
-  try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/positions`, {
-      headers: {
-        "X-SECURITY-TOKEN": xsecurity,
-        CST: cst,
-        "X-CAP-API-KEY": API_KEY,
-      },
-    });
-
-    console.log("<========= Open positions received =========>\n", response.data, "\n\n");
-    return response.data;
-  } catch (error) {
-    console.error("Error getting open positions:", error.response ? error.response.data : error.message);
     throw error;
   }
 }
