@@ -3,11 +3,9 @@ import "dotenv/config";
 export const API_KEY = process.env.API_KEY;
 export const API_IDENTIFIER = process.env.API_IDENTIFIER;
 export const API_PASSWORD = process.env.API_PASSWORD;
-export const BASE_URL = process.env.BASE_URL || "https://demo-api-capital.backend-capital.com";
-export const API_PATH = "/api/v1";
-
-// Fix for WebSocket URL - using the streaming URL from the session response
-export const WS_BASE_URL = "wss://api-streaming-capital.backend-capital.com";
+export const BASE_URL = process.env.BASE_URL;
+export const API_PATH = process.env.API_PATH;
+export const WS_BASE_URL = process.env.WS_BASE_URL;
 
 // Trading configuration
 export const SYMBOLS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD"];
