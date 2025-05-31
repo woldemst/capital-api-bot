@@ -2,6 +2,7 @@ import axios from "axios";
 import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD } from "./config.js";
 
 let cst, xsecurity;
+let sessionStartTime = Date.now();
 
 // Base headers for API requests
 const getHeaders = (includeContentType = false) => {
@@ -64,6 +65,22 @@ export const startSession = async () => {
   }
 };
 
+// Refresh session tokens
+export const refreshSession = async () => {
+  if (Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
+  try {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/session`, { headers: getHeaders() });
+    cst = response.headers["cst"];
+    xsecurity = response.headers["x-security-token"];
+    sessionStartTime = Date.now();
+    logger.info("Session tokens refreshed");
+  } catch (error) {
+    logger.error(`Error refreshing session: ${error.message}`);
+    throw error;
+  }
+};
+
+// Get session details
 export const getSeesionDetails = async () => {
   try {
     const response = await axios.get(`${BASE_URL}${API_PATH}/session`, { headers: getHeaders() });
@@ -97,35 +114,42 @@ export const getOpenPositions = async () => {
   }
 };
 
+// Get activity history
+export const getActivityHistory = async (from, to) => {
+  try {
+    // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
+    console.log(`<========= Fetching activity history from ${from} to ${to} =========>\n`);
+    // const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity?from=${from}&to=${to}`, {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
+      headers: getHeaders(),
+    });
+    console.log(response.data);
+    return response.data;
+  } catch (error) {
+    console.error("Error getting activity history:", error.response ? error.response.data : error.message);
+    throw error;
+  }
+};
+
 // Get historical price data
 export async function getHistorical(symbol, resolution, count, from, to) {
   try {
-    
-    // Map resolution string to API format
-    // const resolutionMap = {
-      //   m1: "MINUTE",
-      //   m5: "MINUTE_5",
-      //   m15: "MINUTE_15",
-      //   m30: "MINUTE_30",
-      //   h1: "HOUR",
-      //   h4: "HOUR_4",
-      //   d1: "DAY",
-      // };
-      
-      console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
-    // const response = await axios.get(`${BASE_URL}${API_PATH}/prices/CFD/${formattedSymbol}`, {
-    const response = await axios.get(
-      `${BASE_URL}${API_PATH}/history/activity?from=${from}&to=${to}&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic=${symbol}`,
-      {
-        headers: getHeaders(),
-        params: {
-          resolution: resolution,
-          max: count,
-        },
-      }
-    );
+    // const resolutionMap = { 
+    //   m1: "MINUTE",
+    //   m5: "MINUTE_5",
+    //   m15: "MINUTE_15",
+    //   m30: "MINUTE_30",
+    //   h1: "HOUR",
+    //   h4: "HOUR_4",
+    //   d1: "DAY",
+    // };
 
-    //     `${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`,
+    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
+    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}`, {
+      headers: getHeaders(true),
+      params: { resolution, max: count, from, to },
+    });
+
 
     return response.data;
   } catch (error) {
