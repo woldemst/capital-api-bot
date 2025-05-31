@@ -1,6 +1,15 @@
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import { API_KEY, API_PATH, BASE_URL, SYMBOLS, PROFIT_THRESHOLD, MAX_OPEN_TRADES } from "./config.js";
-import { startSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens,  getSeesionDetails } from "./api.js";
+import {
+  startSession,
+  refreshSession,
+  getHistorical,
+  getAccountInfo,
+  getOpenPositions,
+  getSessionTokens,
+  getSeesionDetails,
+  getActivityHistory,
+} from "./api.js";
 
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
@@ -11,6 +20,14 @@ async function run() {
   try {
     // Start session and get account info
     await startSession();
+    setInterval(async () => {
+      try {
+        await refreshSession();
+        console.log("Session refreshed successfully");
+      } catch (e) {
+        console.error(`Error refreshing session: ${e.message}`);
+      }
+    }, 9 * 60 * 1000); // Refresh every 9 minutes
 
     // !!! NOT DELETE
     // Get account info
@@ -22,25 +39,19 @@ async function run() {
     // await getOpenPositions();
 
     // !!! NOT DELETE
-    // Get session details 
+    // Get session details
     // await getSeesionDetails();
-    
+
     const tokens = getSessionTokens();
+    // await getActivityHistory('2025-05-24T15:09:47', '2025-05-26T15:10:05');
 
     // Test historical data  function
     try {
-      const m1Data = await getHistorical("EUR_USD", "MINUTE", 50, '2025-05-25T15:09:47', '2025-05-26T15:10:05');
+      const m1Data = await getHistorical("EUR/USD", "MINUTE", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
       console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
     } catch (error) {
       console.error("Error testing historical data:", error.message);
     }
-
-    
-    
-
-
-
-
 
     // Connect to WebSocket for real-time price updates
     // webSocketService.connect(tokens, SYMBOLS, async (data) => {
