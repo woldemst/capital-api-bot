@@ -152,7 +152,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
     };
 
     // Format the symbol correctly for the API (e.g., CS.D.EURUSD.CFD.IP)
-    const formattedSymbol = `CS.D.${symbol.replace('_', '')}.CFD.IP`;
+    const formattedSymbol = `CS.D.${symbol.replace("_", "")}.CFD.IP`;
 
     console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
     const response = await axios.get(
@@ -163,17 +163,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
       }
     );
 
-    // const response = await axios.get(
-    //   `${BASE_URL}${API_PATH}/prices/${formattedSymbol}`,
-    //   {
-    //     headers: getHeaders(true),
-    //     params: {
-    //       resolution: resolutionMap[resolution] || resolution,
-    //       max: count
-    //     },
-    //   }
-    // );
-console.log(response.data);
+    console.log(response.data);
 
     return response.data;
   } catch (error) {
@@ -181,6 +171,18 @@ console.log(response.data);
     throw error;
   }
 }
+
+export const getMarkets = async () => {
+  try {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`, { headers: getHeaders() });
+    console.log("<========= Markets received =========>\n", response.data, "\n\n");
+    return response.data;
+  } catch (error) {
+    console.error("Error getting markets:", error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
+
 
 // Place an order
 export async function placeOrder(symbol, direction, price, size, stopLoss, takeProfit) {
