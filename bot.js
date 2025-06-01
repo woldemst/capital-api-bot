@@ -50,8 +50,8 @@ async function run() {
     // Test historical data  function
     // try {
       // Change this line
-      // const m1Data = await getHistorical("OIL_CRUDE", "m1", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
-      await getMarkets();
+      const m1Data = await getHistorical("EURTUSD", "m1", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
+      // await getMarkets();
     //   console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
     // } catch (error) {
     //   console.error("Error testing historical data:", error.message);
