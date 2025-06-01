@@ -29,6 +29,7 @@ async function run() {
       }
     }, 9 * 60 * 1000); // Refresh every 9 minutes
 
+    
     // !!! NOT DELETE
     // Get account info
     // const accountData = await getAccountInfo();
@@ -46,12 +47,13 @@ async function run() {
     // await getActivityHistory('2025-05-24T15:09:47', '2025-05-26T15:10:05');
 
     // Test historical data  function
-    try {
-      const m1Data = await getHistorical("EUR/USD", "MINUTE", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
-      console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
-    } catch (error) {
-      console.error("Error testing historical data:", error.message);
-    }
+    // try {
+      // Change this line
+      const m1Data = await getHistorical("OIL_CRUDE", "m1", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
+    //   console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
+    // } catch (error) {
+    //   console.error("Error testing historical data:", error.message);
+    // }
 
     // Connect to WebSocket for real-time price updates
     // webSocketService.connect(tokens, SYMBOLS, async (data) => {

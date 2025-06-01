@@ -73,9 +73,9 @@ export const refreshSession = async () => {
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
     sessionStartTime = Date.now();
-    logger.info("Session tokens refreshed");
+    console.log("Session tokens refreshed");
   } catch (error) {
-    logger.error(`Error refreshing session: ${error.message}`);
+    console.error(`Error refreshing session: ${error.message}`);
     throw error;
   }
 };
@@ -120,8 +120,15 @@ export const getActivityHistory = async (from, to) => {
     // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
     console.log(`<========= Fetching activity history from ${from} to ${to} =========>\n`);
     // const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity?from=${from}&to=${to}`, {
+    // const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
     const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
       headers: getHeaders(),
+      params: {
+        from,
+        to,
+        detailed: true,
+        lastPeriod: 600,
+      },
     });
     console.log(response.data);
     return response.data;
@@ -134,22 +141,39 @@ export const getActivityHistory = async (from, to) => {
 // Get historical price data
 export async function getHistorical(symbol, resolution, count, from, to) {
   try {
-    // const resolutionMap = { 
-    //   m1: "MINUTE",
-    //   m5: "MINUTE_5",
-    //   m15: "MINUTE_15",
-    //   m30: "MINUTE_30",
-    //   h1: "HOUR",
-    //   h4: "HOUR_4",
-    //   d1: "DAY",
-    // };
+    const resolutionMap = {
+      m1: "MINUTE",
+      m5: "MINUTE_5",
+      m15: "MINUTE_15",
+      m30: "MINUTE_30",
+      h1: "HOUR",
+      h4: "HOUR_4",
+      d1: "DAY",
+    };
+
+    // Format the symbol correctly for the API (e.g., CS.D.EURUSD.CFD.IP)
+    const formattedSymbol = `CS.D.${symbol.replace('_', '')}.CFD.IP`;
 
     console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
-    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}`, {
-      headers: getHeaders(true),
-      params: { resolution, max: count, from, to },
-    });
+    const response = await axios.get(
+      `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=MINUTE&max=10&from=2025-04-24T00:00:00&to=2025-04-24T01:00:00`,
+      {
+        headers: getHeaders(true),
+        // params: { resolution, max: count, from, to },
+      }
+    );
 
+    // const response = await axios.get(
+    //   `${BASE_URL}${API_PATH}/prices/${formattedSymbol}`,
+    //   {
+    //     headers: getHeaders(true),
+    //     params: {
+    //       resolution: resolutionMap[resolution] || resolution,
+    //       max: count
+    //     },
+    //   }
+    // );
+console.log(response.data);
 
     return response.data;
   } catch (error) {
