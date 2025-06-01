@@ -119,8 +119,6 @@ export const getActivityHistory = async (from, to) => {
   try {
     // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
     console.log(`<========= Fetching activity history from ${from} to ${to} =========>\n`);
-    // const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity?from=${from}&to=${to}`, {
-    // const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
     const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
       headers: getHeaders(),
       params: {
@@ -141,30 +139,41 @@ export const getActivityHistory = async (from, to) => {
 // Get historical price data
 export async function getHistorical(symbol, resolution, count, from, to) {
   try {
-    const resolutionMap = {
-      m1: "MINUTE",
-      m5: "MINUTE_5",
-      m15: "MINUTE_15",
-      m30: "MINUTE_30",
-      h1: "HOUR",
-      h4: "HOUR_4",
-      d1: "DAY",
-    };
-
-    // Format the symbol correctly for the API (e.g., CS.D.EURUSD.CFD.IP)
-    const formattedSymbol = `CS.D.${symbol.replace("_", "")}.CFD.IP`;
+    // const resolutionMap = {
+    //   m1: "MINUTE",
+    //   m5: "MINUTE_5",
+    //   m15: "MINUTE_15",
+    //   m30: "MINUTE_30",
+    //   h1: "HOUR",
+    //   h4: "HOUR_4",
+    //   d1: "DAY",
+    // };
 
     console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
     const response = await axios.get(
-      `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=MINUTE&max=10&from=2025-04-24T00:00:00&to=2025-04-24T01:00:00`,
+      `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=MINUTE&max=100&from=2025-04-24T00:00:00&to=2025-04-24T02:00:00`,
       {
         headers: getHeaders(true),
         // params: { resolution, max: count, from, to },
       }
     );
 
-    console.log(response.data);
-
+    // Log prices for each candle
+    if (response.data.prices && response.data.prices.length > 0) {
+      console.log('\nCandle Prices:')
+      response.data.prices.forEach((candle, index) => {
+        console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
+        console.log('Open Price - Bid:', candle.openPrice.bid);
+        console.log('Open Price - Ask:', candle.openPrice.ask);
+        console.log('Close Price - Bid:', candle.closePrice.bid);
+        console.log('Close Price - Ask:', candle.closePrice.ask);
+        console.log('High Price - Bid:', candle.highPrice.bid);
+        console.log('High Price - Ask:', candle.highPrice.ask);
+        console.log('Low Price - Bid:', candle.lowPrice.bid);
+        console.log('Low Price - Ask:', candle.lowPrice.ask);
+        console.log('Volume:', candle.lastTradedVolume);
+      });
+    }
     return response.data;
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
@@ -174,15 +183,14 @@ export async function getHistorical(symbol, resolution, count, from, to) {
 
 export const getMarkets = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EUR_USD`, { headers: getHeaders() });
+    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EURTUSD`, { headers: getHeaders() });
     console.log("<========= Markets received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
     console.error("Error getting markets:", error.response ? error.response.data : error.message);
     throw error;
   }
-}
-
+};
 
 // Place an order
 export async function placeOrder(symbol, direction, price, size, stopLoss, takeProfit) {
