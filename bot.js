@@ -46,43 +46,49 @@ async function run() {
 
     const tokens = getSessionTokens();
     // await getActivityHistory('2025-05-24T15:09:47', '2025-05-26T15:10:05');
-
-    // Test historical data  function
+    
+    // !!! NOT DELETE
+    // get historical data  function
     // try {
-      // Change this line
-      // const m1Data = await getHistorical("USDCAD", "m1", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
-      // await getMarkets();
+    //   const m1Data = await getHistorical("USDCAD", "m1", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
+
+    //   // debug function for searching for market currencies
+    //   await getMarkets();
+
     //   console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
     // } catch (error) {
     //   console.error("Error testing historical data:", error.message);
     // }
 
     // Connect to WebSocket for real-time price updates
-    // webSocketService.connect(tokens, SYMBOLS, async (data) => {
-    //   try {
-    //     logger.info("Raw WebSocket message received:");
-    //     const rawMessage = data.toString();
-    //     logger.info(rawMessage);
+    webSocketService.connect(tokens, SYMBOLS, async (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
 
-    //     const msg = JSON.parse(rawMessage);
-    //     logger.info(`Parsed message: ${JSON.stringify(msg)}`);
+        // Handle subscription confirmation
+        if (msg.destination === "marketData.subscribe") {
+          console.log("\n=== Subscription Status ===");
+          console.log(JSON.stringify(msg.payload.subscriptions, null, 2));
+          return;
+        }
+        console.log('message:', msg);
+        
+        // Check if it's a price update message
+        if (msg.epic) {
+          const symbol = msg.epic.replace("_", "/");
+          const bid = msg.bid;
+          const ask = msg.offer;
 
-    //     // Check if it's a price update message
-    //     if (msg.epic) {
-    //       const symbol = msg.epic.replace("_", "/");
-    //       const bid = msg.bid;
-    //       const ask = msg.offer;
+          // Log price update
+          // logger.price(symbol, bid, ask);
 
-    //       // Log price update
-    //       logger.price(symbol, bid, ask);
-
-    //       // Process price for trading decisions
-    //       await tradingService.processPrice(symbol, bid, ask, getHistorical, MAX_OPEN_TRADES);
-    //     }
-    //   } catch (error) {
-    //     logger.error("Error processing WebSocket message:", error.message);
-    //   }
-    // });
+          // Process price for trading decisions
+          await tradingService.processPrice(symbol, bid, ask, getHistorical, MAX_OPEN_TRADES);
+        }
+      } catch (error) {
+        console.error("Error processing WebSocket message:", error.message);
+      }
+    });
 
     // Periodically update account info and check profit threshold
     // setInterval(async () => {
@@ -96,11 +102,11 @@ async function run() {
     //     const profitPercentage = (currentBalance - initialBalance) / initialBalance;
 
     //     if (profitPercentage >= PROFIT_THRESHOLD) {
-    //       logger.info(`Profit threshold of ${PROFIT_THRESHOLD * 100}% reached! Increasing position size`);
+    //       console.log(`Profit threshold of ${PROFIT_THRESHOLD * 100}% reached! Increasing position size`);
     //       tradingService.setProfitThresholdReached(true);
     //     }
     //   } catch (error) {
-    //     logger.error("Error updating account info:", error.message);
+    //     console.error("Error updating account info:", error.message);
     //   }
     // }, 5 * 60 * 1000); // Every 5 minutes
   } catch (error) {

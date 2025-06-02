@@ -1,6 +1,5 @@
 import WebSocket from "ws";
 import { WS_BASE_URL, API_KEY } from "../config.js";
-import logger from "../utils/logger.js";
 
 class WebSocketService {
   constructor() {
@@ -11,19 +10,21 @@ class WebSocketService {
 
   connect(tokens, symbols, messageHandler) {
     const { cst, xsecurity } = tokens;
+
     const wsUrl = `${WS_BASE_URL}/connect`;
 
-    logger.info(`Connecting to WebSocket: ${wsUrl}`);
-    
+    console.log(`Connecting to WebSocket: ${wsUrl}`);
+
     this.ws = new WebSocket(wsUrl, {
-      headers: { 
-        "X-SECURITY-TOKEN": xsecurity, 
-        CST: cst
+      headers: {
+        "X-SECURITY-TOKEN": xsecurity,
+        "X-CAP-API-KEY": API_KEY,
+        CST: cst,
       },
     });
 
     this.ws.on("open", () => {
-      logger.info("WebSocket connected");
+      console.log("WebSocket connected");
       this.isConnected = true;
 
       // Subscribe to price updates for each symbol
@@ -33,35 +34,38 @@ class WebSocketService {
       const subscriptionMessage = {
         destination: "marketData.subscribe",
         correlationId: "1",
+        cst: cst,
+        securityToken: xsecurity,
         payload: {
-          epics: formattedSymbols,
-          clientToken: xsecurity,
-          cst: cst,
-          apiKey: API_KEY
+          // epics: ["EURTUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"],
+          epics: symbols,
+          // epics: ["EURTUSD"],
         },
       };
 
       this.ws.send(JSON.stringify(subscriptionMessage));
-      logger.info(`Subscribed to symbols: ${formattedSymbols.join(', ')}`);
+      console.log(`Subscribed to symbols: ${formattedSymbols.join(", ")}`);
 
       // Keep connection alive with ping every 9 minutes
       this.pingInterval = setInterval(() => {
         if (this.ws.readyState === WebSocket.OPEN) {
           this.ws.ping();
-          logger.info("Ping sent to keep WebSocket connection alive");
+          console.log("Ping sent to keep WebSocket connection alive");
         }
       }, 9 * 60 * 1000);
     });
 
-    this.ws.on("error", (error) => logger.error("WebSocket error:", error));
-    
+    this.ws.on("message", messageHandler);
+
+    this.ws.on("error", (error) => {
+      console.error("WebSocket error:", error);
+    });
+
     this.ws.on("close", () => {
-      logger.info("WebSocket connection closed");
+      console.log("WebSocket connection closed");
       this.isConnected = false;
       clearInterval(this.pingInterval);
     });
-
-    this.ws.on("message", messageHandler);
 
     return this;
   }
