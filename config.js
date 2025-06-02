@@ -8,7 +8,7 @@ export const API_PATH = process.env.API_PATH;
 export const WS_BASE_URL = process.env.WS_BASE_URL;
 
 // Trading configuration
-export const SYMBOLS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD"];
+export const SYMBOLS = ["EURTUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"];
 export const LEVERAGE = 30;
 export const RISK_PER_TRADE = 0.02; // 2% risk per trade
 export const MAX_OPEN_TRADES = 3;

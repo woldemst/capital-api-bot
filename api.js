@@ -183,7 +183,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
 
 export const getMarkets = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EURTUSD`, { headers: getHeaders() });
+    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=CAD`, { headers: getHeaders() });
     console.log("<========= Markets received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
