@@ -1,7 +1,7 @@
 import { positionSize, generateSignals } from "../trading.js";
 import { placeOrder, updateTrailingStop } from "../api.js";
 import { TAKE_PROFIT_FACTOR, TRAILING_STOP_PIPS } from "../config.js";
-import logger from "../utils/logger.js";
+
 
 class TradingService {
   constructor() {
@@ -38,7 +38,7 @@ class TradingService {
 
       // Only proceed if overall trend is clear (not mixed)
       if (trendAnalysis.overallTrend === "mixed") {
-        logger.info(`Skipping ${symbol} due to mixed trend on higher timeframes`);
+        console.log(`Skipping ${symbol} due to mixed trend on higher timeframes`);
         return;
       }
 
@@ -50,13 +50,13 @@ class TradingService {
       const m1Indicators = await calcIndicators(m1Data);
       const m15Indicators = await calcIndicators(m15Data);
 
-      logger.info(`${symbol} Indicators calculated`);
+      console.log(`${symbol} Indicators calculated`);
 
       // Generate trading signals
       const { signal } = generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask);
 
       if (signal) {
-        logger.info(`${symbol} ${signal.toUpperCase()} signal generated!`);
+        console.log(`${symbol} ${signal.toUpperCase()} signal generated!`);
 
         // Calculate stop loss and take profit levels
         const stopLossPips = 40; // Default 40 pips stop loss
@@ -94,12 +94,12 @@ class TradingService {
               await updateTrailingStop(position.position.dealId, trailingStopLevel);
             }
           } catch (error) {
-            logger.error("Error setting trailing stop:", error.message);
+            console.error("Error setting trailing stop:", error.message);
           }
         }, 5 * 60 * 1000); // Check after 5 minutes
       }
     } catch (error) {
-      logger.error(`Error processing price for ${symbol}:`, error.message);
+      console.error(`Error processing price for ${symbol}:`, error.message);
     }
   }
 }
