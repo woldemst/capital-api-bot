@@ -32,14 +32,13 @@ class WebSocketService {
 
       // Send subscription message with authentication tokens
       const subscriptionMessage = {
-        destination: "marketData.subscribe",
+        destination: "OHLCMarketData.subscribe",
         correlationId: "1",
         cst: cst,
         securityToken: xsecurity,
         payload: {
           // epics: ["EURTUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"],
           epics: symbols,
-          // epics: ["EURTUSD"],
         },
       };
 
