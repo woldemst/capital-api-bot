@@ -75,7 +75,7 @@ async function run() {
         
         // Check if it's a price update message
         if (msg.epic) {
-          const symbol = msg.epic.replace("_", "/");
+          const symbol = msg.epic;
           const bid = msg.bid;
           const ask = msg.offer;
 
