@@ -9,7 +9,7 @@ import {
   getSessionTokens,
   getSeesionDetails,
   getActivityHistory,
-  getMarkets
+  getMarkets,
 } from "./api.js";
 
 import webSocketService from "./services/websocket.js";
@@ -30,7 +30,6 @@ async function run() {
       }
     }, 9 * 60 * 1000); // Refresh every 9 minutes
 
-    
     // !!! NOT DELETE
     // Get account info
     // const accountData = await getAccountInfo();
@@ -46,7 +45,7 @@ async function run() {
 
     const tokens = getSessionTokens();
     // await getActivityHistory('2025-05-24T15:09:47', '2025-05-26T15:10:05');
-    
+
     // !!! NOT DELETE
     // get historical data  function
     // try {
@@ -63,28 +62,22 @@ async function run() {
     // Connect to WebSocket for real-time price updates
     webSocketService.connect(tokens, SYMBOLS, async (data) => {
       try {
-        const msg = JSON.parse(data.toString());
+        const message = JSON.parse(data.toString());
 
-        // Handle subscription confirmation
-        if (msg.destination === "marketData.subscribe") {
-          console.log("\n=== Subscription Status ===");
-          console.log(JSON.stringify(msg.payload.subscriptions, null, 2));
-          return;
-        }
-        console.log('message:', msg);
-        
-        // Check if it's a price update message
-        if (msg.epic) {
-          const symbol = msg.epic;
-          const bid = msg.bid;
-          const ask = msg.offer;
+        // // Handle subscription confirmation
+        // if (message.destination === "OHLCMarketData.subscribe") {
+        //   console.log("\n=== Subscription Status ===");
+        //   console.log(JSON.stringify(message.payload.subscriptions, null, 2));
+        //   return;
+        // }
 
-          // Log price update
-          // logger.price(symbol, bid, ask);
+        // if (message.payload.epic) {
+          //   const symbol = message.payload.epic;
+          //   console.log('symbol', symbol);
 
           // Process price for trading decisions
-          await tradingService.processPrice(symbol, bid, ask, getHistorical, MAX_OPEN_TRADES);
-        }
+          await tradingService.processPrice(message, getHistorical, MAX_OPEN_TRADES);
+        // }
       } catch (error) {
         console.error("Error processing WebSocket message:", error.message);
       }

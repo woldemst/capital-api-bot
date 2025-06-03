@@ -2,7 +2,6 @@ import { positionSize, generateSignals } from "../trading.js";
 import { placeOrder, updateTrailingStop } from "../api.js";
 import { TAKE_PROFIT_FACTOR, TRAILING_STOP_PIPS } from "../config.js";
 
-
 class TradingService {
   constructor() {
     this.openTrades = [];
@@ -26,12 +25,46 @@ class TradingService {
     return this.openTrades.includes(symbol);
   }
 
-  async processPrice(symbol, bid, ask, getHistorical, maxOpenTrades) {
+  async processPrice(message, getHistorical, maxOpenTrades) {
+    console.log("message:", message);
+    // console.log("message.payload.epic:", message.payload.epic);
+
     try {
+      if (!message || !message.payload) {
+        console.log("Invalid message format:", message);
+        return;
+      }
+
+      const candle = message.payload;
+      console.log("Received candle data:", candle);
+
+      // Extract symbol and verify it exists
+      const symbol = candle.epic;
+      if (!symbol) {
+        console.log("No symbol (epic) in message:", message);
+        return;
+      }
       // Skip if we already have max open trades or this symbol is already traded
       if (this.openTrades.length >= maxOpenTrades || this.isSymbolTraded(symbol)) {
         return;
       }
+
+      if (!message || !message.payload || !message.payload.epic) {
+        console.error("No correct message format");
+        return;
+      }
+
+      // Extract and validate OHLC data
+      const ohlcData = {
+        timestamp: candle.t,
+        open: candle.o,
+        high: candle.h,
+        low: candle.l,
+        close: candle.c,
+        volume: candle.lastTradedVolume,
+      };
+
+      console.log(`Processing ${symbol} OHLC data:`, ohlcData);
 
       // Analyze trend on higher timeframes
       const trendAnalysis = await analyzeTrend(symbol, getHistorical);
@@ -43,8 +76,8 @@ class TradingService {
       }
 
       // Get data for entry signals
-      const m1Data = await getHistorical(symbol, "m1", 100);
-      const m15Data = await getHistorical(symbol, "m15", 50);
+      const m1Data = await getHistorical(symbol, "MINUTE", 100, "2025-04-24T00:00:00", "2025-04-24T02:00:00");
+      const m15Data = await getHistorical(symbol, "MINUTE_15", 50, "2025-04-24T00:00:00", "2025-04-24T02:00:00");
 
       // Calculate indicators
       const m1Indicators = await calcIndicators(m1Data);

@@ -5,7 +5,7 @@ let cst, xsecurity;
 let sessionStartTime = Date.now();
 
 // Base headers for API requests
-const getHeaders = (includeContentType = false) => {
+export const getHeaders = (includeContentType = false) => {
   const baseHeaders = {
     "X-SECURITY-TOKEN": xsecurity,
     "X-CAP-API-KEY": API_KEY,
@@ -24,7 +24,6 @@ export const startSession = async () => {
     // console.log("API_PASSWORD exists:", !!API_PASSWORD);
     // console.log("BASE_URL:", BASE_URL);
 
-    // Prepare request with proper format and correct endpoint
     const response = await axios.post(
       `${BASE_URL}${API_PATH}/session`,
       {
@@ -33,10 +32,7 @@ export const startSession = async () => {
         encryptedPassword: false,
       },
       {
-        headers: {
-          "X-CAP-API-KEY": API_KEY,
-          "Content-Type": "application/json",
-        },
+        headers: getHeaders(true), // Include headers for the reques
       }
     );
 
@@ -139,39 +135,25 @@ export const getActivityHistory = async (from, to) => {
 // Get historical price data
 export async function getHistorical(symbol, resolution, count, from, to) {
   try {
-    // const resolutionMap = {
-    //   m1: "MINUTE",
-    //   m5: "MINUTE_5",
-    //   m15: "MINUTE_15",
-    //   m30: "MINUTE_30",
-    //   h1: "HOUR",
-    //   h4: "HOUR_4",
-    //   d1: "DAY",
-    // };
-
     console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
-    const response = await axios.get(
-      `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=MINUTE&max=100&from=2025-04-24T00:00:00&to=2025-04-24T02:00:00`,
-      {
-        headers: getHeaders(true),
-        // params: { resolution, max: count, from, to },
-      }
-    );
+    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=100&from=${from}&to=${to}`, {
+      headers: getHeaders(true),
+    });
 
     // Log prices for each candle
     if (response.data.prices && response.data.prices.length > 0) {
-      console.log('\nCandle Prices:')
+      console.log("\nCandle Prices:");
       response.data.prices.forEach((candle, index) => {
         console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
-        console.log('Open Price - Bid:', candle.openPrice.bid);
-        console.log('Open Price - Ask:', candle.openPrice.ask);
-        console.log('Close Price - Bid:', candle.closePrice.bid);
-        console.log('Close Price - Ask:', candle.closePrice.ask);
-        console.log('High Price - Bid:', candle.highPrice.bid);
-        console.log('High Price - Ask:', candle.highPrice.ask);
-        console.log('Low Price - Bid:', candle.lowPrice.bid);
-        console.log('Low Price - Ask:', candle.lowPrice.ask);
-        console.log('Volume:', candle.lastTradedVolume);
+        console.log("Open Price - Bid:", candle.openPrice.bid);
+        console.log("Open Price - Ask:", candle.openPrice.ask);
+        console.log("Close Price - Bid:", candle.closePrice.bid);
+        console.log("Close Price - Ask:", candle.closePrice.ask);
+        console.log("High Price - Bid:", candle.highPrice.bid);
+        console.log("High Price - Ask:", candle.highPrice.ask);
+        console.log("Low Price - Bid:", candle.lowPrice.bid);
+        console.log("Low Price - Ask:", candle.lowPrice.ask);
+        console.log("Volume:", candle.lastTradedVolume);
       });
     }
     return response.data;
@@ -216,14 +198,7 @@ export async function placeOrder(symbol, direction, price, size, stopLoss, takeP
       order.profitLevel = direction.toUpperCase() === "BUY" ? price + takeProfit : price - takeProfit;
     }
 
-    const response = await axios.post(`${BASE_URL}${API_PATH}/positions`, order, {
-      headers: {
-        "X-SECURITY-TOKEN": xsecurity,
-        CST: cst,
-        "X-CAP-API-KEY": API_KEY,
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await axios.post(`${BASE_URL}${API_PATH}/positions`, order, { headers: getHeaders(true) });
 
     console.log("Order placed successfully:", response.data);
     return response.data;
@@ -245,12 +220,7 @@ export async function updateTrailingStop(positionId, stopLevel) {
         stopLevel,
       },
       {
-        headers: {
-          "X-SECURITY-TOKEN": xsecurity,
-          CST: cst,
-          "X-CAP-API-KEY": API_KEY,
-          "Content-Type": "application/json",
-        },
+        headers: getHeaders(true),
       }
     );
 
