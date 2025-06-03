@@ -16,20 +16,17 @@ export function positionSize(balance, price, stopLossPips, profitThresholdReache
 export function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask) {
   // Buy signal conditions
   const buyConditions = [
-    // MA crossover (fast MA crosses above slow MA)
+    // MA crossover (5 MA crosses above 20 MA)
     m1Indicators.maFast > m1Indicators.maSlow && 
       m1Data[m1Data.length-2].close < m1Indicators.maSlow,
     
-    // RSI conditions (oversold and trending up)
-    m1Indicators.rsi < 30 || (m1Indicators.rsi < 50 && m1Indicators.rsi > m1Indicators.rsi),
+    // RSI below 30 (oversold)
+    m1Indicators.rsi < 30,
     
-    // Price near lower Bollinger Band
-    bid <= m1Indicators.bb.lower * 1.001,
+    // Price at lower Bollinger Band
+    bid <= m1Indicators.bb.lower,
     
-    // MACD histogram turning positive
-    m1Indicators.macd.histogram > 0 && m1Data[m1Data.length-2].close < 0,
-    
-    // Higher timeframe confirmation
+    // Higher timeframe trend confirmation
     trendAnalysis.overallTrend === 'bullish',
     
     // M15 confirmation
@@ -38,36 +35,52 @@ export function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, tre
   
   // Sell signal conditions
   const sellConditions = [
-    // MA crossover (fast MA crosses below slow MA)
+    // MA crossover (5 MA crosses below 20 MA)
     m1Indicators.maFast < m1Indicators.maSlow && 
       m1Data[m1Data.length-2].close > m1Indicators.maSlow,
     
-    // RSI conditions (overbought and trending down)
-    m1Indicators.rsi > 70 || (m1Indicators.rsi > 50 && m1Indicators.rsi < m1Indicators.rsi),
+    // RSI above 70 (overbought)
+    m1Indicators.rsi > 70,
     
-    // Price near upper Bollinger Band
-    ask >= m1Indicators.bb.upper * 0.999,
+    // Price at upper Bollinger Band
+    ask >= m1Indicators.bb.upper,
     
-    // MACD histogram turning negative
-    m1Indicators.macd.histogram < 0 && m1Data[m1Data.length-2].close > 0,
-    
-    // Higher timeframe confirmation
+    // Higher timeframe trend confirmation
     trendAnalysis.overallTrend === 'bearish',
     
     // M15 confirmation
     m15Indicators.rsi < 50
   ];
   
-  // Count how many buy conditions are met
+  // Calculate signal scores
   const buyScore = buyConditions.filter(Boolean).length;
   const sellScore = sellConditions.filter(Boolean).length;
   
-  console.log(`${symbol} Signal Scores - Buy: ${buyScore}/6, Sell: ${sellScore}/6`);
+  console.log(`${symbol} Signal Analysis:
+    - MA Crossover: ${buyConditions[0] ? 'Bullish' : sellConditions[0] ? 'Bearish' : 'Neutral'}
+    - RSI: ${m1Indicators.rsi.toFixed(2)}
+    - BB Position: ${(bid - m1Indicators.bb.lower).toFixed(5)} from lower, ${(m1Indicators.bb.upper - ask).toFixed(5)} from upper
+    - Higher Timeframe Trend: ${trendAnalysis.overallTrend}
+    - M15 RSI: ${m15Indicators.rsi.toFixed(2)}
+    - Buy Score: ${buyScore}/5
+    - Sell Score: ${sellScore}/5
+  `);
   
-  // Generate signal if at least 4 conditions are met
+  // Generate signal if majority of conditions are met
   let signal = null;
-  if (buyScore >= 4) signal = 'buy';
-  if (sellScore >= 4) signal = 'sell';
+  if (buyScore >= 3) signal = 'buy';
+  if (sellScore >= 3) signal = 'sell';
   
-  return { signal, buyScore, sellScore };
+  return { 
+    signal, 
+    buyScore, 
+    sellScore,
+    metrics: {
+      rsi: m1Indicators.rsi,
+      maFast: m1Indicators.maFast,
+      maSlow: m1Indicators.maSlow,
+      bbUpper: m1Indicators.bb.upper,
+      bbLower: m1Indicators.bb.lower
+    }
+  };
 }

@@ -1,9 +1,9 @@
 import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
 
-// Calculate technical indicators
 export async function calcIndicators(bars) {
   const closes = bars.map((b) => b.close);
   return {
+    // Modified periods as per your requirements
     maFast: SMA.calculate({ period: 5, values: closes }).pop(),
     maSlow: SMA.calculate({ period: 20, values: closes }).pop(),
     ema5: EMA.calculate({ period: 5, values: closes }).pop(),

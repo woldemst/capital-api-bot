@@ -9,11 +9,12 @@ export const WS_BASE_URL = process.env.WS_BASE_URL;
 
 // Trading configuration
 export const SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
-export const LEVERAGE = 30;
-export const RISK_PER_TRADE = 0.02; // 2% risk per trade
-export const MAX_OPEN_TRADES = 3;
-export const TAKE_PROFIT_FACTOR = 2; // Take profit at 2x stop loss
-export const TRAILING_STOP_ACTIVATION = 0.5; // Activate trailing stop at 50% of take profit
-export const TRAILING_STOP_PIPS = 10; // 10 pips trailing stop for EUR/USD
-export const PROFIT_THRESHOLD = 0.05; // 5% profit threshold for increasing position size
-export const POSITION_SIZE_INCREASE = 0.5; // 50% increase in position size after profit threshold
+// Add these constants to your config.js
+export const LEVERAGE = 30;                    // 1:30 leverage
+export const RISK_PER_TRADE = 0.02;           // 2% risk per trade
+export const TAKE_PROFIT_FACTOR = 2;          // Take profit at 2x stop loss
+export const TRAILING_STOP_ACTIVATION = 0.5;   // Activate trailing stop at 50% of take profit
+export const TRAILING_STOP_PIPS = 10;         // 10 pips trailing stop for EUR/USD
+export const PROFIT_THRESHOLD = 0.05;         // 5% profit threshold
+export const POSITION_SIZE_INCREASE = 0.5;    // 50% position size increase after profit threshold
+export const MAX_OPEN_TRADES = 5;             // Maximum 3 positions at a time

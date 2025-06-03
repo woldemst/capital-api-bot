@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { WS_BASE_URL, API_KEY } from "../config.js";
+import { getHeaders } from "../api.js";
 
 class WebSocketService {
   constructor() {
@@ -23,35 +24,31 @@ class WebSocketService {
       },
     });
 
-    this.ws.on("open", () => {
-      console.log("WebSocket connected");
-      this.isConnected = true;
+    this.ws.on("open", async () => {
+      try {
+        this.isConnected = true;
+        // console.log("WebSocket connected");
 
-      // Subscribe to price updates for each symbol
-      const formattedSymbols = symbols.map((s) => s.replace("/", "_"));
-
-      // Send subscription message with authentication tokens
-      const subscriptionMessage = {
-        destination: "OHLCMarketData.subscribe",
-        correlationId: "1",
-        cst: cst,
-        securityToken: xsecurity,
-        payload: {
-          // epics: ["EURTUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"],
-          epics: symbols,
-        },
-      };
-
-      this.ws.send(JSON.stringify(subscriptionMessage));
-      console.log(`Subscribed to symbols: ${formattedSymbols.join(", ")}`);
-
-      // Keep connection alive with ping every 9 minutes
-      this.pingInterval = setInterval(() => {
-        if (this.ws.readyState === WebSocket.OPEN) {
-          this.ws.ping();
-          console.log("Ping sent to keep WebSocket connection alive");
-        }
-      }, 9 * 60 * 1000);
+        // Send subscription message with authentication tokens
+        const subscriptionMessage = {
+          destination: "OHLCMarketData.subscribe",
+          correlationId: "1",
+          cst: cst,
+          securityToken: xsecurity,
+          payload: { epics: symbols },
+        };
+        this.ws.send(JSON.stringify(subscriptionMessage));
+        console.log(`Subscribed to symbols: ${symbols}`);
+        // Keep connection alive with ping every 9 minutes
+        this.pingInterval = setInterval(() => {
+          if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.ping();
+            console.log("Ping sent to keep WebSocket connection alive");
+          }
+        }, 9 * 60 * 1000);
+      } catch (error) {
+        console.error("Error connecting to WebSocket:", error);
+      }
     });
 
     this.ws.on("message", messageHandler);
