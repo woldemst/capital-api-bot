@@ -19,8 +19,9 @@ import axios from "axios";
 // Main bot function
 async function run() {
   try {
-    // Start session and get account info
     await startSession();
+
+    // Session refresh interval
     setInterval(async () => {
       try {
         await refreshSession();
@@ -28,83 +29,76 @@ async function run() {
       } catch (e) {
         console.error(`Error refreshing session: ${e.message}`);
       }
-    }, 9 * 60 * 1000); // Refresh every 9 minutes
-
-    // !!! NOT DELETE
-    // Get account info
-    // const accountData = await getAccountInfo();
-    // const accountBalance = accountData.accounts[0].balance;
-
-    // !!! NOT DELETE
-    // Get open positions
-    // await getOpenPositions();
-
-    // !!! NOT DELETE
-    // Get session details
-    // await getSeesionDetails();
+    }, 9 * 60 * 1000);
 
     const tokens = getSessionTokens();
-    // await getActivityHistory('2025-05-24T15:09:47', '2025-05-26T15:10:05');
 
-    // !!! NOT DELETE
-    // get historical data  function
-    // try {
-    //   const m1Data = await getHistorical("USDCAD", "m1", 50, "2025-05-25T15:09:47", "2025-05-26T15:10:05");
+    // Store the latest candles for each symbol
+    const latestCandles = {};
 
-    //   // debug function for searching for market currencies
-    //   await getMarkets();
-
-    //   console.log(`Successfully fetched historical data for EUR_USD: ${m1Data.prices.length} candles`);
-    // } catch (error) {
-    //   console.error("Error testing historical data:", error.message);
-    // }
-
-    // Connect to WebSocket for real-time price updates
+    // Connect to WebSocket and handle messages
     webSocketService.connect(tokens, SYMBOLS, async (data) => {
       try {
         const message = JSON.parse(data.toString());
 
-        // // Handle subscription confirmation
-        // if (message.destination === "OHLCMarketData.subscribe") {
-        //   console.log("\n=== Subscription Status ===");
-        //   console.log(JSON.stringify(message.payload.subscriptions, null, 2));
-        //   return;
-        // }
-
-        // if (message.payload.epic) {
-          //   const symbol = message.payload.epic;
-          //   console.log('symbol', symbol);
-
-          // Process price for trading decisions
-          await tradingService.processPrice(message, getHistorical, MAX_OPEN_TRADES);
-        // }
+        // Store only candle data
+        if (message.payload && message.payload.epic) {
+          const symbol = message.payload.epic;
+          latestCandles[symbol] = message.payload;
+        }
       } catch (error) {
         console.error("Error processing WebSocket message:", error.message);
       }
     });
 
-    // Periodically update account info and check profit threshold
-    // setInterval(async () => {
-    //   try {
-    //     const accountData = await getAccountInfo();
-    //     const currentBalance = accountData.accounts[0].balance;
-    //     tradingService.setAccountBalance(currentBalance);
+    // Analysis interval (every 60 seconds)
+    setInterval(async () => {
+      for (const symbol of SYMBOLS) {
+        try {
+          if (!latestCandles[symbol]) continue;
+          console.log("prices", latestCandles[symbol]);
 
-    //     // Check if profit threshold has been reached
-    //     const initialBalance = parseFloat(process.env.INITIAL_BALANCE || currentBalance);
-    //     const profitPercentage = (currentBalance - initialBalance) / initialBalance;
+          // Get historical data for different timeframes
+          const m5Data = await getHistorical(symbol, "MINUTE", 50);
+          const m15Data = await getHistorical(symbol, "MINUTE_15", 50);
 
-    //     if (profitPercentage >= PROFIT_THRESHOLD) {
-    //       console.log(`Profit threshold of ${PROFIT_THRESHOLD * 100}% reached! Increasing position size`);
-    //       tradingService.setProfitThresholdReached(true);
-    //     }
-    //   } catch (error) {
-    //     console.error("Error updating account info:", error.message);
-    //   }
-    // }, 5 * 60 * 1000); // Every 5 minutes
+          // Calculate indicators
+          const m1Indicators = await calcIndicators([latestCandles[symbol]]);
+          const m5Indicators = await calcIndicators(m5Data.prices);
+          const m15Indicators = await calcIndicators(m15Data.prices);
+
+          // Analyze trend
+          const trendAnalysis = await analyzeTrend(symbol, getHistorical);
+
+          console.log(`\nAnalyzing ${symbol} at ${new Date().toISOString()}`);
+          console.log("Current candle:", latestCandles[symbol]);
+          console.log("M1 Indicators:", m1Indicators);
+          console.log("Trend Analysis:", trendAnalysis);
+
+          // Process for trading decisions
+          await tradingService.processPrice(
+            {
+              payload: {
+                ...latestCandles[symbol],
+                indicators: {
+                  m1: m1Indicators,
+                  m5: m5Indicators,
+                  m15: m15Indicators,
+                },
+                trendAnalysis,
+              },
+            },
+            getHistorical,
+            MAX_OPEN_TRADES
+          );
+        } catch (error) {
+          console.error(`Error analyzing ${symbol}:`, error.message);
+        }
+      }
+      // }, 60000); // Run analysis every 60 seconds
+    }, 10000); // Run analysis every 60 seconds
   } catch (error) {
-    console.error("Error in main bot execution:", error.message);
-    throw error;
+    console.error("Error in main bot function:", error);
   }
 }
 
