@@ -131,30 +131,66 @@ export const getActivityHistory = async (from, to) => {
     throw error;
   }
 };
+// Helper: format Date in “YYYY-MM-DDTHH:mm:ss” (no ms, no Z)
+function formatIsoNoMs(date) {
+  // erzeugt “2025-06-04T18:43:50.506Z”
+  const iso = date.toISOString();
+  // split bei Punkt und nimm den Teil vor “.”
+  return iso.split(".")[0]; // ergibt “2025-06-04T18:43:50”
+}
 
-// Get historical price data
+// Beispiel in getHistorical:
 export async function getHistorical(symbol, resolution, count, from, to) {
   try {
-    console.log(`<========= Fetching historical data for ${symbol} with resolution ${resolution}, count: ${count} =========>\n`);
+    const nowMs = Date.now();
+
+    // Wenn kein “to” gegeben, nimm jetzt ohne ms & Z
+    if (!to) {
+      to = formatIsoNoMs(new Date(nowMs));
+      // “2025-06-04T18:43:50”
+    }
+
+    // Wenn kein “from” gegeben, rechne zurück je nach Timeframe
+    if (!from) {
+      const resolutionToMs = {
+        MINUTE: 1 * 60 * 1000,
+        MINUTE_15: 5 * 60 * 1000,
+        MINUTE_15: 15 * 60 * 1000,
+        HOUR: 1 * 60 * 60  * 1000,
+        HOUR_4: 4 * 60 * 60 * 1000,
+        DAY: 24 * 60 * 60 * 1000,
+      };
+      const stepMs = resolutionToMs[resolution] || resolutionToMs.m1;
+      const fromMs = nowMs - count * stepMs;
+
+      // Datum ohne ms & Z: “2025-04-24T00:00:00”
+      from = formatIsoNoMs(new Date(fromMs));
+    }
+
+    console.log(`Fetching ${symbol} candles from=${from} to=${to}`);
+
     const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=100&from=${from}&to=${to}`, {
       headers: getHeaders(true),
     });
 
     // Log prices for each candle
-    if (response.data.prices && response.data.prices.length > 0) {
-      console.log("\nCandle Prices:");
-      response.data.prices.forEach((candle, index) => {
-        console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
-        console.log("Open Price - Bid:", candle.openPrice.bid);
-        console.log("Open Price - Ask:", candle.openPrice.ask);
-        console.log("Close Price - Bid:", candle.closePrice.bid);
-        console.log("Close Price - Ask:", candle.closePrice.ask);
-        console.log("High Price - Bid:", candle.highPrice.bid);
-        console.log("High Price - Ask:", candle.highPrice.ask);
-        console.log("Low Price - Bid:", candle.lowPrice.bid);
-        console.log("Low Price - Ask:", candle.lowPrice.ask);
-        console.log("Volume:", candle.lastTradedVolume);
-      });
+    // if (response.data.prices && response.data.prices.length > 0) {
+    //   console.log("\nCandle Prices:");
+    //   response.data.prices.forEach((candle, index) => {
+    //     console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
+    //     console.log("Open Price - Bid:", candle.openPrice.bid);
+    //     console.log("Open Price - Ask:", candle.openPrice.ask);
+    //     console.log("Close Price - Bid:", candle.closePrice.bid);
+    //     console.log("Close Price - Ask:", candle.closePrice.ask);
+    //     console.log("High Price - Bid:", candle.highPrice.bid);
+    //     console.log("High Price - Ask:", candle.highPrice.ask);
+    //     console.log("Low Price - Bid:", candle.lowPrice.bid);
+    //     console.log("Low Price - Ask:", candle.lowPrice.ask);
+    //     console.log("Volume:", candle.lastTradedVolume);
+    //   });
+    // }
+    if (response.data.prices?.length) {
+      console.log("Received candles:", response.data.prices.length);
     }
     return response.data;
   } catch (error) {

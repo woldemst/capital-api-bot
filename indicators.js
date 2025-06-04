@@ -27,8 +27,8 @@ export async function analyzeTrend(symbol, getHistorical) {
     console.log(`Analyzing trend for ${symbol} on higher timeframes`);
     
     // Get data for different timeframes
-    const h4Data = await getHistorical(symbol, 'h4', 50);
-    const d1Data = await getHistorical(symbol, 'd1', 30);
+    const h4Data = await getHistorical(symbol, 'HOUR_4', 50);
+    const d1Data = await getHistorical(symbol, 'DAY', 30);
     
     // Calculate indicators for H4 timeframe
     const h4Indicators = await calcIndicators(h4Data);

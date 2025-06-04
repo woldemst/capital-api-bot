@@ -7,11 +7,11 @@ class WebSocketService {
     this.ws = null;
     this.isConnected = false;
     this.pingInterval = null;
+    this.analysisInterval = null;
   }
 
   connect(tokens, symbols, messageHandler) {
     const { cst, xsecurity } = tokens;
-
     const wsUrl = `${WS_BASE_URL}/connect`;
 
     console.log(`Connecting to WebSocket: ${wsUrl}`);
@@ -27,7 +27,7 @@ class WebSocketService {
     this.ws.on("open", async () => {
       try {
         this.isConnected = true;
-        // console.log("WebSocket connected");
+        console.log("WebSocket connected");
 
         // Send subscription message with authentication tokens
         const subscriptionMessage = {
@@ -39,6 +39,7 @@ class WebSocketService {
         };
         this.ws.send(JSON.stringify(subscriptionMessage));
         console.log(`Subscribed to symbols: ${symbols}`);
+
         // Keep connection alive with ping every 9 minutes
         this.pingInterval = setInterval(() => {
           if (this.ws.readyState === WebSocket.OPEN) {
@@ -61,6 +62,7 @@ class WebSocketService {
       console.log("WebSocket connection closed");
       this.isConnected = false;
       clearInterval(this.pingInterval);
+      clearImmediate(this.analysisInterval);
     });
 
     return this;
@@ -69,6 +71,7 @@ class WebSocketService {
   disconnect() {
     if (this.ws) {
       clearInterval(this.pingInterval);
+      clearImmediate(this.analysisInterval);
       this.ws.close();
       this.ws = null;
       this.isConnected = false;
