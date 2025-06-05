@@ -1,5 +1,5 @@
 import { positionSize, generateSignals } from "../trading.js";
-import { placeOrder, updateTrailingStop } from "../api.js";
+import { placeOrder, updateTrailingStop, getHistorical } from "../api.js";
 import { TAKE_PROFIT_FACTOR, TRAILING_STOP_PIPS } from "../config.js";
 
 class TradingService {
@@ -25,10 +25,8 @@ class TradingService {
     return this.openTrades.includes(symbol);
   }
 
-  async processPrice(message, getHistorical, maxOpenTrades) {
-    console.log("message:", message);
-    // console.log("message.payload.epic:", message.payload.epic);
-
+  async processPrice(message, maxOpenTrades) {
+    let symbol = null;
     try {
       if (!message || !message.payload) {
         console.log("Invalid message format:", message);
@@ -36,21 +34,24 @@ class TradingService {
       }
 
       const candle = message.payload;
-      console.log("Received candle data:", candle);
-
-      // Extract symbol and verify it exists
-      const symbol = candle.epic;
+      symbol = candle.epic;
       if (!symbol) {
         console.log("No symbol (epic) in message:", message);
         return;
       }
-      // Skip if we already have max open trades or this symbol is already traded
       if (this.openTrades.length >= maxOpenTrades || this.isSymbolTraded(symbol)) {
         return;
       }
-
       if (!message || !message.payload || !message.payload.epic) {
         console.error("No correct message format");
+        return;
+      }
+
+      // Extract bid/ask from candle (try multiple formats)
+      const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
+      const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
+      if (typeof bid !== "number" || typeof ask !== "number") {
+        console.error(`Bid/Ask not found for ${symbol}:`, candle);
         return;
       }
 
@@ -66,73 +67,86 @@ class TradingService {
 
       console.log(`Processing ${symbol} OHLC data:`, ohlcData);
 
-      // Analyze trend on higher timeframes
-      const trendAnalysis = await analyzeTrend(symbol, getHistorical);
-
-      // Only proceed if overall trend is clear (not mixed)
+      // Use trendAnalysis from message (fix for undefined error)
+      const trendAnalysis = message.trendAnalysis || { overallTrend: 'unknown' };
+      if (!trendAnalysis || typeof trendAnalysis.overallTrend !== 'string') {
+        console.error(`trendAnalysis missing or invalid for ${symbol}:`, trendAnalysis);
+        return;
+      }
       if (trendAnalysis.overallTrend === "mixed") {
         console.log(`Skipping ${symbol} due to mixed trend on higher timeframes`);
         return;
       }
 
-      // Get data for entry signals
-      const m1Data = await getHistorical(symbol, "MINUTE", 100, "2025-04-24T00:00:00", "2025-04-24T02:00:00");
-      const m15Data = await getHistorical(symbol, "MINUTE_15", 50, "2025-04-24T00:00:00", "2025-04-24T02:00:00");
-
-      // Calculate indicators
-      const m1Indicators = await calcIndicators(m1Data);
-      const m15Indicators = await calcIndicators(m15Data);
-
       console.log(`${symbol} Indicators calculated`);
 
+      // Defensive: ensure indicators are present
+      const indicators = candle.indicators || {};
+      if (!indicators.m1 || !indicators.m5 || !indicators.m15) {
+        console.error(`Indicators missing for ${symbol}:`, indicators);
+        return;
+      }
+
       // Generate trading signals
-      const { signal } = generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask);
+      const { signal } = generateSignals(
+        symbol,
+        indicators.m1,
+        indicators.m5,
+        indicators.m15,
+        trendAnalysis,
+        bid,
+        ask
+      );
 
       if (signal) {
         console.log(`${symbol} ${signal.toUpperCase()} signal generated!`);
 
-        // Calculate stop loss and take profit levels
-        const stopLossPips = 40; // Default 40 pips stop loss
+        // Calculate stop loss and take profit as price levels
+        const stopLossPips = 40;
         const takeProfitPips = stopLossPips * TAKE_PROFIT_FACTOR;
+        const entryPrice = signal === "buy" ? ask : bid;
+        const stopLoss = signal === "buy"
+          ? entryPrice - stopLossPips * 0.0001
+          : entryPrice + stopLossPips * 0.0001;
+        const takeProfit = signal === "buy"
+          ? entryPrice + takeProfitPips * 0.0001
+          : entryPrice - takeProfitPips * 0.0001;
 
-        // Calculate position size based on risk management
-        const size = positionSize(this.accountBalance, bid, stopLossPips, this.profitThresholdReached);
+        // Calculate position size
+        const size = positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached);
 
         // Place the order
         const orderResult = await placeOrder(
           symbol,
           signal,
-          signal === "buy" ? ask : bid,
+          entryPrice,
           size,
-          stopLossPips * 0.0001, // Convert pips to price
-          takeProfitPips * 0.0001 // Convert pips to price
+          stopLoss,
+          takeProfit
         );
 
-        // Add to open trades
         this.openTrades.push(symbol);
 
         // Set up trailing stop once position is in profit
         setTimeout(async () => {
           try {
-            // Get current position details
             const positions = await getOpenPositions();
             const position = positions.positions.find((p) => p.market.epic.replace("_", "/") === symbol);
 
             if (position && position.profit > 0) {
-              // Calculate trailing stop level
               const trailingStopLevel =
-                signal === "buy" ? position.level - TRAILING_STOP_PIPS * 0.0001 : position.level + TRAILING_STOP_PIPS * 0.0001;
-
-              // Update trailing stop
+                signal === "buy"
+                  ? position.level - TRAILING_STOP_PIPS * 0.0001
+                  : position.level + TRAILING_STOP_PIPS * 0.0001;
               await updateTrailingStop(position.position.dealId, trailingStopLevel);
             }
           } catch (error) {
             console.error("Error setting trailing stop:", error.message);
           }
-        }, 5 * 60 * 1000); // Check after 5 minutes
+        }, 5 * 60 * 1000);
       }
     } catch (error) {
-      console.error(`Error processing price for ${symbol}:`, error.message);
+      console.error(`Error processing price for ${symbol || "unknown symbol"}:`, error.message);
     }
   }
 }

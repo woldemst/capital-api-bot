@@ -133,45 +133,45 @@ export const getActivityHistory = async (from, to) => {
 };
 // Helper: format Date in “YYYY-MM-DDTHH:mm:ss” (no ms, no Z)
 function formatIsoNoMs(date) {
-  // erzeugt “2025-06-04T18:43:50.506Z”
+  if (!(date instanceof Date) || isNaN(date)) {
+    throw new Error("Invalid date object passed to formatIsoNoMs");
+  }
   const iso = date.toISOString();
-  // split bei Punkt und nimm den Teil vor “.”
-  return iso.split(".")[0]; // ergibt “2025-06-04T18:43:50”
+  return iso.split(".")[0];
 }
 
 // Beispiel in getHistorical:
 export async function getHistorical(symbol, resolution, count, from, to) {
   try {
     const nowMs = Date.now();
-
-    // Wenn kein “to” gegeben, nimm jetzt ohne ms & Z
     if (!to) {
       to = formatIsoNoMs(new Date(nowMs));
       // “2025-06-04T18:43:50”
     }
-
-    // Wenn kein “from” gegeben, rechne zurück je nach Timeframe
     if (!from) {
       const resolutionToMs = {
         MINUTE: 1 * 60 * 1000,
-        MINUTE_15: 5 * 60 * 1000,
+        MINUTE_5: 5 * 60 * 1000,
         MINUTE_15: 15 * 60 * 1000,
-        HOUR: 1 * 60 * 60  * 1000,
+        HOUR: 1 * 60 * 60 * 1000,
         HOUR_4: 4 * 60 * 60 * 1000,
         DAY: 24 * 60 * 60 * 1000,
       };
       const stepMs = resolutionToMs[resolution] || resolutionToMs.m1;
       const fromMs = nowMs - count * stepMs;
 
-      // Datum ohne ms & Z: “2025-04-24T00:00:00”
+      // “2025-04-24T00:00:00”
       from = formatIsoNoMs(new Date(fromMs));
     }
 
+    
+    
     console.log(`Fetching ${symbol} candles from=${from} to=${to}`);
 
-    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=100&from=${from}&to=${to}`, {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
       headers: getHeaders(true),
     });
+    
 
     // Log prices for each candle
     // if (response.data.prices && response.data.prices.length > 0) {
@@ -192,7 +192,16 @@ export async function getHistorical(symbol, resolution, count, from, to) {
     if (response.data.prices?.length) {
       console.log("Received candles:", response.data.prices.length);
     }
-    return response.data;
+    // return response.data;
+    return {
+      prices: response.data.prices.map((p) => ({
+        close: p.closePrice?.bid,
+        high: p.highPrice?.bid,
+        low: p.lowPrice?.bid,
+        open: p.openPrice?.bid,
+        timestamp: p.snapshotTime,
+      })),
+    };
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
     throw error;
