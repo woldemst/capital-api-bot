@@ -1,11 +1,22 @@
 import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
 
 export async function calcIndicators(bars) {
-  const closes = bars.map((b) => b.close);
+  if (!bars || !Array.isArray(bars) || bars.length === 0) {
+    // console.error('Invalid or empty bars array:', bars);
+    return {};
+  }
+
+  const closes = bars.map(b => {
+    // Handle different price formats
+    return b.close || b.Close || b.closePrice?.bid || 0;
+  });
+
+  // Ensure we have enough data points
+  const minLength = Math.max(20, bars.length);
+  
   return {
-    // Modified periods as per your requirements
-    maFast: SMA.calculate({ period: 5, values: closes }).pop(),
-    maSlow: SMA.calculate({ period: 20, values: closes }).pop(),
+    maFast: SMA.calculate({period: 5, values: closes}).slice(-minLength).pop(),
+    maSlow: SMA.calculate({period: 20, values: closes}).slice(-minLength).pop(),
     ema5: EMA.calculate({ period: 5, values: closes }).pop(),
     ema20: EMA.calculate({ period: 20, values: closes }).pop(),
     rsi: RSI.calculate({ period: 14, values: closes }).pop(),
@@ -23,12 +34,26 @@ export async function calcIndicators(bars) {
 
 // Analyze trend on higher timeframes
 export async function analyzeTrend(symbol, getHistorical) {
+  if (!symbol || typeof getHistorical !== 'function') {
+    console.error('Invalid parameters for analyzeTrend');
+    return { overallTrend: 'unknown' };
+  }
+
   try {
+    const [h4Data, d1Data] = await Promise.all([
+      getHistorical(symbol, 'HOUR_4', 50),
+      getHistorical(symbol, 'DAY', 30)
+    ]);
+
+    // console.log(`h4Data from analyzeTrend:`, h4Data);
+
+    // Add validation for historical data
+    if (!h4Data?.prices || !d1Data?.prices) {
+      console.error('Missing prices in historical data');
+      return { overallTrend: 'unknown' };
+    }
+
     console.log(`Analyzing trend for ${symbol} on higher timeframes`);
-    
-    // Get data for different timeframes
-    const h4Data = await getHistorical(symbol, 'HOUR_4', 50);
-    const d1Data = await getHistorical(symbol, 'DAY', 30);
     
     // Calculate indicators for H4 timeframe
     const h4Indicators = await calcIndicators(h4Data);
@@ -53,7 +78,7 @@ export async function analyzeTrend(symbol, getHistorical) {
                     (h4Trend === 'bearish' && d1Trend === 'bearish') ? 'bearish' : 'mixed'
     };
   } catch (error) {
-    console.error(`Error analyzing trend for ${symbol}:`, error.message);
-    return { h4Trend: 'unknown', d1Trend: 'unknown', overallTrend: 'unknown' };
+    console.error(`Error analyzing trend for ${symbol}:`, error);
+    return { overallTrend: 'unknown' };
   }
 }
