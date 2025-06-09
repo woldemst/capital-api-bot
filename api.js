@@ -1,7 +1,6 @@
 import axios from "axios";
 import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD, BACKTEST_MODE, SYMBOLS, TIMEFRAMES } from "./config.js";
 
-
 let cst, xsecurity;
 let sessionStartTime = Date.now();
 
@@ -165,7 +164,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
       from = formatIsoNoMs(new Date(fromMs));
     }
 
-    console.log(`Fetching ${symbol} candles from=${from} to=${to}`);
+    console.log(`from=${from} to=${to} in resolution=${resolution}`);
 
     const response = await axios.get(
       `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`,
@@ -189,9 +188,6 @@ export async function getHistorical(symbol, resolution, count, from, to) {
     //     console.log("Low Price - Ask:", candle.lowPrice.ask);
     //     console.log("Volume:", candle.lastTradedVolume);
     //   });
-    // }
-    // if (response.data.prices?.length) {
-    //   console.log("Received candles:", response.data.prices.length);
     // }
     // return response.data;
     return {

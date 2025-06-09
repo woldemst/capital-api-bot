@@ -14,7 +14,6 @@ import {
 
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import axios from "axios";
 
 // Main bot function
 async function run() {
@@ -71,14 +70,14 @@ async function run() {
           try {
             if (!latestCandles[symbol]) continue;
 
-            // Add a delay between requests to avoid server errors
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            console.log(`Fetching candles for ${symbol}`);
 
             // Get historical data for different timeframes
+            await new Promise((resolve) => setTimeout(resolve, 1000)); // delay between requests
             const m1Data = await getHistorical(symbol, "MINUTE", 50);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 1000)); // delay between requests
             const m5Data = await getHistorical(symbol, "MINUTE_5", 50);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 1000)); // delay between requests
             const m15Data = await getHistorical(symbol, "MINUTE_15", 50);
 
             const m1Indicators = await calcIndicators(m1Data.prices);
@@ -100,6 +99,7 @@ async function run() {
                   },
                   trendAnalysis,
                 },
+                m1Data: m1Data.prices,
               },
               MAX_OPEN_TRADES
             );
@@ -107,10 +107,8 @@ async function run() {
             console.error(`Error analyzing ${symbol}:`, error.message);
           }
         }
-      }, 60000); // Run analysis every 60 seconds
+      }, 30000); // Run analysis every 30 seconds
     } else {
-      // !!! NOT DELETE
-      // get historical data  function
       try {
         const m1Data = await getHistorical("USDCAD", "MINUTE", 50);
 
