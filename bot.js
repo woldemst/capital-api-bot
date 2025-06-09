@@ -30,22 +30,25 @@ async function run() {
       }
     }, 9 * 60 * 1000);
 
-    // !!! NOT DELETE
-    // Get account info
+    // Get account info and set balance
     // const accountData = await getAccountInfo();
-    // const accountBalance = accountData.accounts[0].balance;
+    // if (accountData && accountData.accounts && accountData.accounts[0]) {
+    //   tradingService.setAccountBalance(accountData.accounts[0].balance);
+    //   console.log(`Account balance set to: ${accountData.accounts[0].balance}€`);
+    // } else {
+    //   console.error("Could not get account balance");
+    //   return;
+    // }
 
-    // !!! NOT DELETE
-    // Get open positions
-    // await getOpenPositions();
-
-    // !!! NOT DELETE
-    // Get session details
-    // await getSeesionDetails();
+    // Get current open positions
+    // const positions = await getOpenPositions();
+    // if (positions && positions.positions) {
+    //   tradingService.setOpenTrades(positions.positions.map(p => p.market.epic));
+    //   console.log(`Current open positions: ${positions.positions.length}`);
+    // }
 
     const tokens = getSessionTokens();
-    // await getActivityHistory('2025-06-05T15:09:47', '2025-06-06T15:10:05');
-
+    
     // Store the latest candles for each symbol
     const latestCandles = {};
 

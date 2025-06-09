@@ -115,7 +115,7 @@ export const getActivityHistory = async (from, to) => {
   try {
     // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
     console.log(`<========= Getting activity history from ${from} to ${to} =========>\n`);
-    const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/history/transactions`, {
       headers: getHeaders(),
       params: {
         from,
@@ -223,29 +223,32 @@ export async function placeOrder(symbol, direction, price, size, stopLoss, takeP
     console.log(`Stop Loss: ${stopLoss}, Take Profit: ${takeProfit}`);
 
     const order = {
-      epic: symbol.replace("/", "_"),
+      epic: symbol,
+      expiry: "-",
       direction: direction.toUpperCase(),
-      size,
+      size: String(size), // API requires size as string
       orderType: "MARKET",
       guaranteedStop: false,
-      trailingStop: false,
+      forceOpen: true,
+      stopLevel: stopLoss,
+      profitLevel: takeProfit,
+      currencyCode: "USD",
+      timeInForce: "EXECUTE_AND_ELIMINATE"
     };
 
-    // Add stop loss and take profit if provided
-    if (stopLoss) {
-      order.stopLevel = direction.toUpperCase() === "BUY" ? price - stopLoss : price + stopLoss;
-    }
+    const response = await axios.post(
+      `${BASE_URL}${API_PATH}/positions`,
+      order,
+      { headers: getHeaders(true) }
+    );
 
-    if (takeProfit) {
-      order.profitLevel = direction.toUpperCase() === "BUY" ? price + takeProfit : price - takeProfit;
-    }
-
-    const response = await axios.post(`${BASE_URL}${API_PATH}/positions`, order, { headers: getHeaders(true) });
-
-    console.log("Order placed successfully:", response.data);
+    console.log("Order response:", response.data);
     return response.data;
   } catch (error) {
-    console.error(`Error placing order for ${symbol}:`, error.response ? error.response.data : error.message);
+    if (error.response?.data) {
+      console.error("Order placement error:", error.response.data);
+      throw new Error(error.response.data.errorCode || "Order placement failed");
+    }
     throw error;
   }
 }
