@@ -7,6 +7,9 @@ class TradingService {
     this.openTrades = [];
     this.accountBalance = 0;
     this.profitThresholdReached = false;
+    this.symbolMinSizes = {}; // Store min size per symbol
+    this.virtualBalance = 10000;
+    this.virtualPositions = [];
   }
 
   setAccountBalance(balance) {
@@ -19,6 +22,10 @@ class TradingService {
 
   setProfitThresholdReached(reached) {
     this.profitThresholdReached = reached;
+  }
+
+  setSymbolMinSizes(minSizes) {
+    this.symbolMinSizes = minSizes;
   }
 
   isSymbolTraded(symbol) {
@@ -86,12 +93,16 @@ class TradingService {
         console.error(`Indicators missing for ${symbol}:`, indicators);
         return;
       }
+      if (!message.m1Data || !Array.isArray(message.m1Data) || message.m1Data.length < 2) {
+        console.error(`m1Data missing or too short for ${symbol}`);
+        return;
+      }
 
       // Generate trading signals
       const { signal } = generateSignals(
         symbol,
+        message.m1Data, // Pass the raw M1 data array
         indicators.m1,
-        indicators.m5,
         indicators.m15,
         trendAnalysis,
         bid,
@@ -112,8 +123,14 @@ class TradingService {
           ? entryPrice + takeProfitPips * 0.0001
           : entryPrice - takeProfitPips * 0.0001;
 
+        // Get min size for this symbol
+        const minSize = this.symbolMinSizes[symbol] || 0.01; // fallback to micro lot
         // Calculate position size
         const size = positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached);
+        if (size < minSize) {
+          console.warn(`Order size ${size} is below minimum for ${symbol} (${minSize}). Skipping order.`);
+          return;
+        }
 
         // Place the order
         const orderResult = await placeOrder(
@@ -148,6 +165,27 @@ class TradingService {
     } catch (error) {
       console.error(`Error processing price for ${symbol || "unknown symbol"}:`, error.message);
     }
+  }
+
+  simulateOrder({ symbol, price, indicators, trendAnalysis, balance }) {
+    if (BACKTEST_MODE) {
+      const signals = this.generateSignals(indicators, trendAnalysis);
+      
+      if (signals.strength > 0.7) {
+        const size = this.positionSize(balance, price, signals.stopLoss);
+        this.virtualPositions.push({
+          symbol,
+          entry: price,
+          size,
+          stopLoss: price - signals.stopLoss,
+          takeProfit: price + signals.takeProfit
+        });
+      }
+    }
+  }
+
+  getVirtualBalance() {
+    return this.virtualBalance;
   }
 }
 

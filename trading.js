@@ -14,7 +14,7 @@ export function positionSize(balance, price, stopLossPips, profitThresholdReache
 
 // Generate trading signals based on indicators
 export function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask) {
-  console.log(`Generating signals for ${symbol}:`,m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask);
+  // console.log(`Generating signals for ${symbol}:`,m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask);
 
   // Buy signal conditions
   const buyConditions = [
