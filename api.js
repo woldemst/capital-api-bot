@@ -1,5 +1,6 @@
 import axios from "axios";
-import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD } from "./config.js";
+import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD, BACKTEST_MODE, SYMBOLS, TIMEFRAMES } from "./config.js";
+
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
@@ -114,7 +115,7 @@ export const getOpenPositions = async () => {
 export const getActivityHistory = async (from, to) => {
   try {
     // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
-    console.log(`<========= Fetching activity history from ${from} to ${to} =========>\n`);
+    console.log(`<========= Getting activity history from ${from} to ${to} =========>\n`);
     const response = await axios.get(`${BASE_URL}${API_PATH}/history/activity`, {
       headers: getHeaders(),
       params: {
@@ -164,14 +165,14 @@ export async function getHistorical(symbol, resolution, count, from, to) {
       from = formatIsoNoMs(new Date(fromMs));
     }
 
-    
-    
     console.log(`Fetching ${symbol} candles from=${from} to=${to}`);
 
-    const response = await axios.get(`${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
-      headers: getHeaders(true),
-    });
-    
+    const response = await axios.get(
+      `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`,
+      {
+        headers: getHeaders(true),
+      }
+    );
 
     // Log prices for each candle
     // if (response.data.prices && response.data.prices.length > 0) {
@@ -189,9 +190,9 @@ export async function getHistorical(symbol, resolution, count, from, to) {
     //     console.log("Volume:", candle.lastTradedVolume);
     //   });
     // }
-    if (response.data.prices?.length) {
-      console.log("Received candles:", response.data.prices.length);
-    }
+    // if (response.data.prices?.length) {
+    //   console.log("Received candles:", response.data.prices.length);
+    // }
     // return response.data;
     return {
       prices: response.data.prices.map((p) => ({
