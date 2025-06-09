@@ -1,5 +1,5 @@
-import axios from "axios";
 import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD, BACKTEST_MODE, SYMBOLS, TIMEFRAMES } from "./config.js";
+import axios from "axios";
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
@@ -18,12 +18,6 @@ export const getHeaders = (includeContentType = false) => {
 // Start a new session with the API
 export const startSession = async () => {
   try {
-    // Log environment variables (without exposing sensitive data)
-    // console.log("API_KEY exists:", !!API_KEY);
-    // console.log("API_IDENTIFIER exists:", !!API_IDENTIFIER);
-    // console.log("API_PASSWORD exists:", !!API_PASSWORD);
-    // console.log("BASE_URL:", BASE_URL);
-
     const response = await axios.post(
       `${BASE_URL}${API_PATH}/session`,
       {
@@ -217,30 +211,29 @@ export const getMarkets = async () => {
 };
 
 // Place an order
-export async function placeOrder(symbol, direction, price, size, stopLoss, takeProfit) {
+export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
   try {
-    console.log(`Placing ${direction} order for ${symbol} at ${price}, size: ${size}`);
-    console.log(`Stop Loss: ${stopLoss}, Take Profit: ${takeProfit}`);
+    console.log(`Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
 
     const order = {
       epic: symbol,
-      expiry: "-",
       direction: direction.toUpperCase(),
-      size: String(size), // API requires size as string
-      orderType: "MARKET",
-      guaranteedStop: false,
-      forceOpen: true,
-      stopLevel: stopLoss,
-      profitLevel: takeProfit,
-      currencyCode: "USD",
-      timeInForce: "EXECUTE_AND_ELIMINATE"
+      size: size,
+      level: level,
+      type: orderType,
+      // Optional parameters that can be added based on requirements:
+      // "timeInForce": "GOOD_TILL_CANCELLED",
+      // "guaranteedStop": false,
+      // "stopLevel": null,
+      // "stopDistance": null,
+      // "limitLevel": null,
+      // "limitDistance": null,
+      // "quoteId": null
     };
 
-    const response = await axios.post(
-      `${BASE_URL}${API_PATH}/positions`,
-      order,
-      { headers: getHeaders(true) }
-    );
+    const response = await axios.post(`${BASE_URL}${API_PATH}/workingorders`, order, {
+      headers: getHeaders(true),
+    });
 
     console.log("Order response:", response.data);
     return response.data;
@@ -273,6 +266,85 @@ export async function updateTrailingStop(positionId, stopLevel) {
     return response.data;
   } catch (error) {
     console.error(`Error updating trailing stop for position ${positionId}:`, error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
+
+// Place an immediate position for scalping
+export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
+  try {
+    console.log(`Creating ${direction} position for ${symbol} at market price, size: ${size}`);
+
+    const position = {
+      epic: symbol,
+      direction: direction.toUpperCase(),
+      size: String(size), // Capital.com requires size as string
+      orderType: "MARKET", // Force market order for immediate execution
+      guaranteedStop: false,
+      forceOpen: true, // Always open new position
+      stopLevel: Number(stopLevel), // Convert to number for validation
+      limitLevel: Number(profitLevel), // Use limitLevel instead of profitLevel
+      currencyCode: "USD",
+      timeInForce: "FILL_OR_KILL", // Ensure immediate execution or cancellation
+    };
+
+    // Validate position parameters
+    if (!symbol || !direction || !size || !stopLevel || !profitLevel) {
+      throw new Error("Missing required position parameters");
+    }
+
+    const response = await axios.post(`${BASE_URL}${API_PATH}/positions`, position, { headers: getHeaders(true) });
+
+    // Handle deal confirmation
+    if (response.data?.dealReference) {
+      try {
+        // Poll for confirmation with timeout
+        let attempts = 0;
+        const maxAttempts = 5;
+        let confirmation = null;
+
+        while (attempts < maxAttempts) {
+          attempts++;
+          confirmation = await getDealConfirmation(response.data.dealReference);
+
+          if (confirmation.dealStatus === "ACCEPTED" || confirmation.dealId) {
+            console.log("Position confirmed:", confirmation);
+            return confirmation;
+          }
+
+          if (confirmation.dealStatus === "REJECTED") {
+            throw new Error(`Deal rejected: ${confirmation.reason || "Unknown reason"}`);
+          }
+
+          // Wait before next attempt
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+
+        throw new Error("Deal confirmation timeout");
+      } catch (confirmError) {
+        console.error("Error confirming deal:", confirmError.message);
+        throw confirmError;
+      }
+    }
+
+    return response.data;
+  } catch (error) {
+    if (error.response?.data) {
+      console.error("Position creation error:", error.response.data);
+      throw new Error(error.response.data.errorCode || "Position creation failed");
+    }
+    throw error;
+  }
+}
+
+// Get deal confirmation
+export async function getDealConfirmation(dealReference) {
+  try {
+    console.log(`Getting confirmation for deal: ${dealReference}`);
+    const response = await axios.get(`${BASE_URL}${API_PATH}/confirms/${dealReference}`, { headers: getHeaders() });
+    return response.data;
+  } catch (error) {
+    console.error("Error getting deal confirmation:", error.response?.data || error.message);
     throw error;
   }
 }
