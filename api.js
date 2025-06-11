@@ -84,7 +84,7 @@ export const getSeesionDetails = async () => {
 export const getAccountInfo = async () => {
   try {
     const response = await axios.get(`${BASE_URL}${API_PATH}/accounts`, { headers: getHeaders() });
-    console.log("<========= Account info received =========>\n", response.data, "\n\n");
+    // console.log("<========= Account info received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
     console.error("Error getting account info:", error.response ? error.response.data : error.message);
@@ -201,7 +201,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
 
 export const getMarkets = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=CAD`, { headers: getHeaders() });
+    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EUR`, { headers: getHeaders() });
     console.log("<========= Markets received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
@@ -273,66 +273,42 @@ export async function updateTrailingStop(positionId, stopLevel) {
 // Place an immediate position for scalping
 export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
   try {
-    console.log(`Creating ${direction} position for ${symbol} at market price, size: ${size}`);
+    console.log(`Placing ${direction} position for ${symbol} at market price, size: ${size}`);
+    console.log(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
 
+    // Validate inputs
+    if (!symbol || !direction || !size || !stopLevel || !profitLevel) {
+      throw new Error('Missing required parameters for position placement');
+    }
+
+    // Format the position request
     const position = {
       epic: symbol,
       direction: direction.toUpperCase(),
-      size: String(size), // Capital.com requires size as string
-      orderType: "MARKET", // Force market order for immediate execution
+      size: size.toString(),
+      orderType: "MARKET",
       guaranteedStop: false,
-      forceOpen: true, // Always open new position
-      stopLevel: Number(stopLevel), // Convert to number for validation
-      limitLevel: Number(profitLevel), // Use limitLevel instead of profitLevel
-      currencyCode: "USD",
-      timeInForce: "FILL_OR_KILL", // Ensure immediate execution or cancellation
+      stopLevel: parseFloat(stopLevel).toFixed(5),
+      profitLevel: parseFloat(profitLevel).toFixed(5),
+      limitDistance: null,
+      stopDistance: null,
+      trailingStop: false,
+      forceOpen: true
     };
 
-    // Validate position parameters
-    if (!symbol || !direction || !size || !stopLevel || !profitLevel) {
-      throw new Error("Missing required position parameters");
-    }
+    console.log('Sending position request:', position);
 
-    const response = await axios.post(`${BASE_URL}${API_PATH}/positions`, position, { headers: getHeaders(true) });
+    const response = await axios.post(
+      `${BASE_URL}${API_PATH}/positions`,
+      position,
+      { headers: getHeaders(true) }
+    );
 
-    // Handle deal confirmation
-    if (response.data?.dealReference) {
-      try {
-        // Poll for confirmation with timeout
-        let attempts = 0;
-        const maxAttempts = 5;
-        let confirmation = null;
-
-        while (attempts < maxAttempts) {
-          attempts++;
-          confirmation = await getDealConfirmation(response.data.dealReference);
-
-          if (confirmation.dealStatus === "ACCEPTED" || confirmation.dealId) {
-            console.log("Position confirmed:", confirmation);
-            return confirmation;
-          }
-
-          if (confirmation.dealStatus === "REJECTED") {
-            throw new Error(`Deal rejected: ${confirmation.reason || "Unknown reason"}`);
-          }
-
-          // Wait before next attempt
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-
-        throw new Error("Deal confirmation timeout");
-      } catch (confirmError) {
-        console.error("Error confirming deal:", confirmError.message);
-        throw confirmError;
-      }
-    }
-
+    console.log('Position created successfully:', response.data);
     return response.data;
+
   } catch (error) {
-    if (error.response?.data) {
-      console.error("Position creation error:", error.response.data);
-      throw new Error(error.response.data.errorCode || "Position creation failed");
-    }
+    console.error('Position creation error:', error.response?.data || error.message);
     throw error;
   }
 }
