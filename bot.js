@@ -27,6 +27,7 @@ class TradingBot {
     try {
       await startSession();
       const tokens = getSessionTokens();
+      // getMarkets()
 
       if (!BACKTEST_MODE) {
         await this.startLiveTrading(tokens);

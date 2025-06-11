@@ -191,27 +191,32 @@ class TradingService {
   async executeTrade(signal, symbol, bid, ask, metrics) {
     console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
 
+    // Add to open trades list
     this.setOpenTrades([...this.openTrades, symbol]);
 
     // Calculate position parameters
     const stopLossPips = 40; // Base stop loss
     const takeProfitPips = stopLossPips * TAKE_PROFIT_FACTOR; // Default 2x stop loss
-    const entryPrice = signal === "buy" ? ask : bid;
-
-    // Calculate precise stop loss and take profit levels
     const pipValue = symbol.includes("JPY") ? 0.01 : 0.0001;
-    const stopLoss = signal === "buy" ? entryPrice - stopLossPips * pipValue : entryPrice + stopLossPips * pipValue;
-    const takeProfit = signal === "buy" ? entryPrice + takeProfitPips * pipValue : entryPrice - takeProfitPips * pipValue;
+    
+    // Calculate entry, stop loss and take profit prices
+    const entryPrice = signal === "buy" ? ask : bid;
+    const stopLossPrice = signal === "buy" 
+      ? (entryPrice - stopLossPips * pipValue).toFixed(5)
+      : (entryPrice + stopLossPips * pipValue).toFixed(5);
+    const takeProfitPrice = signal === "buy"
+      ? (entryPrice + takeProfitPips * pipValue).toFixed(5)
+      : (entryPrice - takeProfitPips * pipValue).toFixed(5);
 
-    // Get min size and calculate position size
-    const minSize = Math.max(0.01, this.symbolMinSizes[symbol] || 0.01);
-    const size = Math.max(minSize, positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached));
+    // Calculate position size based on risk
+    const size = Math.max(0.01, positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached));
 
     console.log("\n=== Position Parameters ===");
     console.log(`Entry: Market ${signal.toUpperCase()} at ~${entryPrice}`);
-    console.log(`Stop Loss: ${stopLoss} (${stopLossPips} pips)`);
-    console.log(`Take Profit: ${takeProfit} (${takeProfitPips} pips)`);
+    console.log(`Stop Loss: ${stopLossPrice} (${stopLossPips} pips)`);
+    console.log(`Take Profit: ${takeProfitPrice} (${takeProfitPips} pips)`);
     console.log(`Position Size: ${size} lots`);
+    console.log(`Risk per trade: $${(this.accountBalance * RISK_PER_TRADE).toFixed(2)}`);
 
     // Place the position with market execution
     try {
@@ -221,66 +226,28 @@ class TradingService {
         symbol,
         signal,
         size,
-        null, // No entry price for market orders
-        stopLoss,
-        takeProfit
+        null, // Market order, no entry price needed
+        stopLossPrice,
+        takeProfitPrice
       );
 
-      if (positionResult) {
-        // Check deal confirmation status
-        if (positionResult.dealStatus === "ACCEPTED" || positionResult.dealId) {
-          this.openTrades.push(symbol);
-          console.log(`✅ Position opened successfully for ${symbol}`);
-          console.log("Position details:", positionResult);
-
-          // Track attempt count and reset on success
-          this.orderAttempts.delete(symbol);
-
-          // Set up trailing stop if position is accepted
-          if (positionResult.dealId) {
-            this.setupTrailingStop(symbol, signal, entryPrice, takeProfitPips, positionResult.dealId);
-          }
-        } else {
-          console.error(`❌ Deal rejected for ${symbol}:`, positionResult.dealStatus);
-          throw new Error(`Deal rejected: ${positionResult.dealStatus}`);
+      if (positionResult && positionResult.dealReference) {
+        console.log(`✅ Position opened successfully. Deal reference: ${positionResult.dealReference}`);
+        
+        // Set up trailing stop if configured
+        if (TRAILING_STOP_ACTIVATION > 0) {
+          this.setupTrailingStop(symbol, signal, entryPrice, takeProfitPips);
         }
+        
+        return positionResult;
       } else {
-        throw new Error("No position result returned");
+        console.error("❌ Position creation failed: No deal reference received");
+        this.setOpenTrades(this.openTrades.filter(t => t !== symbol));
       }
     } catch (error) {
       console.error(`❌ Error creating position for ${symbol}:`, error.message);
-
-      // Track failed attempts
-      const attempts = (this.orderAttempts.get(symbol) || 0) + 1;
-      this.orderAttempts.set(symbol, attempts);
-
-      // Handle specific error cases
-      if (error.message.includes("invalid.size")) {
-        if (attempts <= 3) {
-          // Limit retry attempts
-          console.log(`Retrying with minimum size (0.01) for ${symbol}...`);
-          try {
-            const retryResult = await placePosition(
-              symbol,
-              signal,
-              0.01, // Minimum size
-              null, // Market order
-              stopLoss,
-              takeProfit
-            );
-
-            if (retryResult && (retryResult.dealStatus === "ACCEPTED" || retryResult.dealId)) {
-              this.openTrades.push(symbol);
-              console.log(`✅ Position opened successfully with minimum size for ${symbol}`);
-              this.orderAttempts.delete(symbol);
-            }
-          } catch (retryError) {
-            console.error(`Failed retry for ${symbol}:`, retryError.message);
-          }
-        } else {
-          console.log(`Maximum retry attempts reached for ${symbol}`);
-        }
-      }
+      this.setOpenTrades(this.openTrades.filter(t => t !== symbol));
+      throw error;
     }
   }
 
