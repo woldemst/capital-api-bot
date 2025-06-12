@@ -273,26 +273,25 @@ export async function updateTrailingStop(positionId, stopLevel) {
 // Place an immediate position for scalping
 export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
   try {
-    console.log(`Placing ${direction} position for ${symbol} at market price, size: ${size}`);
-    console.log(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
-
-    // Validate inputs
-    if (!symbol || !direction || !size || !stopLevel || !profitLevel) {
-      throw new Error('Missing required parameters for position placement');
+    // Adjust size for forex pairs (convert to proper units)
+    let adjustedSize = size;
+    if (symbol.length === 6 && /^[A-Z]*$/.test(symbol)) { // Check if it's a forex pair
+      adjustedSize = size * 100; // Convert standard lots to Capital.com's forex size units
     }
+
+    console.log(`Placing ${direction} position for ${symbol} at market price...`);
+    console.log(`Original size: ${size}, Adjusted size: ${adjustedSize}`);
+    console.log(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
 
     // Format the position request
     const position = {
       epic: symbol,
       direction: direction.toUpperCase(),
-      size: size.toString(),
+      size: adjustedSize.toString(),
       orderType: "MARKET",
       guaranteedStop: false,
-      stopLevel: parseFloat(stopLevel).toFixed(5),
-      profitLevel: parseFloat(profitLevel).toFixed(5),
-      limitDistance: null,
-      stopDistance: null,
-      trailingStop: false,
+      stopLevel: stopLevel ? parseFloat(stopLevel).toFixed(5) : undefined,
+      profitLevel: profitLevel ? parseFloat(profitLevel).toFixed(5) : undefined,
       forceOpen: true
     };
 
