@@ -2,33 +2,43 @@ import { RISK_PER_TRADE, LEVERAGE, POSITION_SIZE_INCREASE, TAKE_PROFIT_FACTOR, T
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
 
 // Calculate position size based on risk management
-function positionSize(balance, price, stopLossPips, profitThresholdReached) {
+function positionSize(balance, price, stopLossPips, profitThresholdReached, symbol) {
   // Safety check for balance
   if (!balance || balance <= 0) {
     console.log("Warning: Invalid balance, using minimum position size");
-    return 0.01; // Capital.com minimum position size is 0.01
+    return 0.01;
   }
 
   const amount = balance * RISK_PER_TRADE;
-  const pipValue = 0.0001;
+  const isForex = symbol && symbol.length === 6 && /^[A-Z]*$/.test(symbol);
+  const pipValue = isForex ? 0.0001 : 0.01; // Different pip values for forex vs other instruments
   const slPips = stopLossPips || 40;
 
-  // Apply position size increase if profit threshold reached
-  const multiplier = profitThresholdReached ? 1 + POSITION_SIZE_INCREASE : 1;
-
-  // Calculate size in lots (Capital.com uses 0.01 lot increments)
-  let size = (amount * LEVERAGE * multiplier) / (slPips * pipValue * 10000);
+  // Calculate position size differently for forex vs other instruments
+  let size;
+  if (isForex) {
+    // For forex: 0.01 lot = 1,000 units of base currency
+    size = (amount) / (slPips * pipValue * price * 1000);
+  } else {
+    // For other instruments (commodities, indices)
+    size = amount / (slPips * price * 0.01);
+  }
 
   // Round to 2 decimal places and ensure minimum size of 0.01
   size = Math.max(0.01, Math.round(size * 100) / 100);
+  
+  // Apply maximum size limit (1.00 for forex, 100 for other instruments)
+  const maxSize = isForex ? 1.00 : 100;
+  size = Math.min(maxSize, size);
 
   console.log(`Position Size Calculation:
+    Symbol: ${symbol}
+    Instrument Type: ${isForex ? 'Forex' : 'Other'}
     Balance: ${balance}
     Risk Amount: ${amount}
     Stop Loss Pips: ${slPips}
-    Leverage: ${LEVERAGE}
-    Multiplier: ${multiplier}
-    Calculated Size: ${size} lots
+    Price: ${price}
+    Calculated Size: ${size} ${isForex ? 'lots' : 'units'}
   `);
 
   return size;
@@ -191,9 +201,6 @@ class TradingService {
   async executeTrade(signal, symbol, bid, ask, metrics) {
     console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
 
-    // Add to open trades list
-    this.setOpenTrades([...this.openTrades, symbol]);
-
     // Calculate position parameters
     const stopLossPips = 40; // Base stop loss
     const takeProfitPips = stopLossPips * TAKE_PROFIT_FACTOR; // Default 2x stop loss
@@ -209,7 +216,7 @@ class TradingService {
       : (entryPrice - takeProfitPips * pipValue).toFixed(5);
 
     // Calculate position size based on risk
-    const size = Math.max(0.01, positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached));
+    const size = positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached, symbol);
 
     console.log("\n=== Position Parameters ===");
     console.log(`Entry: Market ${signal.toUpperCase()} at ~${entryPrice}`);
@@ -221,6 +228,9 @@ class TradingService {
     // Place the position with market execution
     try {
       console.log(`Creating ${signal} position for ${symbol} at market price...`);
+      
+      // Add to open trades list before placing the order
+      this.setOpenTrades([...this.openTrades, symbol]);
 
       const positionResult = await placePosition(
         symbol,
@@ -233,12 +243,6 @@ class TradingService {
 
       if (positionResult && positionResult.dealReference) {
         console.log(`✅ Position opened successfully. Deal reference: ${positionResult.dealReference}`);
-        
-        // Set up trailing stop if configured
-        if (TRAILING_STOP_ACTIVATION > 0) {
-          this.setupTrailingStop(symbol, signal, entryPrice, takeProfitPips);
-        }
-        
         return positionResult;
       } else {
         console.error("❌ Position creation failed: No deal reference received");
@@ -246,6 +250,7 @@ class TradingService {
       }
     } catch (error) {
       console.error(`❌ Error creating position for ${symbol}:`, error.message);
+      // Remove from open trades if position creation failed
       this.setOpenTrades(this.openTrades.filter(t => t !== symbol));
       throw error;
     }
