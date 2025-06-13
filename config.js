@@ -8,8 +8,8 @@ export const API_PATH = process.env.API_PATH;
 export const WS_BASE_URL = process.env.WS_BASE_URL;
 
 // Trading configuration
-// export const SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
-export const SYMBOLS = ["US500", "SILVER"];
+export const SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
+// export const SYMBOLS = ["US500", "SILVER"];
 export const TIMEFRAMES = ["MINUTE", "MINUTE_5", "MINUTE_15", "MINUTE_30", "HOUR", "HOUR_4", "DAY"]; // Supported timeframes
 
 // Add these constants to your config.js

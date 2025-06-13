@@ -27,7 +27,7 @@ class TradingBot {
     try {
       await startSession();
       const tokens = getSessionTokens();
-      // getMarkets()
+      await getMarkets();
 
       if (!BACKTEST_MODE) {
         await this.startLiveTrading(tokens);
@@ -83,7 +83,7 @@ class TradingBot {
       } catch (error) {
         console.error("Analysis interval error:", error);
       }
-    }, 30000);
+    }, 15 * 60 * 1000);   
   }
 
   // Update account information and positions
