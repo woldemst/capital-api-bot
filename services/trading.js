@@ -3,33 +3,27 @@ import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "..
 
 // Calculate position size based on risk management
 function positionSize(balance, price, stopLossPips, profitThresholdReached, symbol) {
-  // Safety check for balance
+  const isForex = symbol && symbol.length === 6 && /^[A-Z]*$/.test(symbol);
+  
+  if (isForex) {
+    // For forex pairs, always return 100 as per API requirement
+    return 100;
+  }
+
+  // For other instruments (indices, commodities)
   if (!balance || balance <= 0) {
     console.log("Warning: Invalid balance, using minimum position size");
-    return 0.01;
+    return 1;
   }
 
   const amount = balance * RISK_PER_TRADE;
-  const isForex = symbol && symbol.length === 6 && /^[A-Z]*$/.test(symbol);
-  const pipValue = isForex ? 0.0001 : 0.01; // Different pip values for forex vs other instruments
+  const pipValue = 0.01; // For non-forex instruments
   const slPips = stopLossPips || 40;
 
-  // Calculate position size differently for forex vs other instruments
-  let size;
-  if (isForex) {
-    // For forex: 0.01 lot = 1,000 units of base currency
-    size = (amount) / (slPips * pipValue * price * 1000);
-  } else {
-    // For other instruments (commodities, indices)
-    size = amount / (slPips * price * 0.01);
-  }
-
-  // Round to 2 decimal places and ensure minimum size of 0.01
-  size = Math.max(0.01, Math.round(size * 100) / 100);
-  
-  // Apply maximum size limit (1.00 for forex, 100 for other instruments)
-  const maxSize = isForex ? 1.00 : 100;
-  size = Math.min(maxSize, size);
+  // Calculate size for other instruments
+  let size = amount / (slPips * price * 0.01);
+  size = Math.max(1, Math.round(size));
+  size = Math.min(100, size); // Cap at 100 units
 
   console.log(`Position Size Calculation:
     Symbol: ${symbol}
@@ -38,7 +32,7 @@ function positionSize(balance, price, stopLossPips, profitThresholdReached, symb
     Risk Amount: ${amount}
     Stop Loss Pips: ${slPips}
     Price: ${price}
-    Calculated Size: ${size} ${isForex ? 'lots' : 'units'}
+    Calculated Size: ${size} units
   `);
 
   return size;

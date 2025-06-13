@@ -199,16 +199,30 @@ export async function getHistorical(symbol, resolution, count, from, to) {
   }
 }
 
+// Get available markets
 export const getMarkets = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EUR`, { headers: getHeaders() });
+    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
     console.log("<========= Markets received =========>\n", response.data, "\n\n");
-    return response.data;
+    // Ensure we return an array of markets
+    return Array.isArray(response.data.markets) ? response.data.markets : [];
   } catch (error) {
     console.error("Error getting markets:", error.response ? error.response.data : error.message);
     throw error;
   }
 };
+
+// Get market details for a symbol
+export async function getMarketDetails(symbol) {
+  try {
+    const response = await axios.get(`${BASE_URL}${API_PATH}/markets/${symbol}`, { headers: getHeaders() });
+    console.log(`Market details for ${symbol}:`, response.data);
+    return response.data;
+  } catch (error) {
+    console.error(`Error getting market details for ${symbol}:`, error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
 
 // Place an order
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
@@ -273,14 +287,13 @@ export async function updateTrailingStop(positionId, stopLevel) {
 // Place an immediate position for scalping
 export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
   try {
-    // Adjust size for forex pairs (convert to proper units)
-    let adjustedSize = size;
-    if (symbol.length === 6 && /^[A-Z]*$/.test(symbol)) { // Check if it's a forex pair
-      adjustedSize = size * 100; // Convert standard lots to Capital.com's forex size units
-    }
+    // Handle size requirements
+    const isForex = symbol.length === 6 && /^[A-Z]*$/.test(symbol);
+    // For forex pairs, always use 100 as size
+    const adjustedSize = isForex ? 100 : size;
 
     console.log(`Placing ${direction} position for ${symbol} at market price...`);
-    console.log(`Original size: ${size}, Adjusted size: ${adjustedSize}`);
+    console.log(`Original size: ${size}, Using size: ${adjustedSize}`);
     console.log(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
 
     // Format the position request
