@@ -1,5 +1,7 @@
 import WebSocket from "ws";
-import { WS_BASE_URL, API_KEY } from "../config.js";
+import { API } from "../config.js";
+
+const { WS_URL, KEY: API_KEY } = API;
 
 class WebSocketService {
   constructor() {
@@ -9,7 +11,8 @@ class WebSocketService {
 
   connect(tokens, symbols, messageHandler) {
     const { cst, xsecurity } = tokens;
-    const wsUrl = `${WS_BASE_URL}/connect`;
+    // Remove trailing slash if present and add the endpoint
+    const wsUrl = `${WS_URL.replace(/\/$/, '')}/connect`;
 
     const connectWS = () => {
       this.ws = new WebSocket(wsUrl, {
