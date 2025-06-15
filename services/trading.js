@@ -1,13 +1,17 @@
-import { RISK_PER_TRADE, LEVERAGE, POSITION_SIZE_INCREASE, TAKE_PROFIT_FACTOR, TRAILING_STOP_PIPS } from "../config.js";
+import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
+
+const { RISK: riskConfig } = TRADING;
+const { ATR_PERIOD } = ANALYSIS; // ATR period configuration
+const RSI_CONFIG = { OVERBOUGHT: 70, OVERSOLD: 30 }; // RSI levels configuration
 
 // Calculate position size based on risk management
 function positionSize(balance, price, stopLossPips, profitThresholdReached, symbol) {
   const isForex = symbol && symbol.length === 6 && /^[A-Z]*$/.test(symbol);
-  
+
   if (isForex) {
-    // For forex pairs, always return 100 as per API requirement
-    return 100;
+    // For forex pairs, use configured minimum size
+    return riskConfig.FOREX.MIN_SIZE;
   }
 
   // For other instruments (indices, commodities)
@@ -16,9 +20,8 @@ function positionSize(balance, price, stopLossPips, profitThresholdReached, symb
     return 1;
   }
 
-  const amount = balance * RISK_PER_TRADE;
-  const pipValue = 0.01; // For non-forex instruments
-  const slPips = stopLossPips || 40;
+  const amount = balance * riskConfig.PER_TRADE;
+  const slPips = stopLossPips || ATR_CONFIG.PERIOD;
 
   // Calculate size for other instruments
   let size = amount / (slPips * price * 0.01);
@@ -27,7 +30,7 @@ function positionSize(balance, price, stopLossPips, profitThresholdReached, symb
 
   console.log(`Position Size Calculation:
     Symbol: ${symbol}
-    Instrument Type: ${isForex ? 'Forex' : 'Other'}
+    Instrument Type: ${isForex ? "Forex" : "Other"}
     Balance: ${balance}
     Risk Amount: ${amount}
     Stop Loss Pips: ${slPips}
@@ -40,27 +43,50 @@ function positionSize(balance, price, stopLossPips, profitThresholdReached, symb
 
 // Generate trading signals based on indicators
 function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask) {
-  // Validate inputs
-  if (!m1Data || !m1Indicators || !m15Indicators || !trendAnalysis) {
-    console.log(`${symbol}: Missing required indicators data`);
+  if (!validateIndicatorData(m1Data, m1Indicators, m15Indicators, trendAnalysis)) {
     return { signal: null };
   }
 
+  logMarketConditions(symbol, bid, ask, m1Indicators, m15Indicators, trendAnalysis);
+
+  const buyConditions = generateBuyConditions(m1Data, m1Indicators, m15Indicators, trendAnalysis, bid);
+  const sellConditions = generateSellConditions(m1Data, m1Indicators, m15Indicators, trendAnalysis, ask);
+
+  logSignalConditions(buyConditions, sellConditions);
+
+  const { signal, buyScore, sellScore } = evaluateSignals(buyConditions, sellConditions);
+
+  return {
+    signal,
+    buyScore,
+    sellScore,
+    metrics: extractMetrics(m1Indicators),
+  };
+}
+
+function validateIndicatorData(m1Data, m1Indicators, m15Indicators, trendAnalysis) {
+  if (!m1Data || !m1Indicators || !m15Indicators || !trendAnalysis) {
+    console.log(`Missing required indicators data`);
+    return false;
+  }
+  return true;
+}
+
+function logMarketConditions(symbol, bid, ask, m1Indicators, m15Indicators, trendAnalysis) {
   console.log(`\n=== Analyzing ${symbol} ===`);
   console.log("Current price:", { bid, ask });
   console.log("M1 RSI:", m1Indicators.rsi);
   console.log("M15 RSI:", m15Indicators.rsi);
   console.log("Trend Analysis:", trendAnalysis.overallTrend);
+}
 
-  // Buy signal conditions with enhanced MA cross check
-  const buyConditions = [
-    // MA crossover (5 MA crosses above 20 MA) with recent price confirmation
-    m1Indicators.maFast > m1Indicators.maSlow &&
-      m1Data[m1Data.length - 2].close < m1Indicators.maSlow &&
-      m1Data[m1Data.length - 1].close > m1Data[m1Data.length - 2].close,
+function generateBuyConditions(m1Data, m1Indicators, m15Indicators, trendAnalysis, bid) {
+  return [
+    // MA crossover with price confirmation
+    isBullishMACross(m1Data, m1Indicators),
 
-    // RSI below 30 (oversold)
-    m1Indicators.rsi < 30,
+    // RSI oversold condition
+    m1Indicators.rsi < RSI_CONFIG.OVERSOLD,
 
     // Price at lower Bollinger Band
     bid <= m1Indicators.bb.lower,
@@ -68,19 +94,18 @@ function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnaly
     // Higher timeframe trend confirmation
     trendAnalysis.overallTrend === "bullish",
 
-    // M15 confirmation - trending momentum
-    m15Indicators.rsi > 50 && m15Indicators.macd.histogram > 0,
+    // M15 momentum confirmation
+    isBullishMomentum(m15Indicators),
   ];
+}
 
-  // Sell signal conditions with enhanced checks
-  const sellConditions = [
-    // MA crossover (5 MA crosses below 20 MA) with recent price confirmation
-    m1Indicators.maFast < m1Indicators.maSlow &&
-      m1Data[m1Data.length - 2].close > m1Indicators.maSlow &&
-      m1Data[m1Data.length - 1].close < m1Data[m1Data.length - 2].close,
+function generateSellConditions(m1Data, m1Indicators, m15Indicators, trendAnalysis, ask) {
+  return [
+    // MA crossover with price confirmation
+    isBearishMACross(m1Data, m1Indicators),
 
-    // RSI above 70 (overbought)
-    m1Indicators.rsi > 70,
+    // RSI overbought condition
+    m1Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
 
     // Price at upper Bollinger Band
     ask >= m1Indicators.bb.upper,
@@ -88,57 +113,33 @@ function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnaly
     // Higher timeframe trend confirmation
     trendAnalysis.overallTrend === "bearish",
 
-    // M15 confirmation - trending momentum
-    m15Indicators.rsi < 50 && m15Indicators.macd.histogram < 0,
+    // M15 momentum confirmation
+    isBearishMomentum(m15Indicators),
   ];
+}
 
-  // Enhanced logging for debugging
-  console.log("\nBuy Conditions:");
-  buyConditions.forEach((condition, i) => {
-    console.log(
-      `  ${i + 1}. ${condition ? "✅" : "❌"} ${
-        i === 0 ? "MA Crossover" : i === 1 ? "RSI Oversold" : i === 2 ? "BB Lower Touch" : i === 3 ? "Trend Bullish" : "M15 Confirmation"
-      }`
-    );
-  });
+function isBullishMACross(m1Data, m1Indicators) {
+  return (
+    m1Indicators.maFast > m1Indicators.maSlow &&
+    m1Data[m1Data.length - 2].close < m1Indicators.maSlow &&
+    m1Data[m1Data.length - 1].close > m1Data[m1Data.length - 2].close
+  );
+}
 
-  console.log("\nSell Conditions:");
-  sellConditions.forEach((condition, i) => {
-    console.log(
-      `  ${i + 1}. ${condition ? "✅" : "❌"} ${
-        i === 0 ? "MA Crossover" : i === 1 ? "RSI Overbought" : i === 2 ? "BB Upper Touch" : i === 3 ? "Trend Bearish" : "M15 Confirmation"
-      }`
-    );
-  });
+function isBearishMACross(m1Data, m1Indicators) {
+  return (
+    m1Indicators.maFast < m1Indicators.maSlow &&
+    m1Data[m1Data.length - 2].close > m1Indicators.maSlow &&
+    m1Data[m1Data.length - 1].close < m1Data[m1Data.length - 2].close
+  );
+}
 
-  // Calculate signal scores - require more conditions for stronger signals
-  const buyScore = buyConditions.filter(Boolean).length;
-  const sellScore = sellConditions.filter(Boolean).length;
+function isBullishMomentum(indicators) {
+  return indicators.rsi > 50 && indicators.macd.histogram > 0;
+}
 
-  // Generate signal only if we have strong confirmation (3 out of 5 conditions)
-  let signal = null;
-  if (buyScore >= 3) signal = "buy";
-  if (sellScore >= 3) signal = "sell";
-
-  // Log final decision
-  console.log("\nSignal Analysis:");
-  console.log(`Buy Score: ${buyScore}/5`);
-  console.log(`Sell Score: ${sellScore}/5`);
-  console.log(`Final Signal: ${signal || "NONE"}\n`);
-
-  return {
-    signal,
-    buyScore,
-    sellScore,
-    metrics: {
-      rsi: m1Indicators.rsi,
-      maFast: m1Indicators.maFast,
-      maSlow: m1Indicators.maSlow,
-      bbUpper: m1Indicators.bb.upper,
-      bbLower: m1Indicators.bb.lower,
-      macdHistogram: m1Indicators.macd?.histogram,
-    },
-  };
+function isBearishMomentum(indicators) {
+  return indicators.rsi < 50 && indicators.macd.histogram < 0;
 }
 
 class TradingService {
@@ -195,58 +196,61 @@ class TradingService {
   async executeTrade(signal, symbol, bid, ask, metrics) {
     console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
 
-    // Calculate position parameters
-    const stopLossPips = 40; // Base stop loss
-    const takeProfitPips = stopLossPips * TAKE_PROFIT_FACTOR; // Default 2x stop loss
-    const pipValue = symbol.includes("JPY") ? 0.01 : 0.0001;
-    
-    // Calculate entry, stop loss and take profit prices
-    const entryPrice = signal === "buy" ? ask : bid;
-    const stopLossPrice = signal === "buy" 
-      ? (entryPrice - stopLossPips * pipValue).toFixed(5)
-      : (entryPrice + stopLossPips * pipValue).toFixed(5);
-    const takeProfitPrice = signal === "buy"
-      ? (entryPrice + takeProfitPips * pipValue).toFixed(5)
-      : (entryPrice - takeProfitPips * pipValue).toFixed(5);
-
-    // Calculate position size based on risk
-    const size = positionSize(this.accountBalance, entryPrice, stopLossPips, this.profitThresholdReached, symbol);
+    const { stopLossPrice, takeProfitPrice, stopLossPips, size } = this.calculateTradeParameters(signal, symbol, bid, ask);
 
     console.log("\n=== Position Parameters ===");
+    this.logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips);
+
+    try {
+      return await this.executePosition(signal, symbol, size, stopLossPrice, takeProfitPrice);
+    } catch (error) {
+      this.handleTradeError(error, symbol);
+      throw error;
+    }
+  }
+
+  calculateTradeParameters(signal, symbol, bid, ask) {
+    const stopLossPips = ATR_CONFIG.PERIOD;
+    const takeProfitPips = stopLossPips * riskConfig.REWARD_RISK_RATIO;
+    const pipValue = symbol.includes("JPY") ? 0.01 : 0.0001;
+
+    const entryPrice = signal === "buy" ? ask : bid;
+    const stopLossPrice = this.calculateStopLossPrice(signal, entryPrice, stopLossPips, pipValue);
+    const takeProfitPrice = this.calculateTakeProfitPrice(signal, entryPrice, takeProfitPips, pipValue);
+    const size = this.calculatePositionSize(entryPrice, stopLossPips);
+
+    return { stopLossPrice, takeProfitPrice, stopLossPips, size };
+  }
+
+  logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips) {
     console.log(`Entry: Market ${signal.toUpperCase()} at ~${entryPrice}`);
     console.log(`Stop Loss: ${stopLossPrice} (${stopLossPips} pips)`);
     console.log(`Take Profit: ${takeProfitPrice} (${takeProfitPips} pips)`);
     console.log(`Position Size: ${size} lots`);
     console.log(`Risk per trade: $${(this.accountBalance * RISK_PER_TRADE).toFixed(2)}`);
+  }
 
-    // Place the position with market execution
-    try {
-      console.log(`Creating ${signal} position for ${symbol} at market price...`);
-      
-      // Add to open trades list before placing the order
-      this.setOpenTrades([...this.openTrades, symbol]);
+  async executePosition(signal, symbol, size, stopLossPrice, takeProfitPrice) {
+    console.log(`Creating ${signal} position for ${symbol} at market price...`);
 
-      const positionResult = await placePosition(
-        symbol,
-        signal,
-        size,
-        null, // Market order, no entry price needed
-        stopLossPrice,
-        takeProfitPrice
-      );
+    // Add to open trades list before placing the order
+    this.setOpenTrades([...this.openTrades, symbol]);
 
-      if (positionResult && positionResult.dealReference) {
-        console.log(`✅ Position opened successfully. Deal reference: ${positionResult.dealReference}`);
-        return positionResult;
-      } else {
-        console.error("❌ Position creation failed: No deal reference received");
-        this.setOpenTrades(this.openTrades.filter(t => t !== symbol));
-      }
-    } catch (error) {
-      console.error(`❌ Error creating position for ${symbol}:`, error.message);
-      // Remove from open trades if position creation failed
-      this.setOpenTrades(this.openTrades.filter(t => t !== symbol));
-      throw error;
+    const positionResult = await placePosition(
+      symbol,
+      signal,
+      size,
+      null, // Market order, no entry price needed
+      stopLossPrice,
+      takeProfitPrice
+    );
+
+    if (positionResult && positionResult.dealReference) {
+      console.log(`✅ Position opened successfully. Deal reference: ${positionResult.dealReference}`);
+      return positionResult;
+    } else {
+      console.error("❌ Position creation failed: No deal reference received");
+      this.setOpenTrades(this.openTrades.filter((t) => t !== symbol));
     }
   }
 

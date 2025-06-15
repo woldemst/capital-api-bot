@@ -1,4 +1,7 @@
-import { API_KEY, API_PATH, BASE_URL, SYMBOLS, TIMEFRAMES, PROFIT_THRESHOLD, MAX_OPEN_TRADES, BACKTEST_MODE } from "./config.js";
+import { API, TRADING, MODE } from "./config.js";
+
+const { SYMBOLS, TIMEFRAMES, MAX_POSITIONS} = TRADING;
+const { BACKTEST_MODE } = MODE;
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import {
   startSession,
@@ -27,7 +30,7 @@ class TradingBot {
     try {
       await startSession();
       const tokens = getSessionTokens();
-      await getMarkets();
+      // await getMarkets();
 
       if (!BACKTEST_MODE) {
         await this.startLiveTrading(tokens);
@@ -155,7 +158,7 @@ class TradingBot {
         },
         m1Data: m1Data.prices,
       },
-      MAX_OPEN_TRADES
+      MAX_POSITIONS
     );
   }
 

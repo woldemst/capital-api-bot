@@ -1,14 +1,16 @@
-import { BASE_URL, API_PATH, API_KEY, API_IDENTIFIER, API_PASSWORD, BACKTEST_MODE, SYMBOLS, TIMEFRAMES } from "./config.js";
+import { API, TRADING } from "./config.js";
 import axios from "axios";
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
 
+const { SYMBOLS, TIMEFRAMES } = TRADING;
+
 // Base headers for API requests
 export const getHeaders = (includeContentType = false) => {
   const baseHeaders = {
     "X-SECURITY-TOKEN": xsecurity,
-    "X-CAP-API-KEY": API_KEY,
+    "X-CAP-API-KEY": API.KEY,
     CST: cst,
   };
 
@@ -19,10 +21,10 @@ export const getHeaders = (includeContentType = false) => {
 export const startSession = async () => {
   try {
     const response = await axios.post(
-      `${BASE_URL}${API_PATH}/session`,
+      `${API.BASE_URL}/session`,
       {
-        identifier: API_IDENTIFIER,
-        password: API_PASSWORD,
+        identifier: API.IDENTIFIER,
+        password: API.PASSWORD,
         encryptedPassword: false,
       },
       {
@@ -59,7 +61,7 @@ export const startSession = async () => {
 export const refreshSession = async () => {
   if (Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/session`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
     sessionStartTime = Date.now();
@@ -73,7 +75,7 @@ export const refreshSession = async () => {
 // Get session details
 export const getSeesionDetails = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/session`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
     console.log("session details:", response.data);
   } catch (error) {
     console.error("session details:", error.response?.data || error.message);
@@ -83,7 +85,7 @@ export const getSeesionDetails = async () => {
 // Get account information
 export const getAccountInfo = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/accounts`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/accounts`, { headers: getHeaders() });
     // console.log("<========= Account info received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
@@ -95,7 +97,7 @@ export const getAccountInfo = async () => {
 // Get open positions
 export const getOpenPositions = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/positions`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
     console.log("<========= Open positions received =========>\n", response.data, "\n\n");
     return response.data;
   } catch (error) {
@@ -109,7 +111,7 @@ export const getActivityHistory = async (from, to) => {
   try {
     // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
     console.log(`<========= Getting activity history from ${from} to ${to} =========>\n`);
-    const response = await axios.get(`${BASE_URL}${API_PATH}/history/transactions`, {
+    const response = await axios.get(`${API.BASE_URL}/history/transactions`, {
       headers: getHeaders(),
       params: {
         from,
@@ -161,7 +163,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
     console.log(`from=${from} to=${to} in resolution=${resolution}`);
 
     const response = await axios.get(
-      `${BASE_URL}${API_PATH}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`,
+      `${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`,
       {
         headers: getHeaders(true),
       }
@@ -202,7 +204,7 @@ export async function getHistorical(symbol, resolution, count, from, to) {
 // Get available markets
 export const getMarkets = async () => {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
     console.log("<========= Markets received =========>\n", response.data, "\n\n");
     // Ensure we return an array of markets
     return Array.isArray(response.data.markets) ? response.data.markets : [];
@@ -215,7 +217,7 @@ export const getMarkets = async () => {
 // Get market details for a symbol
 export async function getMarketDetails(symbol) {
   try {
-    const response = await axios.get(`${BASE_URL}${API_PATH}/markets/${symbol}`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
     console.log(`Market details for ${symbol}:`, response.data);
     return response.data;
   } catch (error) {
@@ -245,7 +247,7 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
       // "quoteId": null
     };
 
-    const response = await axios.post(`${BASE_URL}${API_PATH}/workingorders`, order, {
+    const response = await axios.post(`${API.BASE_URL}/workingorders`, order, {
       headers: getHeaders(true),
     });
 
@@ -266,7 +268,7 @@ export async function updateTrailingStop(positionId, stopLevel) {
     console.log(`Updating trailing stop for position ${positionId} to ${stopLevel}`);
 
     const response = await axios.put(
-      `${BASE_URL}${API_PATH}/positions/${positionId}`,
+      `${API.BASE_URL}/positions/${positionId}`,
       {
         trailingStop: true,
         stopLevel,
@@ -311,7 +313,7 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
     console.log('Sending position request:', position);
 
     const response = await axios.post(
-      `${BASE_URL}${API_PATH}/positions`,
+      `${API.BASE_URL}/positions`,
       position,
       { headers: getHeaders(true) }
     );
