@@ -38,34 +38,60 @@ export const TRADING = {
 
 // Technical Analysis Configuration
 export const ANALYSIS = {
-  // Timeframe strategy
-  TREND_TIMEFRAME: 'HOUR_4',
-  SETUP_TIMEFRAME: 'HOUR',
-  ENTRY_TIMEFRAME: 'MINUTE_15',
+  // Multi-Timeframe Strategy
+  TIMEFRAMES: {
+    TREND: 'HOUR_4',    // Trend direction
+    SETUP: 'HOUR',      // Trade setup
+    ENTRY: 'MINUTE_15'  // Entry/Exit timing
+  },
   
-  // Moving averages
-  MA_FAST: 5,
-  MA_SLOW: 20,
-  MA_TREND: 50,
-  MA_LONG: 200,
+  // EMAs for trend and entry
+  EMA: {
+    TREND: {
+      FAST: 50,
+      SLOW: 200
+    },
+    ENTRY: {
+      FAST: 9,
+      SLOW: 21
+    }
+  },
   
   // RSI settings
-  RSI_PERIOD: 14,
-  RSI_OVERBOUGHT: 70,
-  RSI_OVERSOLD: 30,
+  RSI: {
+    PERIOD: 14,
+    OVERBOUGHT: 70,
+    OVERSOLD: 30,
+    EXIT_OVERBOUGHT: 65,
+    EXIT_OVERSOLD: 35
+  },
   
   // MACD settings
-  MACD_FAST: 12,
-  MACD_SLOW: 26,
-  MACD_SIGNAL: 9,
+  MACD: {
+    FAST: 12,
+    SLOW: 26,
+    SIGNAL: 9
+  },
   
   // Bollinger Bands
-  BB_PERIOD: 20,
-  BB_STD_DEV: 2,
+  BOLLINGER: {
+    PERIOD: 20,
+    STD_DEV: 2
+  },
   
-  // ATR for stop loss
-  ATR_PERIOD: 14,
-  ATR_MULTIPLIER: 1.5
+  // ATR for stop loss and trailing
+  ATR: {
+    PERIOD: 14,
+    STOP_MULTIPLIER: 1.5,
+    TRAILING_MULTIPLIER: 1.0
+  },
+  
+  // Risk Management
+  RISK: {
+    PER_TRADE: 0.02,        // 2% risk per trade
+    REWARD_RATIO: 2.0,      // Target 2:1 reward/risk
+    PARTIAL_TAKE_PROFIT: 0.5 // Take 50% profit at 1:1
+  }
 };
 
 // Trading Sessions (UTC times)

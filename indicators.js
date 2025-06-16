@@ -17,7 +17,7 @@ const {
   RSI_OVERBOUGHT,
   RSI_OVERSOLD,
 
-  
+
 } = ANALYSIS;
 
 export async function calcIndicators(bars) {
@@ -32,17 +32,32 @@ export async function calcIndicators(bars) {
   // Ensure we have enough data points
   const minLength = Math.max(BOLLINGER.PERIOD, bars.length);
 
+  // Calculate EMAs for trend and entry
+  const ema50 = EMA.calculate({ period: 50, values: closes });
+  const ema200 = EMA.calculate({ period: 200, values: closes });
+  const ema9 = EMA.calculate({ period: 9, values: closes });
+  const ema21 = EMA.calculate({ period: 21, values: closes });
+
   return {
-    maFast: SMA.calculate({ period: MA.FAST, values: closes }).slice(-minLength).pop(),
-    maSlow: SMA.calculate({ period: MA.SLOW, values: closes }).slice(-minLength).pop(),
-    ema5: EMA.calculate({ period: MA.FAST, values: closes }).pop(),
-    ema20: EMA.calculate({ period: MA.SLOW, values: closes }).pop(),
+    // Trend EMAs
+    ema50: ema50.pop(),
+    ema200: ema200.pop(),
+    
+    // Entry EMAs
+    ema9: ema9.pop(),
+    ema21: ema21.pop(),
+    
+    // RSI
     rsi: RSI.calculate({ period: RSI_CONFIG.PERIOD, values: closes }).pop(),
+    
+    // Bollinger Bands
     bb: BollingerBands.calculate({
       period: BOLLINGER.PERIOD,
       stdDev: BOLLINGER.STD_DEV,
       values: closes,
     }).pop(),
+    
+    // MACD
     macd: MACD.calculate({
       fastPeriod: MACD_CONFIG.FAST,
       slowPeriod: MACD_CONFIG.SLOW,
@@ -51,6 +66,13 @@ export async function calcIndicators(bars) {
       SimpleMAOscillator: false,
       SimpleMASignal: false,
     }).pop(),
+
+    // Store trend state
+    isBullishTrend: ema50[ema50.length - 1] > ema200[ema200.length - 1],
+    isBullishCross: ema9[ema9.length - 1] > ema21[ema21.length - 1] && 
+                    ema9[ema9.length - 2] <= ema21[ema21.length - 2],
+    isBearishCross: ema9[ema9.length - 1] < ema21[ema21.length - 1] && 
+                    ema9[ema9.length - 2] >= ema21[ema21.length - 2],
   };
 }
 
