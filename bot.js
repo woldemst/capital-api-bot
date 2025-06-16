@@ -48,7 +48,6 @@ class TradingBot {
   // Start live trading mode
   async startLiveTrading(tokens) {
     this.setupWebSocket(tokens);
-    // this.startSessionRefresh();
     this.startSessionPing();
     this.startAnalysisInterval();
     this.isRunning = true;
@@ -59,7 +58,7 @@ class TradingBot {
     webSocketService.connect(tokens, SYMBOLS, (data) => {
       try {
         const message = JSON.parse(data.toString());
-        if (message.payload?.epic) {
+        if (message.payload?.epic) {          
           this.latestCandles[message.payload.epic] = message.payload;
         }
       } catch (error) {
@@ -78,17 +77,6 @@ class TradingBot {
         console.error("Session ping failed:", error.message);
       }
     }, this.pingInterval);
-  }
-  // Start session refresh interval
-  startSessionRefresh() {
-    this.sessionRefreshInterval = setInterval(async () => {
-      try {
-        await refreshSession();
-        console.log("Session refreshed successfully");
-      } catch (error) {
-        console.error("Session refresh failed:", error.message);
-      }
-    }, 9 * 60 * 1000);
   }
 
   // Start analysis interval
@@ -127,7 +115,7 @@ class TradingBot {
   // Get historical data for all timeframes
   async fetchHistoricalData(symbol) {
     const delays = [1000, 1000, 1000]; // Delays between requests
-    const timeframes = ["MINUTE", "MINUTE_5", "MINUTE_15"];
+    const timeframes = ["HOUR_4", "HOUR", "MINUTE_15"];
 
     const results = [];
     for (let i = 0; i < timeframes.length; i++) {
@@ -137,8 +125,8 @@ class TradingBot {
     }
 
     return {
-      m1Data: results[0],
-      m5Data: results[1],
+      h4Data: results[0],
+      h1Data: results[1],
       m15Data: results[2],
     };
   }
@@ -152,15 +140,19 @@ class TradingBot {
     console.log(`Analyzing ${symbol}...`);
 
     // Fetch and calculate all required data
-    const { m1Data, m5Data, m15Data } = await this.fetchHistoricalData(symbol);
+    const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);
 
     const indicators = {
-      m1: await calcIndicators(m1Data.prices),
-      m5: await calcIndicators(m5Data.prices),
-      m15: await calcIndicators(m15Data.prices),
+      h4: await calcIndicators(h4Data.prices),  // Trend direction
+      h1: await calcIndicators(h1Data.prices),  // Setup confirmation
+      m15: await calcIndicators(m15Data.prices), // Entry/Exit timing
     };
 
-    const trendAnalysis = await analyzeTrend(symbol, getHistorical);
+    // We don't need separate trend analysis anymore as it's part of the H4 indicators
+    const trendAnalysis = {
+      h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
+      h4Indicators: indicators.h4
+    };
 
     // Process trading decision
     await tradingService.processPrice(
@@ -170,7 +162,9 @@ class TradingBot {
           indicators,
           trendAnalysis,
         },
-        m1Data: m1Data.prices,
+        h4Data: h4Data.prices,
+        h1Data: h1Data.prices,
+        m15Data: m15Data.prices,
       },
       MAX_POSITIONS
     );
