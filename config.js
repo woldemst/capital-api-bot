@@ -78,7 +78,8 @@ export const SESSIONS = {
 
 // Mode Configuration
 export const MODE = {
-  BACKTEST_MODE: false
+  BACKTEST_MODE: false,
+  DEV_MODE: true, // Set to false in production
 };
 
 // For convenience in error messages and logging
