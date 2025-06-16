@@ -1,18 +1,18 @@
 import WebSocket from "ws";
-import { API } from "../config.js";
+import { API, MODE } from "../config.js";
 
 const { WS_URL, KEY: API_KEY } = API;
 
 class WebSocketService {
   constructor() {
     this.ws = null;
-    this.pingInterval = null;
+    // this.pingInterval = MODE.DEV_MODE === true ? 1000 : 9 * 60 * 1000; // Ping every 9 minutes in production, 1 second in dev mode
+    
   }
 
   connect(tokens, symbols, messageHandler) {
     const { cst, xsecurity } = tokens;
-    // Remove trailing slash if present and add the endpoint
-    const wsUrl = `${WS_URL.replace(/\/$/, '')}/connect`;
+    const wsUrl = `${WS_URL}/connect`;
 
     const connectWS = () => {
       this.ws = new WebSocket(wsUrl, {
@@ -35,11 +35,11 @@ class WebSocketService {
         };
         this.ws.send(JSON.stringify(subscriptionMessage));
 
-        this.pingInterval = setInterval(() => {
+        setInterval(() => {
           if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.ping();
           }
-        }, 9 * 60 * 1000);
+        }, this.pingInterval);
       });
 
       this.ws.on("message", messageHandler);
@@ -52,6 +52,7 @@ class WebSocketService {
         console.log("WebSocket disconnected, attempting to reconnect in 5s...");
         clearInterval(this.pingInterval);
         setTimeout(connectWS, 5000);
+     
       });
     };
 

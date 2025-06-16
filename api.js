@@ -57,6 +57,19 @@ export const startSession = async () => {
   }
 };
 
+// ping
+export const pingSession = async () => {
+  try {
+    const response = await axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() });
+    console.log("Ping response:", response.data);
+    console.log(`securityToken: ${xsecurity}`);
+    console.log(`CST: ${cst}`);
+  } catch (error) {
+    console.error(`Error pinging session: ${error.message}`);
+    throw error;
+  }
+};
+
 // Refresh session tokens
 export const refreshSession = async () => {
   if (Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
@@ -162,12 +175,9 @@ export async function getHistorical(symbol, resolution, count, from, to) {
 
     console.log(`from=${from} to=${to} in resolution=${resolution}`);
 
-    const response = await axios.get(
-      `${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`,
-      {
-        headers: getHeaders(true),
-      }
-    );
+    const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
+      headers: getHeaders(true),
+    });
 
     // Log prices for each candle
     // if (response.data.prices && response.data.prices.length > 0) {
@@ -307,22 +317,17 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
       guaranteedStop: false,
       stopLevel: stopLevel ? parseFloat(stopLevel).toFixed(5) : undefined,
       profitLevel: profitLevel ? parseFloat(profitLevel).toFixed(5) : undefined,
-      forceOpen: true
+      forceOpen: true,
     };
 
-    console.log('Sending position request:', position);
+    console.log("Sending position request:", position);
 
-    const response = await axios.post(
-      `${API.BASE_URL}/positions`,
-      position,
-      { headers: getHeaders(true) }
-    );
+    const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
 
-    console.log('Position created successfully:', response.data);
+    console.log("Position created successfully:", response.data);
     return response.data;
-
   } catch (error) {
-    console.error('Position creation error:', error.response?.data || error.message);
+    console.error("Position creation error:", error.response?.data || error.message);
     throw error;
   }
 }

@@ -1,11 +1,12 @@
 import { API, TRADING, MODE } from "./config.js";
 
-const { SYMBOLS, TIMEFRAMES, MAX_POSITIONS} = TRADING;
+const { SYMBOLS, TIMEFRAMES, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import {
   startSession,
   refreshSession,
+  pingSession,
   getHistorical,
   getAccountInfo,
   getOpenPositions,
@@ -23,6 +24,7 @@ class TradingBot {
     this.isRunning = false;
     this.analysisInterval = null;
     this.sessionRefreshInterval = null;
+    this.pingInterval = 9 * 60 * 1000;
   }
 
   // Initialize the bot and start necessary services
@@ -46,7 +48,8 @@ class TradingBot {
   // Start live trading mode
   async startLiveTrading(tokens) {
     this.setupWebSocket(tokens);
-    this.startSessionRefresh();
+    // this.startSessionRefresh();
+    this.startSessionPing();
     this.startAnalysisInterval();
     this.isRunning = true;
   }
@@ -65,6 +68,17 @@ class TradingBot {
     });
   }
 
+  // Start session ping interval
+  startSessionPing() {
+    this.sessionPingInterval = setInterval(async () => {
+      try {
+        await pingSession();
+        console.log("Session pinged successfully");
+      } catch (error) {
+        console.error("Session ping failed:", error.message);
+      }
+    }, this.pingInterval);
+  }
   // Start session refresh interval
   startSessionRefresh() {
     this.sessionRefreshInterval = setInterval(async () => {
@@ -86,7 +100,7 @@ class TradingBot {
       } catch (error) {
         console.error("Analysis interval error:", error);
       }
-    }, 15 * 60 * 1000);   
+    }, 15 * 60 * 1000);
   }
 
   // Update account information and positions
