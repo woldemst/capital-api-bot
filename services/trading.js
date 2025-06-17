@@ -100,10 +100,10 @@ function evaluateSignals(buyConditions, sellConditions) {
   const sellScore = sellConditions.filter(Boolean).length;
   console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
   let signal = null;
-  // For debugging: relax threshold to 4/6 conditions
-  if (buyScore >= 4) {
+  // Relaxed: only 3/6 conditions needed for a signal
+  if (buyScore >= 3) {
     signal = "buy";
-  } else if (sellScore >= 4) {
+  } else if (sellScore >= 3) {
     signal = "sell";
   }
   return { signal, buyScore, sellScore };
@@ -149,11 +149,17 @@ class TradingService {
    */
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
+    // Log all indicator values for debugging
     console.log(`[Signal] Generating signal for ${symbol}`);
+    console.log("[Indicators] H4:", indicators.h4);
+    console.log("[Indicators] H1:", indicators.h1);
+    console.log("[Indicators] M15:", indicators.m15);
     const trendAnalysis = message.payload.trendAnalysis;
     const result = generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
+    } else {
+      console.log(`[Signal] Signal for ${symbol}: ${result.signal.toUpperCase()}`);
     }
     return result;
   }
@@ -276,21 +282,20 @@ class TradingService {
         console.log(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
-      // FIX: Define hour before using it
       const hour = new Date().getUTCHours();
-      // Trading hours: 6-22 UTC (adjust as needed)
       if (hour < 6 || hour > 22) {
         console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
         return;
       }
-      // Extract bid/ask
       const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
       const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
       if (!this.validatePrices(bid, ask, symbol)) return;
-      // Get indicators and generate signal
       const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
       if (signal) {
+        console.log(`[ProcessPrice] Attempting to execute trade for ${symbol} (${signal})`);
         await this.executeTrade(signal, symbol, bid, ask);
+      } else {
+        console.log(`[ProcessPrice] No trade executed for ${symbol}.`);
       }
     } catch (error) {
       console.error(`[ProcessPrice] Error for ${symbol}:`, error.message);
