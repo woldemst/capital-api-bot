@@ -50,13 +50,13 @@ function generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicato
     signal,
     buyScore,
     sellScore,
-    metrics: extractMetrics(m15Indicators),
+    // metrics: extractMetrics(m15Indicators),
   };
 }
 
 function validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
   if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
-    console.log('[Signal] Missing required indicators data');
+    console.log("[Signal] Missing required indicators data");
     return false;
   }
   return true;
@@ -64,11 +64,11 @@ function validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators
 
 function logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
   console.log(`\n=== Analyzing ${symbol} ===`);
-  console.log('Current price:', { bid, ask });
-  console.log('[H4] EMA50:', h4Indicators.ema50, 'EMA200:', h4Indicators.ema200, 'MACD:', h4Indicators.macd?.histogram);
-  console.log('[H1] EMA9:', h1Indicators.ema9, 'EMA21:', h1Indicators.ema21, 'RSI:', h1Indicators.rsi);
-  console.log('[M15] EMA9:', m15Indicators.ema9, 'EMA21:', m15Indicators.ema21, 'RSI:', m15Indicators.rsi, 'BB:', m15Indicators.bb);
-  console.log('Trend:', trendAnalysis.h4Trend);
+  console.log("Current price:", { bid, ask });
+  console.log("[H4] EMA50:", h4Indicators.ema50, "EMA200:", h4Indicators.ema200, "MACD:", h4Indicators.macd?.histogram);
+  console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
+  console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
+  console.log("Trend:", trendAnalysis.h4Trend);
 }
 
 function generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
@@ -77,8 +77,8 @@ function generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendA
     trendAnalysis.h4Trend === "bullish",
     h1Indicators.ema9 > h1Indicators.ema21, // H1 setup confirmation
     m15Indicators.isBullishCross, // EMA9 crosses above EMA21
-    m15Indicators.rsi < 35,       // RSI oversold
-    bid <= m15Indicators.bb?.lower // Price at/below lower BB
+    m15Indicators.rsi < 35, // RSI oversold
+    bid <= m15Indicators.bb?.lower, // Price at/below lower BB
   ];
 }
 function generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
@@ -87,9 +87,25 @@ function generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trend
     trendAnalysis.h4Trend === "bearish",
     h1Indicators.ema9 < h1Indicators.ema21, // H1 setup confirmation
     m15Indicators.isBearishCross, // EMA9 crosses below EMA21
-    m15Indicators.rsi > 65,       // RSI overbought
-    ask >= m15Indicators.bb?.upper // Price at/above upper BB
+    m15Indicators.rsi > 65, // RSI overbought
+    ask >= m15Indicators.bb?.upper, // Price at/above upper BB
   ];
+}
+
+/**
+ * Evaluates buy and sell conditions and returns the signal and scores.
+ * Returns: { signal: "buy" | "sell" | null, buyScore: number, sellScore: number }
+ */
+function evaluateSignals(buyConditions, sellConditions) {
+  const buyScore = buyConditions.filter(Boolean).length;
+  const sellScore = sellConditions.filter(Boolean).length;
+  let signal = null;
+  if (buyScore === buyConditions.length && buyScore > 0) {
+    signal = "buy";
+  } else if (sellScore === sellConditions.length && sellScore > 0) {
+    signal = "sell";
+  }
+  return { signal, buyScore, sellScore };
 }
 
 class TradingService {
@@ -103,11 +119,21 @@ class TradingService {
     this.orderAttempts = new Map();
   }
 
-  setAccountBalance(balance) { this.accountBalance = balance; }
-  setOpenTrades(trades) { this.openTrades = trades; }
-  setProfitThresholdReached(reached) { this.profitThresholdReached = reached; }
-  setSymbolMinSizes(minSizes) { this.symbolMinSizes = minSizes; }
-  isSymbolTraded(symbol) { return this.openTrades.includes(symbol); }
+  setAccountBalance(balance) {
+    this.accountBalance = balance;
+  }
+  setOpenTrades(trades) {
+    this.openTrades = trades;
+  }
+  setProfitThresholdReached(reached) {
+    this.profitThresholdReached = reached;
+  }
+  setSymbolMinSizes(minSizes) {
+    this.symbolMinSizes = minSizes;
+  }
+  isSymbolTraded(symbol) {
+    return this.openTrades.includes(symbol);
+  }
 
   validatePrices(bid, ask, symbol) {
     if (typeof bid !== "number" || typeof ask !== "number" || isNaN(bid) || isNaN(ask)) {
@@ -145,22 +171,24 @@ class TradingService {
    * Calculate trade parameters (stop, target, size, trailing)
    */
   async calculateTradeParameters(signal, symbol, bid, ask) {
-    const price = signal === 'buy' ? ask : bid;
+    const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
     const stopLossPips = 1.5 * atr;
-    const stopLossPrice = signal === 'buy' ? price - stopLossPips : price + stopLossPips;
+    const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
     const takeProfitPips = 2 * stopLossPips;
-    const takeProfitPrice = signal === 'buy' ? price + takeProfitPips : price - takeProfitPips;
+    const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
     const size = positionSize(this.accountBalance, price, stopLossPips, symbol);
     const trailingStopParams = {
-      activationPrice: signal === 'buy' ? price + (stopLossPips * 0.5) : price - (stopLossPips * 0.5),
-      trailingDistance: atr
+      activationPrice: signal === "buy" ? price + stopLossPips * 0.5 : price - stopLossPips * 0.5,
+      trailingDistance: atr,
     };
     return { size, stopLossPrice, takeProfitPrice, stopLossPips, takeProfitPips, trailingStopParams };
   }
 
   logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips) {
-    console.log(`[TradeParams] Entry: ${signal.toUpperCase()} | Size: ${size} | SL: ${stopLossPrice} (${stopLossPips}) | TP: ${takeProfitPrice}`);
+    console.log(
+      `[TradeParams] Entry: ${signal.toUpperCase()} | Size: ${size} | SL: ${stopLossPrice} (${stopLossPips}) | TP: ${takeProfitPrice}`
+    );
   }
 
   /**
@@ -206,7 +234,7 @@ class TradingService {
       for (let i = 1; i < prices.length; i++) {
         const high = prices[i].highPrice?.ask || prices[i].high;
         const low = prices[i].lowPrice?.bid || prices[i].low;
-        const prevClose = prices[i-1].closePrice?.bid || prices[i-1].close;
+        const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
         const tr1 = high - low;
         const tr2 = Math.abs(high - prevClose);
         const tr3 = Math.abs(low - prevClose);
@@ -216,7 +244,7 @@ class TradingService {
       return atr;
     } catch (error) {
       console.error("[ATR] Error:", error);
-      return 0.0010;
+      return 0.001;
     }
   }
 
@@ -242,11 +270,13 @@ class TradingService {
         console.log(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
-      // Trading hours: 12-16 UTC (London/NY overlap)
-if (hour < 6 || hour > 22) {
-  console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
-  return;
-}
+      // FIX: Define hour before using it
+      const hour = new Date().getUTCHours();
+      // Trading hours: 6-22 UTC (adjust as needed)
+      if (hour < 6 || hour > 22) {
+        console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
+        return;
+      }
       // Extract bid/ask
       const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
       const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
