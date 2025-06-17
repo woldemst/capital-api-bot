@@ -1,11 +1,10 @@
-import { API, TRADING, MODE } from "./config.js";
+ import { API, TRADING, MODE, DEV, ANALYSIS } from "./config.js";
 
 const { SYMBOLS, TIMEFRAMES, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import {
   startSession,
-  refreshSession,
   pingSession,
   getHistorical,
   getAccountInfo,
@@ -58,7 +57,7 @@ class TradingBot {
     webSocketService.connect(tokens, SYMBOLS, (data) => {
       try {
         const message = JSON.parse(data.toString());
-        if (message.payload?.epic) {          
+        if (message.payload?.epic) {
           this.latestCandles[message.payload.epic] = message.payload;
         }
       } catch (error) {
@@ -81,6 +80,8 @@ class TradingBot {
 
   // Start analysis interval
   startAnalysisInterval() {
+    // Use dev interval if in DEV_MODE
+    const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
     this.analysisInterval = setInterval(async () => {
       try {
         await this.updateAccountInfo();
@@ -88,7 +89,7 @@ class TradingBot {
       } catch (error) {
         console.error("Analysis interval error:", error);
       }
-    }, 15 * 60 * 1000);
+    }, interval);
   }
 
   // Update account information and positions
@@ -114,9 +115,12 @@ class TradingBot {
 
   // Get historical data for all timeframes
   async fetchHistoricalData(symbol) {
-    const delays = [1000, 1000, 1000]; // Delays between requests
-    const timeframes = ["HOUR_4", "HOUR", "MINUTE_15"];
+    // Use dev timeframes if in DEV_MODE
+    const timeframes = MODE.DEV_MODE
+      ? [DEV.TIMEFRAMES.TREND, DEV.TIMEFRAMES.SETUP, DEV.TIMEFRAMES.ENTRY]
+      : [ANALYSIS.TIMEFRAMES.TREND, ANALYSIS.TIMEFRAMES.SETUP, ANALYSIS.TIMEFRAMES.ENTRY];
 
+    const delays = [1000, 1000, 1000];
     const results = [];
     for (let i = 0; i < timeframes.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
@@ -143,15 +147,15 @@ class TradingBot {
     const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);
 
     const indicators = {
-      h4: await calcIndicators(h4Data.prices),  // Trend direction
-      h1: await calcIndicators(h1Data.prices),  // Setup confirmation
+      h4: await calcIndicators(h4Data.prices), // Trend direction
+      h1: await calcIndicators(h1Data.prices), // Setup confirmation
       m15: await calcIndicators(m15Data.prices), // Entry/Exit timing
     };
 
     // We don't need separate trend analysis anymore as it's part of the H4 indicators
     const trendAnalysis = {
       h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
-      h4Indicators: indicators.h4
+      h4Indicators: indicators.h4,
     };
 
     // Process trading decision
