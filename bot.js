@@ -1,4 +1,4 @@
- import { API, TRADING, MODE, DEV, ANALYSIS } from "./config.js";
+import { API, TRADING, MODE, DEV, ANALYSIS } from "./config.js";
 
 const { SYMBOLS, TIMEFRAMES, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
@@ -82,8 +82,10 @@ class TradingBot {
   startAnalysisInterval() {
     // Use dev interval if in DEV_MODE
     const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
+    console.log(`[Bot] Starting analysis interval: ${interval}s`);
     this.analysisInterval = setInterval(async () => {
       try {
+        console.log("[Bot] Running scheduled analysis...");
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
       } catch (error) {
@@ -115,19 +117,18 @@ class TradingBot {
 
   // Get historical data for all timeframes
   async fetchHistoricalData(symbol) {
-    // Use dev timeframes if in DEV_MODE
     const timeframes = MODE.DEV_MODE
       ? [DEV.TIMEFRAMES.TREND, DEV.TIMEFRAMES.SETUP, DEV.TIMEFRAMES.ENTRY]
       : [ANALYSIS.TIMEFRAMES.TREND, ANALYSIS.TIMEFRAMES.SETUP, ANALYSIS.TIMEFRAMES.ENTRY];
 
+    const count = 220; // Fetch enough candles for EMA200
     const delays = [1000, 1000, 1000];
     const results = [];
     for (let i = 0; i < timeframes.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
-      const data = await getHistorical(symbol, timeframes[i], 50);
+      const data = await getHistorical(symbol, timeframes[i], count);
       results.push(data);
     }
-
     return {
       h4Data: results[0],
       h1Data: results[1],
@@ -138,9 +139,9 @@ class TradingBot {
   // Analyze a single symbol
   async analyzeSymbol(symbol) {
     if (!this.latestCandles[symbol]) {
+      console.log(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
       return;
     }
-
     console.log(`Analyzing ${symbol}...`);
 
     // Fetch and calculate all required data

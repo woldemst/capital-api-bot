@@ -149,8 +149,7 @@ function formatIsoNoMs(date) {
   return iso.split(".")[0];
 }
 
-// Beispiel in getHistorical:
-export async function getHistorical(symbol, resolution, count, from, to) {
+export async function getHistorical(symbol, resolution, count, from = null, to = null) {
   try {
     const nowMs = Date.now();
     if (!to) {

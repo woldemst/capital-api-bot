@@ -22,17 +22,17 @@ const {
 
 export async function calcIndicators(bars) {
   if (!bars || !Array.isArray(bars) || bars.length === 0) {
+    console.warn("[Indicators] No bars provided for indicator calculation.");
     return {};
   }
 
-  const closes = bars.map((b) => {
-    return b.close || b.Close || b.closePrice?.bid || 0;
-  });
+  const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
 
-  // Ensure we have enough data points
-  const minLength = Math.max(BOLLINGER.PERIOD, bars.length);
+  // Defensive: Warn if not enough data for EMA200
+  if (closes.length < 200) {
+    console.warn(`[Indicators] Not enough candles for EMA200: got ${closes.length}, need 200`);
+  }
 
-  // Calculate EMAs for trend and entry
   const ema50 = EMA.calculate({ period: 50, values: closes });
   const ema200 = EMA.calculate({ period: 200, values: closes });
   const ema9 = EMA.calculate({ period: 9, values: closes });
@@ -40,23 +40,19 @@ export async function calcIndicators(bars) {
 
   return {
     // Trend EMAs
-    ema50: ema50.pop(),
-    ema200: ema200.pop(),
-    
+    ema50: ema50.length ? ema50[ema50.length - 1] : null,
+    ema200: ema200.length ? ema200[ema200.length - 1] : null,
     // Entry EMAs
-    ema9: ema9.pop(),
-    ema21: ema21.pop(),
-    
+    ema9: ema9.length ? ema9[ema9.length - 1] : null,
+    ema21: ema21.length ? ema21[ema21.length - 1] : null,
     // RSI
     rsi: RSI.calculate({ period: RSI_CONFIG.PERIOD, values: closes }).pop(),
-    
     // Bollinger Bands
     bb: BollingerBands.calculate({
       period: BOLLINGER.PERIOD,
       stdDev: BOLLINGER.STD_DEV,
       values: closes,
     }).pop(),
-    
     // MACD
     macd: MACD.calculate({
       fastPeriod: MACD_CONFIG.FAST,
@@ -66,13 +62,10 @@ export async function calcIndicators(bars) {
       SimpleMAOscillator: false,
       SimpleMASignal: false,
     }).pop(),
-
     // Store trend state
-    isBullishTrend: ema50[ema50.length - 1] > ema200[ema200.length - 1],
-    isBullishCross: ema9[ema9.length - 1] > ema21[ema21.length - 1] && 
-                    ema9[ema9.length - 2] <= ema21[ema21.length - 2],
-    isBearishCross: ema9[ema9.length - 1] < ema21[ema21.length - 1] && 
-                    ema9[ema9.length - 2] >= ema21[ema21.length - 2],
+    isBullishTrend: ema50.length && ema200.length ? ema50[ema50.length - 1] > ema200[ema200.length - 1] : false,
+    isBullishCross: ema9.length > 1 && ema21.length > 1 ? (ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2]) : false,
+    isBearishCross: ema9.length > 1 && ema21.length > 1 ? (ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2]) : false,
   };
 }
 

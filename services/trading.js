@@ -50,7 +50,6 @@ function generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicato
     signal,
     buyScore,
     sellScore,
-    // metrics: extractMetrics(m15Indicators),
   };
 }
 
@@ -99,10 +98,12 @@ function generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trend
 function evaluateSignals(buyConditions, sellConditions) {
   const buyScore = buyConditions.filter(Boolean).length;
   const sellScore = sellConditions.filter(Boolean).length;
+  console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
   let signal = null;
-  if (buyScore === buyConditions.length && buyScore > 0) {
+  // For debugging: relax threshold to 4/6 conditions
+  if (buyScore >= 4) {
     signal = "buy";
-  } else if (sellScore === sellConditions.length && sellScore > 0) {
+  } else if (sellScore >= 4) {
     signal = "sell";
   }
   return { signal, buyScore, sellScore };
@@ -148,14 +149,19 @@ class TradingService {
    */
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
+    console.log(`[Signal] Generating signal for ${symbol}`);
     const trendAnalysis = message.payload.trendAnalysis;
-    return generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
+    const result = generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
+    if (!result.signal) {
+      console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
+    }
+    return result;
   }
 
   /**
    * Main trade execution logic for the new strategy
    */
-  async executeTrade(signal, symbol, bid, ask, metrics) {
+  async executeTrade(signal, symbol, bid, ask) {
     console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
     const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
     this.logTradeParameters(signal, params.size, params.stopLossPrice, params.takeProfitPrice, params.stopLossPips);
@@ -282,9 +288,9 @@ class TradingService {
       const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
       if (!this.validatePrices(bid, ask, symbol)) return;
       // Get indicators and generate signal
-      const { signal, metrics } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
+      const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
       if (signal) {
-        await this.executeTrade(signal, symbol, bid, ask, metrics);
+        await this.executeTrade(signal, symbol, bid, ask);
       }
     } catch (error) {
       console.error(`[ProcessPrice] Error for ${symbol}:`, error.message);
