@@ -243,11 +243,10 @@ class TradingService {
         return;
       }
       // Trading hours: 12-16 UTC (London/NY overlap)
-      const hour = new Date().getUTCHours();
-      if (hour < 12 || hour > 16) {
-        console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
-        return;
-      }
+if (hour < 6 || hour > 22) {
+  console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
+  return;
+}
       // Extract bid/ask
       const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
       const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
