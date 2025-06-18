@@ -49,7 +49,7 @@ export const ANALYSIS = {
   EMA: {
     TREND: {
       FAST: 50,
-      SLOW: 100 // was 200
+      SLOW: 200
     },
     ENTRY: {
       FAST: 9,
@@ -62,7 +62,7 @@ export const ANALYSIS = {
     PERIOD: 14,
     OVERBOUGHT: 70,
     OVERSOLD: 30,
-    EXIT_OVERBOUGHT: 65,
+    EXIT_OVERBOUGHT: 65, // Earlier exit
     EXIT_OVERSOLD: 35
   },
   

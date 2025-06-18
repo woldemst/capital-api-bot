@@ -335,7 +335,7 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
 export async function getDealConfirmation(dealReference) {
   try {
     console.log(`Getting confirmation for deal: ${dealReference}`);
-    const response = await axios.get(`${BASE_URL}${API_PATH}/confirms/${dealReference}`, { headers: getHeaders() });
+    const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() }); // Fixed path
     return response.data;
   } catch (error) {
     console.error("Error getting deal confirmation:", error.response?.data || error.message);

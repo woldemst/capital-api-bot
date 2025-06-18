@@ -1,115 +1,14 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
 
-// FIX: Use ANALYSIS.RISK, not TRADING.RISK
 const { RISK: riskConfig } = ANALYSIS;
 const { ATR_PERIOD } = ANALYSIS; // ATR period configuration
-const RSI_CONFIG = { OVERBOUGHT: 70, OVERSOLD: 30 }; // RSI levels configuration
-
-// === LEGACY: Old m1/m5/m15 logic kept for reference ===
-// function generateSignals(symbol, m1Data, m1Indicators, m15Indicators, trendAnalysis, bid, ask) { ... }
-// function isBullishMACross(...) { ... }
-// function isBearishMACross(...) { ... }
-// function isBullishMomentum(...) { ... }
-// function isBearishMomentum(...) { ... }
-// === END LEGACY ===
-
-// === NEW STRATEGY: Multi-Timeframe (H4/H1/M15) ===
-
-/**
- * Calculate position size based on risk management (NEW STRATEGY)
- * Enforces minimum size of 100 units (1 lot) for all trades.
- */
-function positionSize(balance, price, stopLossPips, symbol) {
-  const minSize = 100;
-  if (!balance || balance <= 0) {
-    console.log("[PositionSize] Invalid balance, using minimum position size");
-    return minSize;
-  }
-  const amount = balance * riskConfig.PER_TRADE;
-  const slPips = stopLossPips || 10; // fallback if ATR not available
-  let size = amount / (slPips * price * 0.01);
-  size = Math.max(minSize, Math.round(size));
-  size = Math.min(1000, size); // Cap at 1000 units (10 lots)
-  console.log(`[PositionSize] Symbol: ${symbol}, Balance: ${balance}, Risk: ${amount}, SL: ${slPips}, Price: ${price}, Size: ${size}`);
-  return size;
-}
-
-/**
- * Generate trading signals based on H4/H1/M15 indicators (NEW STRATEGY)
- */
-function generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
-  if (!validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis)) {
-    return { signal: null };
-  }
-  logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
-  const buyConditions = generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid);
-  const sellConditions = generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask);
-  // Optionally: logSignalConditions(buyConditions, sellConditions);
-  const { signal, buyScore, sellScore } = evaluateSignals(buyConditions, sellConditions);
-  return {
-    signal,
-    buyScore,
-    sellScore,
-  };
-}
-
-function validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-  if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
-    console.log("[Signal] Missing required indicators data");
-    return false;
-  }
-  return true;
-}
-
-function logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-  console.log(`\n=== Analyzing ${symbol} ===`);
-  console.log("Current price:", { bid, ask });
-  // FIX: Use emaFast/emaSlow instead of ema50/ema200
-  console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
-  console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
-  console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
-  console.log("Trend:", trendAnalysis.h4Trend);
-}
-
-function generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
-  return [
-    h4Indicators.isBullishTrend || (h4Indicators.macd && h4Indicators.macd.histogram > 0),
-    trendAnalysis.h4Trend === "bullish",
-    h1Indicators.ema9 > h1Indicators.ema21, // H1 setup confirmation
-    m15Indicators.isBullishCross, // EMA9 crosses above EMA21
-    m15Indicators.rsi < 35, // RSI oversold
-    bid <= m15Indicators.bb?.lower, // Price at/below lower BB
-  ];
-}
-function generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
-  return [
-    !h4Indicators.isBullishTrend || (h4Indicators.macd && h4Indicators.macd.histogram < 0),
-    trendAnalysis.h4Trend === "bearish",
-    h1Indicators.ema9 < h1Indicators.ema21, // H1 setup confirmation
-    m15Indicators.isBearishCross, // EMA9 crosses below EMA21
-    m15Indicators.rsi > 65, // RSI overbought
-    ask >= m15Indicators.bb?.upper, // Price at/above upper BB
-  ];
-}
-
-/**
- * Evaluates buy and sell conditions and returns the signal and scores.
- * Returns: { signal: "buy" | "sell" | null, buyScore: number, sellScore: number }
- */
-function evaluateSignals(buyConditions, sellConditions) {
-  const buyScore = buyConditions.filter(Boolean).length;
-  const sellScore = sellConditions.filter(Boolean).length;
-  console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
-  let signal = null;
-  // Relaxed: only 3/6 conditions needed for a signal
-  if (buyScore >= 3) {
-    signal = "buy";
-  } else if (sellScore >= 3) {
-    signal = "sell";
-  }
-  return { signal, buyScore, sellScore };
-}
+const RSI_CONFIG = {
+  OVERBOUGHT: 70,
+  OVERSOLD: 30,
+  EXIT_OVERBOUGHT: 65,
+  EXIT_OVERSOLD: 35,
+}; // Added missing properties
 
 class TradingService {
   constructor() {
@@ -145,10 +44,36 @@ class TradingService {
     }
     return true;
   }
+  validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
+    if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
+      console.log("[Signal] Missing required indicators data");
+      return false;
+    }
+    return true;
+  }
+  logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
+    console.log(`\n=== Analyzing ${symbol} ===`);
+    console.log("Current price:", { bid, ask });
+    console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
+    console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
+    console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
+    console.log("Trend:", trendAnalysis.h4Trend);
+  }
 
-  /**
-   * Generate and validate signal for the new strategy (H4/H1/M15)
-   */
+  evaluateSignals(buyConditions, sellConditions) {
+    const buyScore = buyConditions.filter(Boolean).length;
+    const sellScore = sellConditions.filter(Boolean).length;
+    console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
+    let signal = null;
+    // Relaxed: only 3/6 conditions needed for a signal
+    if (buyScore >= 3) {
+      signal = "buy";
+    } else if (sellScore >= 3) {
+      signal = "sell";
+    }
+    return { signal, buyScore, sellScore };
+  }
+
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
     // Log all indicator values for debugging
@@ -157,7 +82,7 @@ class TradingService {
     console.log("[Indicators] H1:", indicators.h1);
     console.log("[Indicators] M15:", indicators.m15);
     const trendAnalysis = message.payload.trendAnalysis;
-    const result = generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
+    const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
     } else {
@@ -165,10 +90,40 @@ class TradingService {
     }
     return result;
   }
+  generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
+    return [
+      // H4 Trend conditions
+      h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
+      h4Indicators.macd?.histogram > 0, // Trend confirmation
 
-  /**
-   * Main trade execution logic for the new strategy
-   */
+      // H1 Setup confirmation
+      h1Indicators.ema9 > h1Indicators.ema21,
+      h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
+
+      // M15 Entry conditions
+      m15Indicators.isBullishCross,
+      m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
+      bid <= m15Indicators.bb?.lower,
+    ];
+  }
+
+  generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
+    return [
+      // H4 Trend conditions
+      !h4Indicators.isBullishTrend,
+      h4Indicators.macd?.histogram < 0,
+
+      // H1 Setup confirmation
+      h1Indicators.ema9 < h1Indicators.ema21,
+      h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
+
+      // M15 Entry conditions
+      m15Indicators.isBearishCross,
+      m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
+      ask >= m15Indicators.bb?.upper,
+    ];
+  }
+
   async executeTrade(signal, symbol, bid, ask) {
     console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
     const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
@@ -181,22 +136,36 @@ class TradingService {
     }
   }
 
-  /**
-   * Calculate trade parameters (stop, target, size, trailing)
-   */
   async calculateTradeParameters(signal, symbol, bid, ask) {
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
     const stopLossPips = 1.5 * atr;
     const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-    const takeProfitPips = 2 * stopLossPips;
+    const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-    const size = positionSize(this.accountBalance, price, stopLossPips, symbol);
+    const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
+
+    // Trailing stop parameters
     const trailingStopParams = {
-      activationPrice: signal === "buy" ? price + stopLossPips * 0.5 : price - stopLossPips * 0.5,
-      trailingDistance: atr,
+      activationPrice:
+        signal === "buy"
+          ? price + stopLossPips // Activate at 1R profit
+          : price - stopLossPips,
+      trailingDistance: atr, // Trail by 1 ATR
     };
-    return { size, stopLossPrice, takeProfitPrice, stopLossPips, takeProfitPips, trailingStopParams };
+
+    return {
+      size,
+      stopLossPrice,
+      takeProfitPrice,
+      stopLossPips,
+      takeProfitPips,
+      trailingStopParams,
+      partialTakeProfit:
+        signal === "buy"
+          ? price + stopLossPips // Take partial at 1R
+          : price - stopLossPips,
+    };
   }
 
   logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips) {
@@ -205,15 +174,11 @@ class TradingService {
     );
   }
 
-  /**
-   * Place position and set up trailing stop (partial TP placeholder)
-   */
   async executePosition(signal, symbol, params) {
     const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
-    // TODO: Implement partial take profit logic if supported by broker API
     try {
       const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice);
-      if (position.dealId) {
+      if (position?.dealId) {
         await this.setupTrailingStop(symbol, signal, position.dealId, trailingStopParams);
       }
       return position;
@@ -223,18 +188,23 @@ class TradingService {
     }
   }
 
-  async setupTrailingStop(symbol, signal, entryPrice, trailingStopParams) {
+  async setupTrailingStop(symbol, signal, dealId, params) {
+    if (!dealId || !params?.trailingDistance) {
+      console.warn("[TrailingStop] Missing required parameters");
+      return;
+    }
+
     setTimeout(async () => {
       try {
         const positions = await getOpenPositions();
-        const position = positions.positions.find((p) => p.market.epic === symbol);
+        const position = positions?.positions?.find((p) => p.market.epic === symbol);
         if (position && position.profit > 0) {
-          // Trailing stop logic here
+          await updateTrailingStop(dealId, params.trailingDistance);
         }
       } catch (error) {
         console.error("[TrailingStop] Error:", error.message);
       }
-    }, 5 * 60 * 1000); // Check after 5 minutes
+    }, 5 * 60 * 1000);
   }
 
   async calculateATR(symbol) {
@@ -262,9 +232,6 @@ class TradingService {
     }
   }
 
-  /**
-   * Main entry point for processing a new price update
-   */
   async processPrice(message, maxOpenTrades) {
     let symbol = null;
     try {
@@ -302,6 +269,37 @@ class TradingService {
     } catch (error) {
       console.error(`[ProcessPrice] Error for ${symbol}:`, error.message);
     }
+  }
+
+  positionSize(balance, price, stopLossPips, symbol) {
+    const minSize = 100;
+    if (!balance || balance <= 0) {
+      console.log("[PositionSize] Invalid balance, using minimum position size");
+      return minSize;
+    }
+    const amount = balance * riskConfig.PER_TRADE;
+    const slPips = stopLossPips || 10; // fallback if ATR not available
+    let size = amount / (slPips * price * 0.01);
+    size = Math.max(minSize, Math.round(size));
+    size = Math.min(1000, size); // Cap at 1000 units (10 lots)
+    console.log(`[PositionSize] Symbol: ${symbol}, Balance: ${balance}, Risk: ${amount}, SL: ${slPips}, Price: ${price}, Size: ${size}`);
+    return size;
+  }
+
+  generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
+    if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis)) {
+      return { signal: null };
+    }
+    // Fix: Use this.logMarketConditions instead of logMarketConditions
+    this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
+    const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid);
+    const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask);
+    const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
+    return {
+      signal,
+      buyScore,
+      sellScore,
+    };
   }
 }
 
