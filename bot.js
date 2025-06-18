@@ -58,7 +58,18 @@ class TradingBot {
       try {
         const message = JSON.parse(data.toString());
         if (message.payload?.epic) {
-          this.latestCandles[message.payload.epic] = message.payload;
+          const candle = message.payload;
+          // Only process completed candles with confirmed close
+          if (candle.complete || candle.snapshotTimeUTC) {
+            this.latestCandles[candle.epic] = candle;
+            // Check trading hours before analysis
+            // const hour = new Date().getUTCHours();
+            // if (hour >= 6 && hour <= 22) {
+            //   // Main trading session
+            //   this.analyzeSymbol(candle.epic);
+            // }
+            this.analyzeSymbol(candle.epic);
+          }
         }
       } catch (error) {
         console.error("WebSocket message processing error:", error.message);
@@ -82,15 +93,10 @@ class TradingBot {
   startAnalysisInterval() {
     // Use dev interval if in DEV_MODE
     const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
-    if (MODE.DEV_MODE) {
-      console.log(`[DEV] Starting analysis interval: ${interval}s`);
-    } else {
-      console.log(`[PROD] Starting analysis interval: ${interval / 1000}s`);
-    }
-
+    console.log(`[Bot] Starting analysis interval: ${interval}s`);
     this.analysisInterval = setInterval(async () => {
       try {
-        console.log("Running scheduled analysis...");
+        console.log("[Bot] Running scheduled analysis...");
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
       } catch (error) {
