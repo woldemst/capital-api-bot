@@ -82,10 +82,15 @@ class TradingBot {
   startAnalysisInterval() {
     // Use dev interval if in DEV_MODE
     const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
-    console.log(`[Bot] Starting analysis interval: ${interval}s`);
+    if (MODE.DEV_MODE) {
+      console.log(`[DEV] Starting analysis interval: ${interval}s`);
+    } else {
+      console.log(`[PROD] Starting analysis interval: ${interval / 1000}s`);
+    }
+
     this.analysisInterval = setInterval(async () => {
       try {
-        console.log("[Bot] Running scheduled analysis...");
+        console.log("Running scheduled analysis...");
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
       } catch (error) {

@@ -2,7 +2,7 @@ import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
 
 const {
-  MA,
+  EMA: EMA_CONFIG,
   RSI: RSI_CONFIG,
   MACD: MACD_CONFIG,
   BOLLINGER,
@@ -28,20 +28,24 @@ export async function calcIndicators(bars) {
 
   const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
 
-  // Defensive: Warn if not enough data for EMA200
-  if (closes.length < 200) {
-    console.warn(`[Indicators] Not enough candles for EMA200: got ${closes.length}, need 200`);
+  // Use config periods
+  const fastPeriod = EMA_CONFIG.TREND.FAST;
+  const slowPeriod = EMA_CONFIG.TREND.SLOW;
+
+  // Defensive: Warn if not enough data for slow EMA
+  if (closes.length < slowPeriod) {
+    console.warn(`[Indicators] Not enough candles for EMA${slowPeriod}: got ${closes.length}, need ${slowPeriod}`);
   }
 
-  const ema50 = EMA.calculate({ period: 50, values: closes });
-  const ema200 = EMA.calculate({ period: 200, values: closes });
+  const emaFast = EMA.calculate({ period: fastPeriod, values: closes });
+  const emaSlow = EMA.calculate({ period: slowPeriod, values: closes });
   const ema9 = EMA.calculate({ period: 9, values: closes });
   const ema21 = EMA.calculate({ period: 21, values: closes });
 
   return {
     // Trend EMAs
-    ema50: ema50.length ? ema50[ema50.length - 1] : null,
-    ema200: ema200.length ? ema200[ema200.length - 1] : null,
+    emaFast: emaFast.length ? emaFast[emaFast.length - 1] : null,
+    emaSlow: emaSlow.length ? emaSlow[emaSlow.length - 1] : null,
     // Entry EMAs
     ema9: ema9.length ? ema9[ema9.length - 1] : null,
     ema21: ema21.length ? ema21[ema21.length - 1] : null,
@@ -63,7 +67,7 @@ export async function calcIndicators(bars) {
       SimpleMASignal: false,
     }).pop(),
     // Store trend state
-    isBullishTrend: ema50.length && ema200.length ? ema50[ema50.length - 1] > ema200[ema200.length - 1] : false,
+    isBullishTrend: emaFast.length && emaSlow.length ? emaFast[emaFast.length - 1] > emaSlow[emaSlow.length - 1] : false,
     isBullishCross: ema9.length > 1 && ema21.length > 1 ? (ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2]) : false,
     isBearishCross: ema9.length > 1 && ema21.length > 1 ? (ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2]) : false,
   };
