@@ -1,7 +1,8 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
 
-const { RISK: riskConfig } = TRADING;
+// FIX: Use ANALYSIS.RISK, not TRADING.RISK
+const { RISK: riskConfig } = ANALYSIS;
 const { ATR_PERIOD } = ANALYSIS; // ATR period configuration
 const RSI_CONFIG = { OVERBOUGHT: 70, OVERSOLD: 30 }; // RSI levels configuration
 
@@ -64,7 +65,8 @@ function validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators
 function logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
   console.log(`\n=== Analyzing ${symbol} ===`);
   console.log("Current price:", { bid, ask });
-  console.log("[H4] EMA50:", h4Indicators.ema50, "EMA200:", h4Indicators.ema200, "MACD:", h4Indicators.macd?.histogram);
+  // FIX: Use emaFast/emaSlow instead of ema50/ema200
+  console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
   console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
   console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
   console.log("Trend:", trendAnalysis.h4Trend);
@@ -283,10 +285,10 @@ class TradingService {
         return;
       }
       const hour = new Date().getUTCHours();
-      if (hour < 6 || hour > 22) {
-        console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
-        return;
-      }
+      // if (hour < 6 || hour > 22) {
+      //   console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
+      //   return;
+      // }
       const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
       const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
       if (!this.validatePrices(bid, ask, symbol)) return;

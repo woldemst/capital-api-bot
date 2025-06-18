@@ -49,7 +49,7 @@ export const ANALYSIS = {
   EMA: {
     TREND: {
       FAST: 50,
-      SLOW: 200
+      SLOW: 100 // was 200
     },
     ENTRY: {
       FAST: 9,
