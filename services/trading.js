@@ -2,7 +2,6 @@ import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
 
 const { RISK: riskConfig } = ANALYSIS;
-const { ATR_PERIOD } = ANALYSIS; // ATR period configuration
 const RSI_CONFIG = {
   OVERBOUGHT: 70,
   OVERSOLD: 30,
@@ -52,12 +51,12 @@ class TradingService {
     return true;
   }
   logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-    console.log(`\n=== Analyzing ${symbol} ===`);
-    console.log("Current price:", { bid, ask });
-    console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
-    console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
-    console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
-    console.log("Trend:", trendAnalysis.h4Trend);
+    // console.log(`\n=== Analyzing ${symbol} ===`);
+    // console.log("Current price:", { bid, ask });
+    // console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
+    // console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
+    // console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
+    // console.log("Trend:", trendAnalysis.h4Trend);
   }
 
   evaluateSignals(buyConditions, sellConditions) {
@@ -77,11 +76,11 @@ class TradingService {
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
     // Log all indicator values for debugging
-    console.log(`[Signal] Generating signal for ${symbol}`);
-    console.log("[Indicators] H4:", indicators.h4);
-    console.log("[Indicators] H1:", indicators.h1);
-    console.log("[Indicators] M15:", indicators.m15);
-    const trendAnalysis = message.payload.trendAnalysis;
+    // console.log(`[Signal] Generating signal for ${symbol}`);
+    // console.log("[Indicators] H4:", indicators.h4);
+    // console.log("[Indicators] H1:", indicators.h1);
+    // console.log("[Indicators] M15:", indicators.m15);
+    const trendAnalysis = message.trendAnalysis;
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
@@ -235,12 +234,9 @@ class TradingService {
   async processPrice(message, maxOpenTrades) {
     let symbol = null;
     try {
-      if (!message || !message.payload) {
-        console.log("[ProcessPrice] Invalid message format:", message);
-        return;
-      }
-      const candle = message.payload;
-      symbol = candle.epic;
+      if (!message) return;
+      const candle = message;
+      symbol = candle.symbol || candle.epic;
       console.log(`\n=== Processing ${symbol} ===`);
       console.log(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
       if (this.openTrades.length >= maxOpenTrades) {
@@ -251,7 +247,7 @@ class TradingService {
         console.log(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
-      const hour = new Date().getUTCHours();
+      // const hour = new Date().getUTCHours();
       // if (hour < 6 || hour > 22) {
       //   console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
       //   return;
@@ -259,30 +255,27 @@ class TradingService {
       const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
       const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
       if (!this.validatePrices(bid, ask, symbol)) return;
+
+      // --- ADD THIS ---
       const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
       if (signal) {
-        console.log(`[ProcessPrice] Attempting to execute trade for ${symbol} (${signal})`);
         await this.executeTrade(signal, symbol, bid, ask);
-      } else {
-        console.log(`[ProcessPrice] No trade executed for ${symbol}.`);
       }
+      // ---------------
     } catch (error) {
-      console.error(`[ProcessPrice] Error for ${symbol}:`, error.message);
+      console.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
   }
 
-  positionSize(balance, price, stopLossPips, symbol) {
-    const minSize = 100;
-    if (!balance || balance <= 0) {
-      console.log("[PositionSize] Invalid balance, using minimum position size");
-      return minSize;
-    }
-    const amount = balance * riskConfig.PER_TRADE;
-    const slPips = stopLossPips || 10; // fallback if ATR not available
-    let size = amount / (slPips * price * 0.01);
-    size = Math.max(minSize, Math.round(size));
-    size = Math.min(1000, size); // Cap at 1000 units (10 lots)
-    console.log(`[PositionSize] Symbol: ${symbol}, Balance: ${balance}, Risk: ${amount}, SL: ${slPips}, Price: ${price}, Size: ${size}`);
+  positionSize(balance, entryPrice, stopLossPrice, symbol) {
+    const pipValue = 0.0001; // For most forex pairs
+    const risk = balance * riskConfig.PER_TRADE;
+    const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
+    if (stopLossPips === 0) return 100; // fallback
+    let size = risk / (stopLossPips * pipValue);
+    size = Math.max(100, Math.round(size));
+    size = Math.min(1000, size); // Cap at 1000 units
+    console.log(`[PositionSize] Symbol: ${symbol}, Balance: ${balance}, Risk: ${risk}, SL(pips): ${stopLossPips}, Size: ${size}`);
     return size;
   }
 
@@ -290,8 +283,7 @@ class TradingService {
     if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis)) {
       return { signal: null };
     }
-    // Fix: Use this.logMarketConditions instead of logMarketConditions
-    this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
+    // this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
     const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid);
     const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask);
     const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);

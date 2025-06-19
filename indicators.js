@@ -1,24 +1,7 @@
 import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
 
-const {
-  MA,
-  RSI: RSI_CONFIG,
-  MACD: MACD_CONFIG,
-  BOLLINGER,
-  ATR: ATR_CONFIG,
-
-  MA_FAST,
-  MA_SLOW,
-  MA_TREND,
-  MA_LONG,
-
-  RSI_PERIOD,
-  RSI_OVERBOUGHT,
-  RSI_OVERSOLD,
-
-
-} = ANALYSIS;
+const { RSI: RSI_CONFIG, MACD: MACD_CONFIG, BOLLINGER, ATR: ATR_CONFIG } = ANALYSIS;
 
 export async function calcIndicators(bars) {
   if (!bars || !Array.isArray(bars) || bars.length === 0) {
@@ -76,17 +59,20 @@ export async function calcIndicators(bars) {
     // ATR for dynamic stops
     atr: atr,
     // Store trend state
-    isBullishTrend: 
-      emaFast.length && emaSlow.length && 
-      emaFast[emaFast.length - 1] > emaSlow[emaSlow.length - 1] && 
+    isBullishTrend:
+      emaFast.length &&
+      emaSlow.length &&
+      emaFast[emaFast.length - 1] > emaSlow[emaSlow.length - 1] &&
       closes[closes.length - 1] > emaFast[emaFast.length - 1],
-    isBullishCross: 
-      ema9.length > 1 && ema21.length > 1 && 
-      ema9[ema9.length - 1] > ema21[ema21.length - 1] && 
+    isBullishCross:
+      ema9.length > 1 &&
+      ema21.length > 1 &&
+      ema9[ema9.length - 1] > ema21[ema21.length - 1] &&
       ema9[ema9.length - 2] <= ema21[ema21.length - 2],
-    isBearishCross: 
-      ema9.length > 1 && ema21.length > 1 && 
-      ema9[ema9.length - 1] < ema21[ema21.length - 1] && 
+    isBearishCross:
+      ema9.length > 1 &&
+      ema21.length > 1 &&
+      ema9[ema9.length - 1] < ema21[ema21.length - 1] &&
       ema9[ema9.length - 2] >= ema21[ema21.length - 2],
   };
 }

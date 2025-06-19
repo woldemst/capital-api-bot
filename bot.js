@@ -1,46 +1,57 @@
-import { API, TRADING, MODE, DEV, ANALYSIS } from "./config.js";
-
-const { SYMBOLS, TIMEFRAMES, MAX_POSITIONS } = TRADING;
-const { BACKTEST_MODE } = MODE;
-import { calcIndicators, analyzeTrend } from "./indicators.js";
-import {
-  startSession,
-  pingSession,
-  getHistorical,
-  getAccountInfo,
-  getOpenPositions,
-  getSessionTokens,
-  getSeesionDetails,
-  getActivityHistory,
-  getMarkets,
-} from "./api.js";
+import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens } from "./api.js";
+import { TRADING, MODE, DEV, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
+import { calcIndicators } from "./indicators.js";
+
+const { SYMBOLS, MAX_POSITIONS } = TRADING;
+const { BACKTEST_MODE } = MODE;
 
 class TradingBot {
   constructor() {
-    this.latestCandles = {};
     this.isRunning = false;
     this.analysisInterval = null;
     this.sessionRefreshInterval = null;
     this.pingInterval = 9 * 60 * 1000;
+    this.maxRetries = 3;
+    this.retryDelay = 30000; // 30 seconds
+    this.latestCandles = {}; // Store latest candles for each symbol
   }
 
   // Initialize the bot and start necessary services
   async initialize() {
-    try {
-      await startSession();
-      const tokens = getSessionTokens();
-      // await getMarkets();
+    let retryCount = 0;
 
-      if (!BACKTEST_MODE) {
-        await this.startLiveTrading(tokens);
-      } else {
-        await this.runBacktest();
+    while (retryCount < this.maxRetries) {
+      try {
+        await startSession();
+        const tokens = getSessionTokens();
+
+        if (!tokens.cst || !tokens.xsecurity) {
+          console.warn(`[Bot] Invalid session tokens, attempt ${retryCount + 1}/${this.maxRetries}`);
+          throw new Error("Invalid session tokens");
+        }
+
+        if (!BACKTEST_MODE) {
+          await this.startLiveTrading(tokens);
+        } else {
+          await this.runBacktest();
+        }
+
+        return; // Success, exit the retry loop
+      } catch (error) {
+        retryCount++;
+        console.error(`[Bot] Initialization attempt ${retryCount} failed:`, error);
+
+        if (retryCount < this.maxRetries) {
+          console.log(`[Bot] Refreshing session and retrying in ${this.retryDelay / 1000}s...`);
+          await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
+          await refreshSession();
+        } else {
+          console.error("[Bot] Max retry attempts reached. Shutting down.");
+          throw error;
+        }
       }
-    } catch (error) {
-      console.error("Failed to initialize bot:", error);
-      throw error;
     }
   }
 
@@ -59,20 +70,20 @@ class TradingBot {
         const message = JSON.parse(data.toString());
         if (message.payload?.epic) {
           const candle = message.payload;
-          // Only process completed candles with confirmed close
+          // Improved: log every received candle for debugging
+          // console.log("[WebSocket] Received candle for", candle.epic, candle);
+          // Store the latest candle for the symbol
+          this.latestCandles[candle.epic] = candle;
+          // Only analyze on completed candles (avoid duplicates)
           if (candle.complete || candle.snapshotTimeUTC) {
-            this.latestCandles[candle.epic] = candle;
-            // Check trading hours before analysis
-            // const hour = new Date().getUTCHours();
-            // if (hour >= 6 && hour <= 22) {
-            //   // Main trading session
-            //   this.analyzeSymbol(candle.epic);
-            // }
             this.analyzeSymbol(candle.epic);
           }
+        } else {
+          // Log all other messages for debugging
+          // console.log("[WebSocket] Message received but no epic:", message);
         }
       } catch (error) {
-        console.error("WebSocket message processing error:", error.message);
+        console.error("WebSocket message processing error:", error.message, data?.toString());
       }
     });
   }
@@ -91,12 +102,18 @@ class TradingBot {
 
   // Start analysis interval
   startAnalysisInterval() {
-    // Use dev interval if in DEV_MODE
     const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
-    console.log(`[Bot] Starting analysis interval: ${interval}s`);
+    if (MODE.DEV_MODE) {
+      console.log(`[DEV] Starting analysis interval: ${interval}s`);
+    } else {
+      console.log(`[PROD] Starting analysis interval: ${interval}s`);
+    }
     this.analysisInterval = setInterval(async () => {
       try {
-        console.log("[Bot] Running scheduled analysis...");
+        const now = new Date();
+        const date = now.toLocaleDateString();
+        const time = now.toLocaleTimeString();
+        console.log(`[${date} ${time}] Running scheduled analysis...`);
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
       } catch (error) {
@@ -149,10 +166,6 @@ class TradingBot {
 
   // Analyze a single symbol
   async analyzeSymbol(symbol) {
-    if (!this.latestCandles[symbol]) {
-      console.log(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
-      return;
-    }
     console.log(`Analyzing ${symbol}...`);
 
     // Fetch and calculate all required data
@@ -170,14 +183,18 @@ class TradingBot {
       h4Indicators: indicators.h4,
     };
 
-    // Process trading decision
+    // Use the latest real-time candle for bid/ask
+    const latestCandle = this.latestCandles[symbol];
+    if (!latestCandle) {
+      console.log(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
+      return;
+    }
     await tradingService.processPrice(
       {
-        payload: {
-          ...this.latestCandles[symbol],
-          indicators,
-          trendAnalysis,
-        },
+        ...latestCandle,
+        symbol: symbol,
+        indicators,
+        trendAnalysis,
         h4Data: h4Data.prices,
         h1Data: h1Data.prices,
         m15Data: m15Data.prices,
@@ -189,6 +206,7 @@ class TradingBot {
   // Analyze all symbols
   async analyzeAllSymbols() {
     for (const symbol of SYMBOLS) {
+      if (!this.latestCandles[symbol]) continue; // Only analyze if we have a candle
       try {
         await this.analyzeSymbol(symbol);
       } catch (error) {

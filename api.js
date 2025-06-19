@@ -4,8 +4,6 @@ import axios from "axios";
 let cst, xsecurity;
 let sessionStartTime = Date.now();
 
-const { SYMBOLS, TIMEFRAMES } = TRADING;
-
 // Base headers for API requests
 export const getHeaders = (includeContentType = false) => {
   const baseHeaders = {
@@ -32,7 +30,10 @@ export const startSession = async () => {
       }
     );
 
-    console.log("<========= Session started successfully =========>\n", response.data, "\n\n");
+    const now = new Date();
+    const date = now.toLocaleDateString();
+    const time = now.toLocaleTimeString();
+    console.log(`<========= Session started at ${date} ${time} =========>\n`, response.data, "\n\n");
 
     // Store the session tokens
     cst = response.headers["cst"];
@@ -133,7 +134,7 @@ export const getActivityHistory = async (from, to) => {
         lastPeriod: 600,
       },
     });
-    console.log(response.data);
+    // console.log(response.data);
     return response.data;
   } catch (error) {
     console.error("Error getting activity history:", error.response ? error.response.data : error.message);
