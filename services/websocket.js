@@ -1,11 +1,11 @@
 import WebSocket from "ws";
-import { API, MODE } from "../config.js";
+import { API } from "../config.js";
 
 const { WS_URL, KEY: API_KEY } = API;
 
 class WebSocketService {
   constructor() {
-    this.ws = null;    
+    this.ws = null;
   }
 
   connect(tokens, symbols, messageHandler) {
@@ -32,8 +32,6 @@ class WebSocketService {
           payload: { epics: symbols },
         };
         this.ws.send(JSON.stringify(subscriptionMessage));
-
-
       });
 
       this.ws.on("message", messageHandler);
@@ -45,7 +43,6 @@ class WebSocketService {
       this.ws.on("close", () => {
         console.log("WebSocket disconnected, attempting to reconnect in 5s...");
         setTimeout(connectWS, 5000);
-     
       });
     };
 
