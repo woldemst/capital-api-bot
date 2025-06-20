@@ -1,7 +1,6 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
 
-const { RISK: riskConfig } = ANALYSIS;
 const RSI_CONFIG = {
   OVERBOUGHT: 70,
   OVERSOLD: 30,
@@ -268,15 +267,21 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
-    const pipValue = 0.0001; // For most forex pairs
-    const risk = balance * riskConfig.PER_TRADE;
+    const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
+    const pipValue = this.getPipValue(symbol); // Dynamic pip value
+
+    const riskAmount = balance * RISK_PER_TRADE;
     const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
-    if (stopLossPips === 0) return 100; // fallback
-    let size = risk / (stopLossPips * pipValue);
-    size = Math.max(100, Math.round(size));
-    size = Math.min(1000, size); // Cap at 1000 units
-    console.log(`[PositionSize] Symbol: ${symbol}, Balance: ${balance}, Risk: ${risk}, SL(pips): ${stopLossPips}, Size: ${size}`);
-    return size;
+
+    if (stopLossPips === 0) return FOREX_MIN_SIZE;
+
+    const size = riskAmount / (stopLossPips * pipValue);
+    return Math.max(FOREX_MIN_SIZE, Math.round(size));
+  }
+
+  // Add pip value determination
+  getPipValue(symbol) {
+    return symbol.includes("JPY") ? 0.01 : 0.0001;
   }
 
   generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
