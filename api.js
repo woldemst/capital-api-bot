@@ -1,4 +1,4 @@
-import { API, TRADING } from "./config.js";
+import { API } from "./config.js";
 import axios from "axios";
 
 let cst, xsecurity;
@@ -108,18 +108,6 @@ export const getAccountInfo = async () => {
   }
 };
 
-// Get open positions
-export const getOpenPositions = async () => {
-  try {
-    const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
-    console.log("<========= Open positions received =========>\n", response.data, "\n\n");
-    return response.data;
-  } catch (error) {
-    console.error("Error getting open positions:", error.response ? error.response.data : error.message);
-    throw error;
-  }
-};
-
 // Get activity history
 export const getActivityHistory = async (from, to) => {
   try {
@@ -141,6 +129,7 @@ export const getActivityHistory = async (from, to) => {
     throw error;
   }
 };
+
 // Helper: format Date in “YYYY-MM-DDTHH:mm:ss” (no ms, no Z)
 function formatIsoNoMs(date) {
   if (!(date instanceof Date) || isNaN(date)) {
@@ -149,6 +138,44 @@ function formatIsoNoMs(date) {
   const iso = date.toISOString();
   return iso.split(".")[0];
 }
+
+// Get available markets
+export const getMarkets = async () => {
+  try {
+    const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
+    console.log("<========= Markets received =========>\n", response.data, "\n\n");
+    // Ensure we return an array of markets
+    return Array.isArray(response.data.markets) ? response.data.markets : [];
+  } catch (error) {
+    console.error("Error getting markets:", error.response ? error.response.data : error.message);
+    throw error;
+  }
+};
+
+// Get market details for a symbol
+export async function getMarketDetails(symbol) {
+  try {
+    const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
+    console.log(`Market details for ${symbol}:`, response.data);
+    return response.data;
+  } catch (error) {
+    console.error(`Error getting market details for ${symbol}:`, error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
+
+// Get open positions
+export const getOpenPositions = async () => {
+  try {
+    const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
+    console.log("<========= Open positions received =========>\n", response.data, "\n\n");
+    return response.data;
+  } catch (error) {
+    console.error("Error getting open positions:", error.response ? error.response.data : error.message);
+    throw error;
+  }
+};
+
 
 export async function getHistorical(symbol, resolution, count, from = null, to = null) {
   try {
@@ -207,31 +234,6 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
     };
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
-    throw error;
-  }
-}
-
-// Get available markets
-export const getMarkets = async () => {
-  try {
-    const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
-    console.log("<========= Markets received =========>\n", response.data, "\n\n");
-    // Ensure we return an array of markets
-    return Array.isArray(response.data.markets) ? response.data.markets : [];
-  } catch (error) {
-    console.error("Error getting markets:", error.response ? error.response.data : error.message);
-    throw error;
-  }
-};
-
-// Get market details for a symbol
-export async function getMarketDetails(symbol) {
-  try {
-    const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
-    console.log(`Market details for ${symbol}:`, response.data);
-    return response.data;
-  } catch (error) {
-    console.error(`Error getting market details for ${symbol}:`, error.response ? error.response.data : error.message);
     throw error;
   }
 }
@@ -299,20 +301,15 @@ export async function updateTrailingStop(positionId, stopLevel) {
 // Place an immediate position for scalping
 export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
   try {
-    // Handle size requirements
-    const isForex = symbol.length === 6 && /^[A-Z]*$/.test(symbol);
-    // For forex pairs, always use 100 as size
-    const adjustedSize = isForex ? 100 : size;
-
     console.log(`Placing ${direction} position for ${symbol} at market price...`);
-    console.log(`Original size: ${size}, Using size: ${adjustedSize}`);
+    console.log(`Original size: ${size}, Using size: ${size}`);
     console.log(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
 
     // Format the position request
     const position = {
       epic: symbol,
       direction: direction.toUpperCase(),
-      size: adjustedSize.toString(),
+      size: size,
       orderType: "MARKET",
       guaranteedStop: false,
       stopLevel: stopLevel ? parseFloat(stopLevel).toFixed(5) : undefined,

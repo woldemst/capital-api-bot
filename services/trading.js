@@ -1,5 +1,6 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
+const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
 
 const RSI_CONFIG = {
   OVERBOUGHT: 70,
@@ -42,6 +43,7 @@ class TradingService {
     }
     return true;
   }
+
   validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
     if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
       console.log("[Signal] Missing required indicators data");
@@ -49,6 +51,7 @@ class TradingService {
     }
     return true;
   }
+
   logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
     // console.log(`\n=== Analyzing ${symbol} ===`);
     // console.log("Current price:", { bid, ask });
@@ -125,7 +128,7 @@ class TradingService {
   async executeTrade(signal, symbol, bid, ask) {
     console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
     const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
-    this.logTradeParameters(signal, params.size, params.stopLossPrice, params.takeProfitPrice, params.stopLossPips);
+    // this.logTradeParameters(signal, params.size, params.stopLossPrice, params.takeProfitPrice, params.stopLossPips);
     try {
       await this.executePosition(signal, symbol, params);
     } catch (error) {
@@ -142,6 +145,7 @@ class TradingService {
     const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
     const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
+    console.log(`[calculateTradeParameters] Size: ${size}`);
 
     // Trailing stop parameters
     const trailingStopParams = {
@@ -267,16 +271,25 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
-    const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
+    const riskAmount = balance * RISK_PER_TRADE;
     const pipValue = this.getPipValue(symbol); // Dynamic pip value
 
-    const riskAmount = balance * RISK_PER_TRADE;
+    // console.log(`[PositionSize] Balance: ${balance} | Entry Price: ${entryPrice} | Stop Loss Price: ${stopLossPrice} | symbol: ${symbol}`);
+
+    if (!pipValue || pipValue <= 0) {
+      console.error("Invalid pip value calculation");
+      return 100; // Fallback with warning
+    }
+
     const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
 
     if (stopLossPips === 0) return FOREX_MIN_SIZE;
 
-    const size = riskAmount / (stopLossPips * pipValue);
-    return Math.max(FOREX_MIN_SIZE, Math.round(size));
+    let size = riskAmount / (stopLossPips * pipValue);
+    // size = Math.max(FOREX_MIN_SIZE, Math.round(size));
+    console.log("[PositionSize] Size:", size);
+    // return Math.max(FOREX_MIN_SIZE, Math.round(size));
+    return size;
   }
 
   // Add pip value determination
