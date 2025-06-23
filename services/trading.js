@@ -180,8 +180,13 @@ class TradingService {
     const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
     try {
       const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice);
-      if (position?.dealId) {
-        await this.setupTrailingStop(symbol, signal, position.dealId, trailingStopParams);
+      if (position?.dealReference) {
+        // Fetch and log deal confirmation
+        const { getDealConfirmation } = await import("../api.js");
+        const confirmation = await getDealConfirmation(position.dealReference);
+        if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
+          console.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+        }
       }
       return position;
     } catch (error) {
@@ -274,21 +279,37 @@ class TradingService {
     const riskAmount = balance * RISK_PER_TRADE;
     const pipValue = this.getPipValue(symbol); // Dynamic pip value
 
-    // console.log(`[PositionSize] Balance: ${balance} | Entry Price: ${entryPrice} | Stop Loss Price: ${stopLossPrice} | symbol: ${symbol}`);
-
     if (!pipValue || pipValue <= 0) {
       console.error("Invalid pip value calculation");
       return 100; // Fallback with warning
     }
 
     const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
-
-    if (stopLossPips === 0) return FOREX_MIN_SIZE;
+    if (stopLossPips === 0) return 0;
 
     let size = riskAmount / (stopLossPips * pipValue);
-    // size = Math.max(FOREX_MIN_SIZE, Math.round(size));
-    console.log("[PositionSize] Size:", size);
-    // return Math.max(FOREX_MIN_SIZE, Math.round(size));
+    // Convert to units (assuming size is in lots, so multiply by 1000)
+    size = size * 1000;
+    // Floor to nearest 100
+    size = Math.floor(size / 100) * 100;
+    if (size < 100) size = 100;
+
+    // --- Margin check for 5 simultaneous trades ---
+    // Assume leverage is 30:1 for forex (can be adjusted)
+    const leverage = 30;
+    // Margin required = (size * entryPrice) / leverage
+    const marginRequired = (size * entryPrice) / leverage;
+    // Use available margin from account (set by updateAccountInfo)
+    const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
+    // Ensure margin for one trade is no more than 1/5 of available
+    const maxMarginPerTrade = availableMargin / 5;
+    if (marginRequired > maxMarginPerTrade) {
+        // Reduce size so marginRequired == maxMarginPerTrade
+        size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+        if (size < 100) size = 100;
+        console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
+    }
+    console.log(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
     return size;
   }
 

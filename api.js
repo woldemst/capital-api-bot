@@ -309,7 +309,7 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
     const position = {
       epic: symbol,
       direction: direction.toUpperCase(),
-      size: size,
+      size: size.toFixed(5),
       orderType: "MARKET",
       guaranteedStop: false,
       stopLevel: stopLevel ? parseFloat(stopLevel).toFixed(5) : undefined,
@@ -333,10 +333,11 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
 export async function getDealConfirmation(dealReference) {
   try {
     console.log(`Getting confirmation for deal: ${dealReference}`);
-    const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() }); // Fixed path
+    const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
+    console.log('[DealConfirmation]', response.data);
     return response.data;
   } catch (error) {
-    console.error("Error getting deal confirmation:", error.response?.data || error.message);
+    console.error(`[DealConfirmation] Error for ${dealReference}:`, error.response?.data || error.message);
     throw error;
   }
 }
