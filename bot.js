@@ -22,9 +22,6 @@ class TradingBot {
   async initialize() {
     let retryCount = 0;
 
-    // Fetch and store minDealSize and dealSizeIncrement for all symbols
-    await this.fetchAndStoreSymbolMinSizes();
-
     while (retryCount < this.maxRetries) {
       try {
         await startSession();
