@@ -22,6 +22,9 @@ class TradingBot {
   async initialize() {
     let retryCount = 0;
 
+    // Fetch and store minDealSize and dealSizeIncrement for all symbols
+    await this.fetchAndStoreSymbolMinSizes();
+
     while (retryCount < this.maxRetries) {
       try {
         await startSession();
@@ -231,6 +234,24 @@ class TradingBot {
     clearInterval(this.analysisInterval);
     clearInterval(this.sessionRefreshInterval);
     webSocketService.disconnect();
+  }
+
+  // Fetch and store minDealSize and dealSizeIncrement for all symbols
+  async fetchAndStoreSymbolMinSizes() {
+    const minSizes = {};
+    for (const symbol of SYMBOLS) {
+      try {
+        const details = await import("./api.js").then(api => api.getMarketDetails(symbol));
+        const minDealSize = details.instrument?.minDealSize || 1;
+        const dealSizeIncrement = details.instrument?.dealSizeIncrement || 1;
+        minSizes[symbol] = { minDealSize, dealSizeIncrement };
+        console.log(`[SymbolConfig] ${symbol}: minDealSize=${minDealSize}, dealSizeIncrement=${dealSizeIncrement}`);
+      } catch (e) {
+        console.warn(`[SymbolConfig] Could not fetch min size for ${symbol}:`, e.message);
+        minSizes[symbol] = { minDealSize: 1, dealSizeIncrement: 1 };
+      }
+    }
+    tradingService.setSymbolMinSizes(minSizes);
   }
 }
 
