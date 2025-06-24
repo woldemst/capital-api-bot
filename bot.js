@@ -3,6 +3,7 @@ import { TRADING, MODE, DEV, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
+import logger from "./utils/logger.js";
 
 const { SYMBOLS, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
@@ -28,7 +29,7 @@ class TradingBot {
         const tokens = getSessionTokens();
 
         if (!tokens.cst || !tokens.xsecurity) {
-          console.warn(`[Bot] Invalid session tokens, attempt ${retryCount + 1}/${this.maxRetries}`);
+          logger.error(`[Bot] Invalid session tokens, attempt ${retryCount + 1}/${this.maxRetries}`);
           throw new Error("Invalid session tokens");
         }
 
@@ -41,14 +42,14 @@ class TradingBot {
         return; // Success, exit the retry loop
       } catch (error) {
         retryCount++;
-        console.error(`[Bot] Initialization attempt ${retryCount} failed:`, error);
+        logger.error(`[Bot] Initialization attempt ${retryCount} failed:`, error);
 
         if (retryCount < this.maxRetries) {
-          console.log(`[Bot] Refreshing session and retrying in ${this.retryDelay / 1000}s...`);
+          logger.info(`[Bot] Refreshing session and retrying in ${this.retryDelay / 1000}s...`);
           await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
           await refreshSession();
         } else {
-          console.error("[Bot] Max retry attempts reached. Shutting down.");
+          logger.error("[Bot] Max retry attempts reached. Shutting down.");
           throw error;
         }
       }
@@ -83,7 +84,7 @@ class TradingBot {
           // console.log("[WebSocket] Message received but no epic:", message);
         }
       } catch (error) {
-        console.error("WebSocket message processing error:", error.message, data?.toString());
+        logger.error("WebSocket message processing error:", error.message, data?.toString());
       }
     });
   }
@@ -93,9 +94,9 @@ class TradingBot {
     this.sessionPingInterval = setInterval(async () => {
       try {
         await pingSession();
-        console.log("Session pinged successfully");
+        logger.info("Session pinged successfully");
       } catch (error) {
-        console.error("Session ping failed:", error.message);
+        logger.error("Session ping failed:", error.message);
       }
     }, this.pingInterval);
   }
@@ -104,20 +105,20 @@ class TradingBot {
   startAnalysisInterval() {
     const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
     if (MODE.DEV_MODE) {
-      console.log(`[DEV] Starting analysis interval: ${interval}s`);
+      logger.info(`[DEV] Starting analysis interval: ${interval}s`);
     } else {
-      console.log(`[PROD] Starting analysis interval: ${interval}s`);
+      logger.info(`[PROD] Starting analysis interval: ${interval}s`);
     }
     this.analysisInterval = setInterval(async () => {
       try {
         const now = new Date();
         const date = now.toLocaleDateString();
         const time = now.toLocaleTimeString();
-        console.log(`[${date} ${time}] Running scheduled analysis...`);
+        logger.info(`[${date} ${time}] Running scheduled analysis...`);
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
       } catch (error) {
-        console.error("Analysis interval error:", error);
+        logger.error("Analysis interval error:", error);
       }
     }, interval);
   }
@@ -135,10 +136,10 @@ class TradingBot {
       const positions = await getOpenPositions();
       if (positions?.positions) {
         tradingService.setOpenTrades(positions.positions.map((p) => p.market.epic));
-        console.log(`Current open positions: ${positions.positions.length}`);
+        logger.info(`Current open positions: ${positions.positions.length}`);
       }
     } catch (error) {
-      console.error("Failed to update account info:", error);
+      logger.error("Failed to update account info:", error);
       throw error;
     }
   }
@@ -166,7 +167,7 @@ class TradingBot {
 
   // Analyze a single symbol
   async analyzeSymbol(symbol) {
-    console.log(`Analyzing ${symbol}...`);
+    logger.info(`Analyzing ${symbol}...`);
 
     // Fetch and calculate all required data
     const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);
@@ -186,7 +187,7 @@ class TradingBot {
     // Use the latest real-time candle for bid/ask
     const latestCandle = this.latestCandles[symbol];
     if (!latestCandle) {
-      console.log(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
+      logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
       return;
     }
     await tradingService.processPrice(
@@ -210,7 +211,7 @@ class TradingBot {
       try {
         await this.analyzeSymbol(symbol);
       } catch (error) {
-        console.error(`Error analyzing ${symbol}:`, error.message);
+        logger.error(`Error analyzing ${symbol}:`, error.message);
       }
     }
   }
@@ -219,9 +220,9 @@ class TradingBot {
   async runBacktest() {
     try {
       const m1Data = await getHistorical("USDCAD", "MINUTE", 50);
-      console.log(`Backtest data fetched for USDCAD: ${m1Data.prices.length} candles`);
+      logger.info(`Backtest data fetched for USDCAD: ${m1Data.prices.length} candles`);
     } catch (error) {
-      console.error("Backtest error:", error.message);
+      logger.error("Backtest error:", error.message);
     }
   }
 
@@ -242,9 +243,9 @@ class TradingBot {
         const minDealSize = details.instrument?.minDealSize || 1;
         const dealSizeIncrement = details.instrument?.dealSizeIncrement || 1;
         minSizes[symbol] = { minDealSize, dealSizeIncrement };
-        console.log(`[SymbolConfig] ${symbol}: minDealSize=${minDealSize}, dealSizeIncrement=${dealSizeIncrement}`);
+        logger.info(`[SymbolConfig] ${symbol}: minDealSize=${minDealSize}, dealSizeIncrement=${dealSizeIncrement}`);
       } catch (e) {
-        console.warn(`[SymbolConfig] Could not fetch min size for ${symbol}:`, e.message);
+        logger.warn(`[SymbolConfig] Could not fetch min size for ${symbol}:`, e.message);
         minSizes[symbol] = { minDealSize: 1, dealSizeIncrement: 1 };
       }
     }
@@ -255,6 +256,6 @@ class TradingBot {
 // Create and start the bot
 const bot = new TradingBot();
 bot.initialize().catch((error) => {
-  console.error("Bot initialization failed:", error);
+  logger.error("Bot initialization failed:", error);
   process.exit(1);
 });

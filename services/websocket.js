@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { API } from "../config.js";
+import logger from "../utils/logger.js";
 
 const { WS_URL, KEY: API_KEY } = API;
 
@@ -22,7 +23,7 @@ class WebSocketService {
       });
 
       this.ws.on("open", () => {
-        console.log("WebSocket connected");
+        logger.info("WebSocket connected");
 
         const subscriptionMessage = {
           destination: "OHLCMarketData.subscribe",
@@ -37,11 +38,11 @@ class WebSocketService {
       this.ws.on("message", messageHandler);
 
       this.ws.on("error", (error) => {
-        console.error("WebSocket error:", error);
+        logger.error("WebSocket error:", error);
       });
 
       this.ws.on("close", () => {
-        console.log("WebSocket disconnected, attempting to reconnect in 5s...");
+        logger.info("WebSocket disconnected, attempting to reconnect in 5s...");
         setTimeout(connectWS, 5000);
       });
     };
