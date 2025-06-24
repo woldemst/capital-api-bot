@@ -1,5 +1,6 @@
 import { API } from "./config.js";
 import axios from "axios";
+import logger from "./utils/logger.js";
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
@@ -33,26 +34,28 @@ export const startSession = async () => {
     const now = new Date();
     const date = now.toLocaleDateString();
     const time = now.toLocaleTimeString();
-    console.log(`<========= Session started at ${date} ${time} =========>\n`, response.data, "\n\n");
+    logger.info(`<========= Session started at ${date} ${time} =========>`);
+    logger.info(response.data);
+    logger.info(""); // Blank line for spacing
 
     // Store the session tokens
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
 
     if (!cst || !xsecurity) {
-      console.error("Warning: Session tokens not received in response headers");
-      console.log("Response headers:", response.headers);
+      logger.warn("Session tokens not received in response headers");
+      logger.info("Response headers:", response.headers);
     }
 
-    console.log("cst:", cst, "\nxsecurity:", xsecurity, "\n");
+    logger.info(`cst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
     return response.data;
   } catch (error) {
-    console.error("Failed to start session:", error.response ? error.response.data : error.message);
-    console.log("Request config:", error.config);
+    logger.error("Failed to start session:", error.response ? error.response.data : error.message);
+    logger.error("Request config:", error.config);
     if (error.response) {
-      console.log("Response status:", error.response.status);
-      console.log("Response headers:", error.response.headers);
+      logger.error("Response status:", error.response.status);
+      logger.error("Response headers:", error.response.headers);
     }
     throw error;
   }
@@ -62,11 +65,11 @@ export const startSession = async () => {
 export const pingSession = async () => {
   try {
     const response = await axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() });
-    console.log("Ping response:", response.data);
-    console.log(`securityToken: ${xsecurity}`);
-    console.log(`CST: ${cst}`);
+    logger.info(`Ping response: ${JSON.stringify(response.data)}`);
+    logger.info(`securityToken: ${xsecurity}`);
+    logger.info(`CST: ${cst}`);
   } catch (error) {
-    console.error(`Error pinging session: ${error.message}`);
+    logger.error(`Error pinging session: ${error.message}`);
     throw error;
   }
 };
@@ -79,9 +82,9 @@ export const refreshSession = async () => {
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
     sessionStartTime = Date.now();
-    console.log("Session tokens refreshed");
+    logger.info("Session tokens refreshed");
   } catch (error) {
-    console.error(`Error refreshing session: ${error.message}`);
+    logger.error(`Error refreshing session: ${error.message}`);
     throw error;
   }
 };
@@ -90,9 +93,9 @@ export const refreshSession = async () => {
 export const getSeesionDetails = async () => {
   try {
     const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
-    console.log("session details:", response.data);
+    logger.info(`session details: ${JSON.stringify(response.data)}`);
   } catch (error) {
-    console.error("session details:", error.response?.data || error.message);
+    logger.error("session details:", error.response?.data || error.message);
   }
 };
 
@@ -100,10 +103,10 @@ export const getSeesionDetails = async () => {
 export const getAccountInfo = async () => {
   try {
     const response = await axios.get(`${API.BASE_URL}/accounts`, { headers: getHeaders() });
-    // console.log("<========= Account info received =========>\n", response.data, "\n\n");
+    // logger.info("<========= Account info received =========>\n" + JSON.stringify(response.data) + "\n\n");
     return response.data;
   } catch (error) {
-    console.error("Error getting account info:", error.response ? error.response.data : error.message);
+    logger.error("Error getting account info:", error.response ? error.response.data : error.message);
     throw error;
   }
 };
@@ -111,8 +114,7 @@ export const getAccountInfo = async () => {
 // Get activity history
 export const getActivityHistory = async (from, to) => {
   try {
-    // fetch("/history/activity?from=2022-01-17T15:09:47&to=2022-01-17T15:10:05&lastPeriod=600&detailed=true&dealId={{dealId}}&filter=source!=DEALER;type!=POSITION;status==REJECTED;epic==OIL_CRUDE,GOLD")
-    console.log(`<========= Getting activity history from ${from} to ${to} =========>\n`);
+    logger.info(`<========= Getting activity history from ${from} to ${to} =========>`);
     const response = await axios.get(`${API.BASE_URL}/history/transactions`, {
       headers: getHeaders(),
       params: {
@@ -122,10 +124,10 @@ export const getActivityHistory = async (from, to) => {
         lastPeriod: 600,
       },
     });
-    // console.log(response.data);
+    // logger.info(JSON.stringify(response.data));
     return response.data;
   } catch (error) {
-    console.error("Error getting activity history:", error.response ? error.response.data : error.message);
+    logger.error("Error getting activity history:", error.response ? error.response.data : error.message);
     throw error;
   }
 };
@@ -143,11 +145,11 @@ function formatIsoNoMs(date) {
 export const getMarkets = async () => {
   try {
     const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
-    console.log("<========= Markets received =========>\n", response.data, "\n\n");
+    logger.info("<========= Markets received =========>\n" + JSON.stringify(response.data) + "\n\n");
     // Ensure we return an array of markets
     return Array.isArray(response.data.markets) ? response.data.markets : [];
   } catch (error) {
-    console.error("Error getting markets:", error.response ? error.response.data : error.message);
+    logger.error("Error getting markets:", error.response ? error.response.data : error.message);
     throw error;
   }
 };
@@ -156,10 +158,10 @@ export const getMarkets = async () => {
 export async function getMarketDetails(symbol) {
   try {
     const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
-    console.log(`Market details for ${symbol}:`, response.data);
+    logger.info(`Market details for ${symbol}: ${JSON.stringify(response.data)}`);
     return response.data;
   } catch (error) {
-    console.error(`Error getting market details for ${symbol}:`, error.response ? error.response.data : error.message);
+    logger.error(`Error getting market details for ${symbol}:`, error.response ? error.response.data : error.message);
     throw error;
   }
 }
@@ -168,14 +170,14 @@ export async function getMarketDetails(symbol) {
 export const getOpenPositions = async () => {
   try {
     const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
-    console.log("<========= Open positions received =========>\n", response.data, "\n\n");
+    // logger.info("<========= Open positions received =========>\n" + JSON.stringify(response.data) + "\n\n");
+    logger.info("<========= Open positions received =========>\n" + response.data.length + "\n\n");
     return response.data;
   } catch (error) {
-    console.error("Error getting open positions:", error.response ? error.response.data : error.message);
+    logger.error("Error getting open positions:", error.response ? error.response.data : error.message);
     throw error;
   }
 };
-
 
 export async function getHistorical(symbol, resolution, count, from = null, to = null) {
   try {
@@ -200,7 +202,7 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
       from = formatIsoNoMs(new Date(fromMs));
     }
 
-    console.log(`from=${from} to=${to} in resolution=${resolution}`);
+    logger.info(`from=${from} to=${to} in resolution=${resolution}`);
 
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
       headers: getHeaders(true),
@@ -208,18 +210,18 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
 
     // Log prices for each candle
     // if (response.data.prices && response.data.prices.length > 0) {
-    //   console.log("\nCandle Prices:");
+    //   logger.info("\nCandle Prices:");
     //   response.data.prices.forEach((candle, index) => {
-    //     console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
-    //     console.log("Open Price - Bid:", candle.openPrice.bid);
-    //     console.log("Open Price - Ask:", candle.openPrice.ask);
-    //     console.log("Close Price - Bid:", candle.closePrice.bid);
-    //     console.log("Close Price - Ask:", candle.closePrice.ask);
-    //     console.log("High Price - Bid:", candle.highPrice.bid);
-    //     console.log("High Price - Ask:", candle.highPrice.ask);
-    //     console.log("Low Price - Bid:", candle.lowPrice.bid);
-    //     console.log("Low Price - Ask:", candle.lowPrice.ask);
-    //     console.log("Volume:", candle.lastTradedVolume);
+    //     logger.info(`\nCandle ${index + 1} at ${candle.snapshotTime}:");
+    //     logger.info("Open Price - Bid:", candle.openPrice.bid);
+    //     logger.info("Open Price - Ask:", candle.openPrice.ask);
+    //     logger.info("Close Price - Bid:", candle.closePrice.bid);
+    //     logger.info("Close Price - Ask:", candle.closePrice.ask);
+    //     logger.info("High Price - Bid:", candle.highPrice.bid);
+    //     logger.info("High Price - Ask:", candle.highPrice.ask);
+    //     logger.info("Low Price - Bid:", candle.lowPrice.bid);
+    //     logger.info("Low Price - Ask:", candle.lowPrice.ask);
+    //     logger.info("Volume:", candle.lastTradedVolume);
     //   });
     // }
     // return response.data;
@@ -233,7 +235,7 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
       })),
     };
   } catch (error) {
-    console.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
+    logger.error(`Error fetching historical data for ${symbol}:`, error.response ? error.response.data : error.message);
     throw error;
   }
 }
@@ -241,7 +243,7 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
 // Place an order
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
   try {
-    console.log(`Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
+    logger.info(`Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
 
     const order = {
       epic: symbol,
@@ -263,11 +265,11 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
       headers: getHeaders(true),
     });
 
-    console.log("Order response:", response.data);
+    logger.info("Order response:", response.data);
     return response.data;
   } catch (error) {
     if (error.response?.data) {
-      console.error("Order placement error:", error.response.data);
+      logger.error("Order placement error:", error.response.data);
       throw new Error(error.response.data.errorCode || "Order placement failed");
     }
     throw error;
@@ -277,7 +279,7 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
 // Update trailing stop
 export async function updateTrailingStop(positionId, stopLevel) {
   try {
-    console.log(`Updating trailing stop for position ${positionId} to ${stopLevel}`);
+    logger.info(`Updating trailing stop for position ${positionId} to ${stopLevel}`);
 
     const response = await axios.put(
       `${API.BASE_URL}/positions/${positionId}`,
@@ -290,10 +292,10 @@ export async function updateTrailingStop(positionId, stopLevel) {
       }
     );
 
-    console.log("Trailing stop updated successfully:", response.data);
+    logger.info("Trailing stop updated successfully:", response.data);
     return response.data;
   } catch (error) {
-    console.error(`Error updating trailing stop for position ${positionId}:`, error.response ? error.response.data : error.message);
+    logger.error(`Error updating trailing stop for position ${positionId}:`, error.response ? error.response.data : error.message);
     throw error;
   }
 }
@@ -301,9 +303,9 @@ export async function updateTrailingStop(positionId, stopLevel) {
 // Place an immediate position for scalping
 export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
   try {
-    console.log(`Placing ${direction} position for ${symbol} at market price...`);
-    console.log(`Original size: ${size}, Using size: ${size}`);
-    console.log(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
+    logger.info(`Placing ${direction} position for ${symbol} at market price...`);
+    logger.info(`Original size: ${size}, Using size: ${size}`);
+    logger.info(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
 
     // Format the position request
     const position = {
@@ -317,14 +319,14 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
       forceOpen: true,
     };
 
-    console.log("Sending position request:", position);
+    logger.info("Sending position request:", position);
 
     const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
 
-    console.log("Position created successfully:", response.data);
+    logger.info("Position created successfully:", response.data);
     return response.data;
   } catch (error) {
-    console.error("Position creation error:", error.response?.data || error.message);
+    logger.error("Position creation error:", error.response?.data || error.message);
     throw error;
   }
 }
@@ -332,12 +334,12 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
 // Get deal confirmation
 export async function getDealConfirmation(dealReference) {
   try {
-    console.log(`Getting confirmation for deal: ${dealReference}`);
+    logger.info(`Getting confirmation for deal: ${dealReference}`);
     const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
-    console.log('[DealConfirmation]', response.data);
+    logger.info("[DealConfirmation]", response.data);
     return response.data;
   } catch (error) {
-    console.error(`[DealConfirmation] Error for ${dealReference}:`, error.response?.data || error.message);
+    logger.error(`[DealConfirmation] Error for ${dealReference}:`, error.response?.data || error.message);
     throw error;
   }
 }
@@ -345,4 +347,34 @@ export async function getDealConfirmation(dealReference) {
 // Export session tokens for WebSocket connection
 export function getSessionTokens() {
   return { cst, xsecurity };
+}
+
+// Get allowed TP/SL range for a symbol
+export async function getAllowedTPRange(symbol) {
+  try {
+    const details = await getMarketDetails(symbol);
+    // Capital.com returns min/max distances in marketDetails.instrument
+    const instr = details.instrument;
+    // For forex, these are usually in points (e.g. 10 = 0.0010 for EURUSD)
+    return {
+      minTPDistance: instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0,
+      maxTPDistance: instr.limits?.limitDistance?.max || instr.limits?.limitLevel?.max || Number.POSITIVE_INFINITY,
+      minSLDistance: instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0,
+      maxSLDistance: instr.limits?.stopDistance?.max || instr.limits?.stopLevel?.max || Number.POSITIVE_INFINITY,
+      // For reference, also return the instrument decimals
+      decimals: instr.lotSizeScale || instr.scalingFactor || 5,
+      // And the current market price (for level calculations)
+      market: details.snapshot,
+    };
+  } catch (error) {
+    logger.error(`[getAllowedTPRange] Error for ${symbol}:`, error.message);
+    return {
+      minTPDistance: 0,
+      maxTPDistance: Number.POSITIVE_INFINITY,
+      minSLDistance: 0,
+      maxSLDistance: Number.POSITIVE_INFINITY,
+      decimals: 5,
+      market: {},
+    };
+  }
 }

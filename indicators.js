@@ -1,11 +1,12 @@
 import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
+import logger from "./utils/logger.js";
 
 const { RSI: RSI_CONFIG, MACD: MACD_CONFIG, BOLLINGER, ATR: ATR_CONFIG } = ANALYSIS;
 
-export async function calcIndicators(bars) {
+export async function calcIndicators(bars, symbol = '', timeframe = '') {
   if (!bars || !Array.isArray(bars) || bars.length === 0) {
-    console.warn("[Indicators] No bars provided for indicator calculation.");
+    logger.error(`[Indicators] No bars provided for indicator calculation for ${symbol} ${timeframe}`);
     return {};
   }
 
@@ -29,7 +30,7 @@ export async function calcIndicators(bars) {
   }
   const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
 
-  return {
+  const result = {
     // Trend EMAs
     emaFast: emaFast.length ? emaFast[emaFast.length - 1] : null,
     emaSlow: emaSlow.length ? emaSlow[emaSlow.length - 1] : null,
@@ -75,6 +76,8 @@ export async function calcIndicators(bars) {
       ema9[ema9.length - 1] < ema21[ema21.length - 1] &&
       ema9[ema9.length - 2] >= ema21[ema21.length - 2],
   };
+  logger.indicator(symbol, timeframe, result);
+  return result;
 }
 
 // Analyze trend on higher timeframes

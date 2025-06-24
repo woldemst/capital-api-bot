@@ -1,5 +1,6 @@
 import { TRADING, ANALYSIS } from "../config.js";
-import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
+import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange } from "../api.js";
+import logger from "../utils/logger.js";
 const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
 
 const RSI_CONFIG = {
@@ -38,7 +39,7 @@ class TradingService {
 
   validatePrices(bid, ask, symbol) {
     if (typeof bid !== "number" || typeof ask !== "number" || isNaN(bid) || isNaN(ask)) {
-      console.error(`[PriceValidation] Invalid prices for ${symbol}. Bid: ${bid}, Ask: ${ask}`);
+      logger.error(`[PriceValidation] Invalid prices for ${symbol}. Bid: ${bid}, Ask: ${ask}`);
       return false;
     }
     return true;
@@ -46,25 +47,25 @@ class TradingService {
 
   validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
     if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
-      console.log("[Signal] Missing required indicators data");
+      logger.info("[Signal] Missing required indicators data");
       return false;
     }
     return true;
   }
 
   logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-    // console.log(`\n=== Analyzing ${symbol} ===`);
-    // console.log("Current price:", { bid, ask });
-    // console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
-    // console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
-    // console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
-    // console.log("Trend:", trendAnalysis.h4Trend);
+    // logger.info(`\n=== Analyzing ${symbol} ===`);
+    // logger.info("Current price:", { bid, ask });
+    // logger.info("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
+    // logger.info("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
+    // logger.info("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
+    // logger.info("Trend:", trendAnalysis.h4Trend);
   }
 
   evaluateSignals(buyConditions, sellConditions) {
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
-    console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
+    logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
     let signal = null;
     // Relaxed: only 3/6 conditions needed for a signal
     if (buyScore >= 3) {
@@ -77,17 +78,16 @@ class TradingService {
 
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
-    // Log all indicator values for debugging
-    // console.log(`[Signal] Generating signal for ${symbol}`);
-    // console.log("[Indicators] H4:", indicators.h4);
-    // console.log("[Indicators] H1:", indicators.h1);
-    // console.log("[Indicators] M15:", indicators.m15);
+    // logger.info(`[Signal] Generating signal for ${symbol}`);
+    // logger.info("[Indicators] H4:", indicators.h4);
+    // logger.info("[Indicators] H1:", indicators.h1);
+    // logger.info("[Indicators] M15:", indicators.m15);
     const trendAnalysis = message.trendAnalysis;
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
-      console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
+      logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
     } else {
-      console.log(`[Signal] Signal for ${symbol}: ${result.signal.toUpperCase()}`);
+      logger.info(`[Signal] Signal for ${symbol}: ${result.signal.toUpperCase()}`);
     }
     return result;
   }
@@ -125,14 +125,75 @@ class TradingService {
     ];
   }
 
+  // Validate and adjust TP/SL to allowed range
+  async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
+    const range = await getAllowedTPRange(symbol);
+    let newTP = takeProfitPrice;
+    let newSL = stopLossPrice;
+    const decimals = range.decimals || 5;
+    // For forex, TP/SL must be at least minTPDistance away from entry, and not violate maxTPDistance
+    // For SELL: TP < entry, SL > entry. For BUY: TP > entry, SL < entry
+    if (direction === "buy") {
+      const minTP = entryPrice + range.minTPDistance * Math.pow(10, -decimals);
+      const maxTP = entryPrice + range.maxTPDistance * Math.pow(10, -decimals);
+      if (newTP < minTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) < min allowed (${minTP}). Adjusting.`);
+        newTP = minTP;
+      }
+      if (newTP > maxTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) > max allowed (${maxTP}). Adjusting.`);
+        newTP = maxTP;
+      }
+      // Repeat for SL
+      const minSL = entryPrice - range.maxSLDistance * Math.pow(10, -decimals);
+      const maxSL = entryPrice - range.minSLDistance * Math.pow(10, -decimals);
+      if (newSL < minSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) < min allowed (${minSL}). Adjusting.`);
+        newSL = minSL;
+      }
+      if (newSL > maxSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) > max allowed (${maxSL}). Adjusting.`);
+        newSL = maxSL;
+      }
+    } else {
+      // SELL
+      const minTP = entryPrice - range.maxTPDistance * Math.pow(10, -decimals);
+      const maxTP = entryPrice - range.minTPDistance * Math.pow(10, -decimals);
+      if (newTP > maxTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) > max allowed (${maxTP}). Adjusting.`);
+        newTP = maxTP;
+      }
+      if (newTP < minTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) < min allowed ( ${minTP}). Adjusting.`);
+        newTP = minTP;
+      }
+      // Repeat for SL
+      const minSL = entryPrice + range.minSLDistance * Math.pow(10, -decimals);
+      const maxSL = entryPrice + range.maxSLDistance * Math.pow(10, -decimals);
+      if (newSL < minSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) < min allowed (${minSL}). Adjusting.`);
+        newSL = minSL;
+      }
+      if (newSL > maxSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) > max allowed (${maxSL}). Adjusting.`);
+        newSL = maxSL;
+      }
+    }
+    return { stopLossPrice: newSL, takeProfitPrice: newTP };
+  }
+
   async executeTrade(signal, symbol, bid, ask) {
-    console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
+    logger.trade(signal.toUpperCase(), symbol, { bid, ask });
     const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
-    // this.logTradeParameters(signal, params.size, params.stopLossPrice, params.takeProfitPrice, params.stopLossPips);
+    // Validate TP/SL before placing trade
+    const price = signal === "buy" ? ask : bid;
+    const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
+    params.stopLossPrice = validated.stopLossPrice;
+    params.takeProfitPrice = validated.takeProfitPrice;
     try {
       await this.executePosition(signal, symbol, params);
     } catch (error) {
-      console.error(`[TradeExecution] Failed for ${symbol}:`, error);
+      logger.error(`[TradeExecution] Failed for ${symbol}:`, error);
       throw error;
     }
   }
@@ -145,7 +206,7 @@ class TradingService {
     const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
     const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
-    console.log(`[calculateTradeParameters] Size: ${size}`);
+    logger.info(`[calculateTradeParameters] Size: ${size}`);
 
     // Trailing stop parameters
     const trailingStopParams = {
@@ -171,7 +232,7 @@ class TradingService {
   }
 
   logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips) {
-    console.log(
+    logger.info(
       `[TradeParams] Entry: ${signal.toUpperCase()} | Size: ${size} | SL: ${stopLossPrice} (${stopLossPips}) | TP: ${takeProfitPrice}`
     );
   }
@@ -185,19 +246,19 @@ class TradingService {
         const { getDealConfirmation } = await import("../api.js");
         const confirmation = await getDealConfirmation(position.dealReference);
         if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
-          console.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+          logger.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
         }
       }
       return position;
     } catch (error) {
-      console.error(`[Position] Failed for ${symbol}:`, error);
+      logger.error(`[Position] Failed for ${symbol}:`, error);
       throw error;
     }
   }
 
   async setupTrailingStop(symbol, signal, dealId, params) {
     if (!dealId || !params?.trailingDistance) {
-      console.warn("[TrailingStop] Missing required parameters");
+      logger.warn("[TrailingStop] Missing required parameters");
       return;
     }
 
@@ -209,7 +270,7 @@ class TradingService {
           await updateTrailingStop(dealId, params.trailingDistance);
         }
       } catch (error) {
-        console.error("[TrailingStop] Error:", error.message);
+        logger.error("[TrailingStop] Error:", error.message);
       }
     }, 5 * 60 * 1000);
   }
@@ -234,7 +295,7 @@ class TradingService {
       const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
       return atr;
     } catch (error) {
-      console.error("[ATR] Error:", error);
+      logger.error("[ATR] Error:", error);
       return 0.001;
     }
   }
@@ -245,19 +306,20 @@ class TradingService {
       if (!message) return;
       const candle = message;
       symbol = candle.symbol || candle.epic;
-      console.log(`\n=== Processing ${symbol} ===`);
-      console.log(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
+      logger.info(`\n=== Processing ${symbol} ===`);
+      logger.info("")
+      logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
       if (this.openTrades.length >= maxOpenTrades) {
-        console.log(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
+        logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
         return;
       }
       if (this.isSymbolTraded(symbol)) {
-        console.log(`[ProcessPrice] ${symbol} already has an open position.`);
+        logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
       // const hour = new Date().getUTCHours();
       // if (hour < 6 || hour > 22) {
-      //   console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
+      //   logger.info(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
       //   return;
       // }
       const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
@@ -271,7 +333,7 @@ class TradingService {
       }
       // ---------------
     } catch (error) {
-      console.error(`[ProcessPrice] Error for ${symbol}:`, error);
+      logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
   }
 
@@ -280,7 +342,7 @@ class TradingService {
     const pipValue = this.getPipValue(symbol); // Dynamic pip value
 
     if (!pipValue || pipValue <= 0) {
-      console.error("Invalid pip value calculation");
+      logger.error("Invalid pip value calculation");
       return 100; // Fallback with warning
     }
 
@@ -307,9 +369,9 @@ class TradingService {
         // Reduce size so marginRequired == maxMarginPerTrade
         size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
         if (size < 100) size = 100;
-        console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
+        logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
     }
-    console.log(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
+    logger.info(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
     return size;
   }
 
@@ -331,6 +393,48 @@ class TradingService {
       buyScore,
       sellScore,
     };
+  }
+
+  // Monitor open trades and close if exit conditions are met
+  async monitorOpenTrades(latestIndicatorsBySymbol) {
+    const positions = await getOpenPositions();
+    if (!positions?.positions) return;
+    for (const p of positions.positions) {
+      const symbol = p.market.epic;
+      const direction = p.position.direction.toLowerCase();
+      const dealId = p.position.dealId;
+      // Get latest indicators for this symbol
+      const indicators = latestIndicatorsBySymbol[symbol];
+      if (!indicators) continue;
+      // Trailing stop logic (move SL up if price moves in favor)
+      // (Assume trailing stop is ATR-based, 1x ATR behind price)
+      const atr = indicators.atr;
+      const price = direction === "buy" ? p.market.bid : p.market.offer;
+      let newStop = null;
+      if (direction === "buy") {
+        newStop = price - atr;
+        if (newStop > p.position.stopLevel) {
+          await updateTrailingStop(dealId, newStop);
+          logger.info(`[TrailingStop] Updated for ${symbol} to ${newStop}`);
+        }
+      } else if (direction === "sell") {
+        newStop = price + atr;
+        if (newStop < p.position.stopLevel) {
+          await updateTrailingStop(dealId, newStop);
+          logger.info(`[TrailingStop] Updated for ${symbol} to ${newStop}`);
+        }
+      }
+      // Indicator-based exit: close if trend reverses or EMA cross
+      if (
+        (direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
+        (direction === "sell" && indicators.emaFast > indicators.emaSlow)
+      ) {
+        // Close position via API (not shown, you may need to implement closePosition)
+        logger.info(`[Exit] Closing ${symbol} (${direction}) due to EMA cross/invalidated trend.`);
+        // await closePosition(dealId); // Implement this in your API
+      }
+      // You can add more exit rules here (e.g., MACD cross, RSI, etc.)
+    }
   }
 }
 
