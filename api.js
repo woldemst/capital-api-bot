@@ -16,6 +16,15 @@ export const getHeaders = (includeContentType = false) => {
   return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
+// Helper: format Date in “YYYY-MM-DDTHH:mm:ss” (no ms, no Z)
+function formatIsoNoMs(date) {
+  if (!(date instanceof Date) || isNaN(date)) {
+    throw new Error("Invalid date object passed to formatIsoNoMs");
+  }
+  const iso = date.toISOString();
+  return iso.split(".")[0];
+}
+
 // Start a new session with the API
 export const startSession = async () => {
   try {
