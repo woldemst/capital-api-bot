@@ -44,8 +44,8 @@ export const startSession = async () => {
     const date = now.toLocaleDateString();
     const time = now.toLocaleTimeString();
     logger.info(`<========= Session started at ${date} ${time} =========>`);
-    logger.info(response.data);
-    logger.info(""); // Blank line for spacing
+    // logger.info(response.data);
+    // logger.info(""); // Blank line for spacing
 
     // Store the session tokens
     cst = response.headers["cst"];
@@ -56,7 +56,7 @@ export const startSession = async () => {
       logger.info("Response headers:", response.headers);
     }
 
-    logger.info(`\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
+    logger.info(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
     return response.data;
   } catch (error) {
@@ -151,7 +151,7 @@ export async function getMarketDetails(symbol) {
 
 export const getOpenPositions = async () => withSessionRetry(async () => {
   const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
-  logger.info("<========= j =========>\n" + response.data.length + "\n\n");
+  logger.info("<========= open positions =========>\n" + JSON.stringify(response.data, null, 2) + "\n\n");
   return response.data;
 });
 
