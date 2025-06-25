@@ -1,5 +1,5 @@
 import { TRADING, ANALYSIS } from "../config.js";
-import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange } from "../api.js";
+import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
 import logger from "../utils/logger.js";
 const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
 
@@ -395,45 +395,69 @@ class TradingService {
     };
   }
 
-  // Monitor open trades and close if exit conditions are met
+  // --- Improved: Monitor open trades and close if exit conditions are met ---
   async monitorOpenTrades(latestIndicatorsBySymbol) {
-    const positions = await getOpenPositions();
-    if (!positions?.positions) return;
-    for (const p of positions.positions) {
+    const positionsData = await getOpenPositions();
+    if (!positionsData?.positions) return;
+    for (const p of positionsData.positions) {
       const symbol = p.market.epic;
       const direction = p.position.direction.toLowerCase();
       const dealId = p.position.dealId;
-      // Get latest indicators for this symbol
+      const entry = p.position.openLevel;
+      const size = p.position.size;
+      const stopLevel = p.position.stopLevel;
+      const price = direction === "buy" ? p.market.bid : p.market.offer;
+      const profit = (direction === "buy" ? price - entry : entry - price) * size;
       const indicators = latestIndicatorsBySymbol[symbol];
       if (!indicators) continue;
-      // Trailing stop logic (move SL up if price moves in favor)
-      // (Assume trailing stop is ATR-based, 1x ATR behind price)
-      const atr = indicators.atr;
-      const price = direction === "buy" ? p.market.bid : p.market.offer;
-      let newStop = null;
-      if (direction === "buy") {
-        newStop = price - atr;
-        if (newStop > p.position.stopLevel) {
-          await updateTrailingStop(dealId, newStop);
-          logger.info(`[TrailingStop] Updated for ${symbol} to ${newStop}`);
-        }
-      } else if (direction === "sell") {
-        newStop = price + atr;
-        if (newStop < p.position.stopLevel) {
+
+      // 1. Trailing stop logic (move SL up if price moves in favor)
+      if (profit > 0) {
+        const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
+        if ((direction === "buy" && newStop > stopLevel) || (direction === "sell" && newStop < stopLevel)) {
           await updateTrailingStop(dealId, newStop);
           logger.info(`[TrailingStop] Updated for ${symbol} to ${newStop}`);
         }
       }
-      // Indicator-based exit: close if trend reverses or EMA cross
-      if (
-        (direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
-        (direction === "sell" && indicators.emaFast > indicators.emaSlow)
-      ) {
-        // Close position via API (not shown, you may need to implement closePosition)
-        logger.info(`[Exit] Closing ${symbol} (${direction}) due to EMA cross/invalidated trend.`);
-        // await closePosition(dealId); // Implement this in your API
+
+      // 2. Indicator-based exit: close if trend reverses and in profit
+      let exitReason = null;
+      if (profit > 0) {
+        // EMA cross exit
+        if ((direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
+            (direction === "sell" && indicators.emaFast > indicators.emaSlow)) {
+          exitReason = "EMA cross";
+        }
+        // MACD cross exit (optional, can combine with EMA)
+        if ((direction === "buy" && indicators.macd?.histogram < 0) ||
+            (direction === "sell" && indicators.macd?.histogram > 0)) {
+          exitReason = exitReason ? exitReason + ", MACD" : "MACD";
+        }
+        // RSI overbought/oversold exit (optional)
+        if ((direction === "buy" && indicators.rsi > 65) ||
+            (direction === "sell" && indicators.rsi < 35)) {
+          exitReason = exitReason ? exitReason + ", RSI" : "RSI";
+        }
       }
-      // You can add more exit rules here (e.g., MACD cross, RSI, etc.)
+      if (exitReason) {
+        // You need to implement closePosition in your API
+        if (typeof this.closePosition === "function") {
+          await this.closePosition(dealId);
+          logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, locked profit: ${profit}`);
+        } else {
+          logger.info(`[Exit] Would close ${symbol} (${direction}) due to: ${exitReason}, locked profit: ${profit}`);
+        }
+      }
+    }
+  }
+
+  // Close position by dealId
+  async closePosition(dealId) {
+    try {
+      await apiClosePosition(dealId);
+      logger.info(`[API] Closed position for dealId: ${dealId}`);
+    } catch (error) {
+      logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
     }
   }
 }

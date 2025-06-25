@@ -1,4 +1,4 @@
-import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens } from "./api.js";
+import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession } from "./api.js";
 import { TRADING, MODE, DEV, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
@@ -17,6 +17,7 @@ class TradingBot {
     this.maxRetries = 3;
     this.retryDelay = 30000; // 30 seconds
     this.latestCandles = {}; // Store latest candles for each symbol
+    this.monitorInterval = null; // Add monitor interval for open trades
   }
 
   // Initialize the bot and start necessary services
@@ -61,6 +62,7 @@ class TradingBot {
     this.setupWebSocket(tokens);
     this.startSessionPing();
     this.startAnalysisInterval();
+    this.startMonitorOpenTrades(); // Add monitor open trades interval
     this.isRunning = true;
   }
 
@@ -250,6 +252,24 @@ class TradingBot {
       }
     }
     tradingService.setSymbolMinSizes(minSizes);
+  }
+
+  // Monitor open trades every 2 minutes
+  startMonitorOpenTrades() {
+    this.monitorInterval = setInterval(async () => {
+      try {
+        const latestIndicatorsBySymbol = {};
+        for (const symbol of TRADING.SYMBOLS) {
+          const candles = this.latestCandles[symbol]?.candles || [];
+          if (candles.length > 0) {
+            latestIndicatorsBySymbol[symbol] = await calcIndicators(candles, symbol);
+          }
+        }
+        await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+      } catch (error) {
+        logger.error("[Bot] Error in monitorOpenTrades:", error);
+      }
+    }, 2 * 60 * 1000); // every 2 minutes
   }
 }
 
