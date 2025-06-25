@@ -151,7 +151,7 @@ export async function getMarketDetails(symbol) {
 
 export const getOpenPositions = async () => withSessionRetry(async () => {
   const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
-  logger.info("<========= Open positions received =========>\n" + response.data.length + "\n\n");
+  logger.info("<========= j =========>\n" + response.data.length + "\n\n");
   return response.data;
 });
 
@@ -255,6 +255,21 @@ export async function getDealConfirmation(dealReference) {
     logger.info("[DealConfirmation]", response.data);
     return response.data;
   });
+}
+
+// Close position by dealId
+export async function closePosition(dealId) {
+  try {
+    // Capital.com: DELETE /positions/{dealId}
+    const response = await axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
+      headers: getHeaders(true),
+    });
+    logger.info(`[API] Position closed:`, response.data);
+    return response.data;
+  } catch (error) {
+    logger.error(`[API] Failed to close position for dealId: ${dealId}`, error.response?.data || error.message);
+    throw error;
+  }
 }
 
 // Export session tokens for WebSocket connection
