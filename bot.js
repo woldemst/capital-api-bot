@@ -243,7 +243,7 @@ class TradingBot {
     const minSizes = {};
     for (const symbol of SYMBOLS) {
       try {
-        const details = await import("./api.js").then(api => api.getMarketDetails(symbol));
+        const details = await import("./api.js").then((api) => api.getMarketDetails(symbol));
         const minDealSize = details.instrument?.minDealSize || 1;
         const dealSizeIncrement = details.instrument?.dealSizeIncrement || 1;
         minSizes[symbol] = { minDealSize, dealSizeIncrement };
@@ -258,7 +258,7 @@ class TradingBot {
 
   // Monitor open trades every 2 minutes
   startMonitorOpenTrades() {
-    logger.info("[Monitor] Starting open trade monitor interval (every 2 minutes)");
+    logger.info("[Monitor] Starting open trade monitor interval (every 1 minute)");
     this.monitorInterval = setInterval(async () => {
       logger.info(`[Monitor] Checking open trades at ${new Date().toISOString()}`);
       try {
@@ -276,7 +276,7 @@ class TradingBot {
       } catch (error) {
         logger.error("[Bot] Error in monitorOpenTrades:", error);
       }
-    }, 2 * 60 * 1000); // every 2 minutes
+    }, 1 * 60 * 1000); // every 1 min
   }
 }
 

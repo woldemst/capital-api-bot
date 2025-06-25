@@ -23,7 +23,7 @@ class WebSocketService {
       });
 
       this.ws.on("open", () => {
-        logger.info("WebSocket connected");
+        // logger.info("WebSocket connected");
 
         const subscriptionMessage = {
           destination: "OHLCMarketData.subscribe",
