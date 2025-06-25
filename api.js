@@ -56,7 +56,7 @@ export const startSession = async () => {
       logger.info("Response headers:", response.headers);
     }
 
-    logger.info(`cst: ${cst} \nxsecurity: ${xsecurity} \n`);
+    logger.info(`\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
     return response.data;
   } catch (error) {

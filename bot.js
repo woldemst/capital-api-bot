@@ -73,10 +73,12 @@ class TradingBot {
         const message = JSON.parse(data.toString());
         if (message.payload?.epic) {
           const candle = message.payload;
-          // Improved: log every received candle for debugging
-          // console.log("[WebSocket] Received candle for", candle.epic, candle);
-          // Store the latest candle for the symbol
-          this.latestCandles[candle.epic] = candle;
+          // Maintain a rolling array of last 50 candles per symbol
+          if (!this.latestCandles[candle.epic]) this.latestCandles[candle.epic] = [];
+          this.latestCandles[candle.epic].push(candle);
+          if (this.latestCandles[candle.epic].length > 50) {
+            this.latestCandles[candle.epic].shift();
+          }
           // Only analyze on completed candles (avoid duplicates)
           if (candle.complete || candle.snapshotTimeUTC) {
             this.analyzeSymbol(candle.epic);
@@ -256,16 +258,21 @@ class TradingBot {
 
   // Monitor open trades every 2 minutes
   startMonitorOpenTrades() {
+    logger.info("[Monitor] Starting open trade monitor interval (every 2 minutes)");
     this.monitorInterval = setInterval(async () => {
+      logger.info(`[Monitor] Checking open trades at ${new Date().toISOString()}`);
       try {
         const latestIndicatorsBySymbol = {};
         for (const symbol of TRADING.SYMBOLS) {
-          const candles = this.latestCandles[symbol]?.candles || [];
+          const candles = this.latestCandles[symbol] || [];
+          logger.info(`[Monitor] Symbol: ${symbol}, candles available: ${candles.length}`);
           if (candles.length > 0) {
             latestIndicatorsBySymbol[symbol] = await calcIndicators(candles, symbol);
+            logger.info(`[Monitor] Calculated indicators for ${symbol}`);
           }
         }
         await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+        logger.info("[Monitor] monitorOpenTrades completed");
       } catch (error) {
         logger.error("[Bot] Error in monitorOpenTrades:", error);
       }
