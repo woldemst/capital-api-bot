@@ -500,9 +500,24 @@ class TradingService {
         }
         // Tighten trailing stop to lock in profit
         const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
-        if ((direction === "buy" && newStop > stopLevel) || (direction === "sell" && newStop < stopLevel)) {
+        // --- Trailing stop validation (Capital.com expects stop to be at least minStopDistance from current price, and on correct side) ---
+        const range = await getAllowedTPRange(symbol);
+        const decimals = range.decimals || 5;
+        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+        let valid = false;
+        if (direction === "buy") {
+          // For buy, stop must be BELOW current price by at least minStopDistance
+          if (newStop < price - minStopDistance) valid = true;
+        } else {
+          // For sell, stop must be ABOVE current price by at least minStopDistance
+          if (newStop > price + minStopDistance) valid = true;
+        }
+        logger.info(`[TrailingStop] Validation for ${symbol}: direction=${direction}, price=${price}, newStop=${newStop}, minStopDistance=${minStopDistance}, valid=${valid}`);
+        if (valid) {
           await updateTrailingStop(dealId, newStop);
           logger.info(`[TrailingStop] Tightened for ${symbol} to ${newStop} after partial close.`);
+        } else {
+          logger.warn(`[TrailingStop] Not updated for ${symbol}: newStop ${newStop} not valid (must be at least ${minStopDistance} from price ${price})`);
         }
       }
 
@@ -518,24 +533,31 @@ class TradingService {
       // 3. Dynamic trailing stop logic (trail as price moves in favor, not just profit > 0)
       let shouldTrail = false;
       let newStop = stopLevel;
+      // --- Trailing stop validation ---
+      const range = await getAllowedTPRange(symbol);
+      const decimals = range.decimals || 5;
+      const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
       if (direction === "buy") {
         // Only trail up, never down
-        const candidate = price - (indicators.atr * (indicators.atr ? 1 : 1)); // You can make this multiplier configurable
-        if (candidate > stopLevel) {
+        const candidate = price - (indicators.atr * (indicators.atr ? 1 : 1));
+        if (candidate > stopLevel && candidate < price - minStopDistance) {
           newStop = candidate;
           shouldTrail = true;
         }
       } else {
         // Only trail down, never up
         const candidate = price + (indicators.atr * (indicators.atr ? 1 : 1));
-        if (candidate < stopLevel) {
+        if (candidate < stopLevel && candidate > price + minStopDistance) {
           newStop = candidate;
           shouldTrail = true;
         }
       }
+      // logger.info(`[TrailingStop] Dynamic validation for ${symbol}: direction=${direction}, price=${price}, newStop=${newStop}, minStopDistance=${minStopDistance}, shouldTrail=${shouldTrail}`);
       if (shouldTrail) {
         await updateTrailingStop(dealId, newStop);
         logger.info(`[TrailingStop] Dynamically updated for ${symbol} to ${newStop}`);
+      } else if (newStop !== stopLevel) {
+        logger.warn(`[TrailingStop] Not updated for ${symbol}: newStop ${newStop} not valid (must be at least ${minStopDistance} from price ${price})`);
       }
 
       // 4. Indicator-based exit: close if trend reverses (regardless of profit)
