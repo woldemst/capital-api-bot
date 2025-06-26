@@ -40,10 +40,7 @@ export const startSession = async () => {
       }
     );
 
-    const now = new Date();
-    const date = now.toLocaleDateString();
-    const time = now.toLocaleTimeString();
-    logger.info(`<========= Session started at ${date} ${time} =========>`);
+    logger.info(`<========= Session started =========>`);
     // logger.info(response.data);
     // logger.info(""); // Blank line for spacing
 
