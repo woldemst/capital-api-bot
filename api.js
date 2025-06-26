@@ -40,10 +40,7 @@ export const startSession = async () => {
       }
     );
 
-    const now = new Date();
-    const date = now.toLocaleDateString();
-    const time = now.toLocaleTimeString();
-    logger.info(`<========= Session started at ${date} ${time} =========>`);
+    logger.info(`<========= Session started =========>`);
     // logger.info(response.data);
     // logger.info(""); // Blank line for spacing
 
@@ -110,23 +107,44 @@ export const getSeesionDetails = async () => {
 
 // Helper: Retry API call after session refresh if session error
 async function withSessionRetry(fn, ...args) {
-  try {
-    return await fn(...args);
-  } catch (error) {
-    const status = error.response?.status;
-    const errorCode = error.response?.data?.errorCode || "";
-    if (
-      status === 401 ||
-      status === 403 ||
-      errorCode === "error.invalid.session.token" ||
-      (typeof errorCode === "string" && errorCode.toLowerCase().includes("session"))
-    ) {
-      logger.warn("[API] Session error detected. Refreshing session and retrying...");
-      await refreshSession();
-      // Try again once
+  let attempts = 0;
+  const maxAttempts = 3;
+  while (attempts < maxAttempts) {
+    try {
       return await fn(...args);
+    } catch (error) {
+      const status = error.response?.status;
+      const errorCode = error.response?.data?.errorCode || "";
+      // Session/token errors
+      if (
+        status === 401 ||
+        status === 403 ||
+        errorCode === "error.invalid.session.token" ||
+        (typeof errorCode === "string" && errorCode.toLowerCase().includes("session"))
+      ) {
+        logger.warn("[API] Session error detected. Refreshing session and retrying...");
+        await refreshSession();
+        // Try again once
+        return await fn(...args);
+      }
+      // Retry on 500 TimeoutException
+      if (status === 500 && errorCode === "java.util.concurrent.TimeoutException") {
+        attempts++;
+        if (attempts < maxAttempts) {
+          await new Promise((res) => setTimeout(res, 1500));
+          continue;
+        }
+      }
+      // Retry on generic 500 errors (server errors)
+      if (status === 500) {
+        attempts++;
+        if (attempts < maxAttempts) {
+          await new Promise((res) => setTimeout(res, 1500));
+          continue;
+        }
+      }
+      throw error;
     }
-    throw error;
   }
 }
 
@@ -160,6 +178,7 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
     const nowMs = Date.now();
     if (!to) {
       to = formatIsoNoMs(new Date(nowMs));
+      // “2025-06-04T18:43:50”
     }
     if (!from) {
       const resolutionToMs = {
@@ -172,12 +191,32 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
       };
       const stepMs = resolutionToMs[resolution] || resolutionToMs.m1;
       const fromMs = nowMs - count * stepMs;
+
+      // “2025-04-24T00:00:00”
       from = formatIsoNoMs(new Date(fromMs));
     }
     logger.info(`from=${from} to=${to} in resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
       headers: getHeaders(true),
     });
+
+    // Log prices for each candle
+    // if (response.data.prices && response.data.prices.length > 0) {
+    //   console.log("\nCandle Prices:");
+    //   response.data.prices.forEach((candle, index) => {
+    //     console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
+    //     console.log("Open Price - Bid:", candle.openPrice.bid);
+    //     console.log("Open Price - Ask:", candle.openPrice.ask);
+    //     console.log("Close Price - Bid:", candle.closePrice.bid);
+    //     console.log("Close Price - Ask:", candle.closePrice.ask);
+    //     console.log("High Price - Bid:", candle.highPrice.bid);
+    //     console.log("High Price - Ask:", candle.highPrice.ask);
+    //     console.log("Low Price - Bid:", candle.lowPrice.bid);
+    //     console.log("Low Price - Ask:", candle.lowPrice.ask);
+    //     console.log("Volume:", candle.lastTradedVolume);
+    //   });
+    // }
+    // return response.data;
     return {
       prices: response.data.prices.map((p) => ({
         close: p.closePrice?.bid,
@@ -199,7 +238,16 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
       size: size,
       level: level,
       type: orderType,
+      // Optional parameters that can be added based on requirements:
+      // "timeInForce": "GOOD_TILL_CANCELLED",
+      // "guaranteedStop": false,
+      // "stopLevel": null,
+      // "stopDistance": null,
+      // "limitLevel": null,
+      // "limitDistance": null,
+      // "quoteId": null
     };
+
     const response = await axios.post(`${API.BASE_URL}/workingorders`, order, {
       headers: getHeaders(true),
     });
