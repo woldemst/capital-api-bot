@@ -36,6 +36,10 @@ export const TRADING = {
 
   // Slippage control (in pips)
   MAX_SLIPPAGE_PIPS: 2, // Maximum allowed slippage in pips
+
+  // Signal threshold for entry
+  MIN_BUY_CONDITIONS: 3, // Minimum buy conditions for a signal
+  MIN_SELL_CONDITIONS: 3, // Minimum sell conditions for a signal
 };
 
 // Technical Analysis Configuration
