@@ -84,13 +84,49 @@ class TradingService {
     return { signal, buyScore, sellScore };
   }
 
+  // Range filter: skip signals in low volatility/ranging markets
+  passesRangeFilter(indicators, price) {
+    const { RANGE_FILTER } = ANALYSIS;
+    if (!RANGE_FILTER?.ENABLED) return true;
+    if (!indicators) return true;
+    // ATR filter
+    if (indicators.atr && price) {
+      const atrPct = indicators.atr / price;
+      if (atrPct < RANGE_FILTER.MIN_ATR_PCT) {
+        logger.info(`[RangeFilter] ATR too low (${(atrPct*100).toFixed(3)}%). Skipping signal.`);
+        return false;
+      }
+    }
+    // Bollinger Band width filter
+    if (indicators.bb && price) {
+      const bbWidth = indicators.bb.upper - indicators.bb.lower;
+      const bbWidthPct = bbWidth / price;
+      if (bbWidthPct < RANGE_FILTER.MIN_BB_WIDTH_PCT) {
+        logger.info(`[RangeFilter] BB width too low (${(bbWidthPct*100).toFixed(3)}%). Skipping signal.`);
+        return false;
+      }
+    }
+    // EMA distance filter
+    if (indicators.emaFast && indicators.emaSlow && price) {
+      const emaDist = Math.abs(indicators.emaFast - indicators.emaSlow);
+      const emaDistPct = emaDist / price;
+      if (emaDistPct < RANGE_FILTER.MIN_EMA_DIST_PCT) {
+        logger.info(`[RangeFilter] EMA distance too low (${(emaDistPct*100).toFixed(3)}%). Skipping signal.`);
+        return false;
+      }
+    }
+    return true;
+  }
+
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
-    // logger.info(`[Signal] Generating signal for ${symbol}`);
-    // logger.info("[Indicators] H4:", indicators.h4);
-    // logger.info("[Indicators] H1:", indicators.h1);
-    // logger.info("[Indicators] M15:", indicators.m15);
     const trendAnalysis = message.trendAnalysis;
+    // --- Range filter ---
+    const price = bid || ask || 1;
+    if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
+      logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
+      return { signal: null, buyScore: 0, sellScore: 0 };
+    }
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
