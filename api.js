@@ -143,7 +143,7 @@ export const getMarkets = async () =>
 export async function getMarketDetails(symbol) {
   return await withSessionRetry(async () => {
     const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
-    logger.info(`Market details for ${symbol}: ${JSON.stringify(response.data)}`);
+    // logger.info(`Market details for ${symbol}: ${JSON.stringify(response.data)}`);
     return response.data;
   });
 }
