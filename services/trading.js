@@ -71,14 +71,14 @@ class TradingService {
   }
 
   evaluateSignals(buyConditions, sellConditions) {
+    const { MIN_BUY_CONDITIONS = 3, MIN_SELL_CONDITIONS = 3 } = TRADING;
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
     logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
     let signal = null;
-    // Relaxed: only 3/6 conditions needed for a signal
-    if (buyScore >= 3) {
+    if (buyScore >= MIN_BUY_CONDITIONS) {
       signal = "buy";
-    } else if (sellScore >= 3) {
+    } else if (sellScore >= MIN_SELL_CONDITIONS) {
       signal = "sell";
     }
     return { signal, buyScore, sellScore };
