@@ -71,14 +71,14 @@ class TradingService {
   }
 
   evaluateSignals(buyConditions, sellConditions) {
-    const { MIN_BUY_CONDITIONS = 3, MIN_SELL_CONDITIONS = 3 } = TRADING;
+    // Relaxed: only 3/6 conditions needed for a signal
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
     logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
     let signal = null;
-    if (buyScore >= MIN_BUY_CONDITIONS) {
+    if (buyScore >= 3) {
       signal = "buy";
-    } else if (sellScore >= MIN_SELL_CONDITIONS) {
+    } else if (sellScore >= 3) {
       signal = "sell";
     }
     return { signal, buyScore, sellScore };
@@ -122,11 +122,11 @@ class TradingService {
     const indicators = candle.indicators || {};
     const trendAnalysis = message.trendAnalysis;
     // --- Range filter ---
-    const price = bid || ask || 1;
-    if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
-      logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
-      return { signal: null, buyScore: 0, sellScore: 0 };
-    }
+    // const price = bid || ask || 1;
+    // if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
+    //   logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
+    //   return { signal: null, buyScore: 0, sellScore: 0 };
+    // }
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
@@ -382,22 +382,13 @@ class TradingService {
         logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
-      // --- Overtrading protection ---
-      // const now = Date.now();
-      // const lastTrade = this.lastTradeTimestamps[symbol] || 0;
-      // const minutesSinceLast = (now - lastTrade) / 60000;
-      // if (minutesSinceLast < this.COOLDOWN_MINUTES) {
-      //   logger.info(`[Overtrading] Skipping ${symbol}: only ${minutesSinceLast.toFixed(1)} min since last trade (min ${this.COOLDOWN_MINUTES}m cooldown).`);
-      //   return;
-      // }
-      // Extract bid/ask from merged candle structure
+      // No cooldown logic: allow high-frequency trading
       const bid = candle.close?.bid;
       const ask = candle.close?.ask;
       if (!this.validatePrices(bid, ask, symbol)) return;
       const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
       if (signal) {
         await this.executeTrade(signal, symbol, bid, ask);
-        this.lastTradeTimestamps[symbol] = now;
       }
     } catch (error) {
       logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
@@ -405,38 +396,27 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
+    // Simpler, more aggressive sizing (like old version)
     const riskAmount = balance * RISK_PER_TRADE;
     const pipValue = this.getPipValue(symbol); // Dynamic pip value
-
     if (!pipValue || pipValue <= 0) {
       logger.error("Invalid pip value calculation");
       return 100; // Fallback with warning
     }
-
     const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
     if (stopLossPips === 0) return 0;
-
     let size = riskAmount / (stopLossPips * pipValue);
-    // Convert to units (assuming size is in lots, so multiply by 1000)
     size = size * 1000;
-    // Floor to nearest 100
     size = Math.floor(size / 100) * 100;
     if (size < 100) size = 100;
-
-    // --- Margin check for 5 simultaneous trades ---
-    // Use available margin from account (set by updateAccountInfo)
-    const availableMargin = this.availableMargin ?? this.accountBalance;
-    // Divide available margin by max positions (from config)
-    const maxPositions = TRADING.MAX_POSITIONS || 5;
-    const maxMarginPerTrade = availableMargin / maxPositions;
-    const leverage = TRADING.LEVERAGE || 30;
-    // Margin required = (size * entryPrice) / leverage
-    let marginRequired = (size * entryPrice) / leverage;
+    // --- Margin check for 5 simultaneous trades (no max positions from config, just divide by 5) ---
+    const leverage = 30;
+    const marginRequired = (size * entryPrice) / leverage;
+    const availableMargin = this.accountBalance;
+    const maxMarginPerTrade = availableMargin / 5;
     if (marginRequired > maxMarginPerTrade) {
-      // Reduce size so marginRequired == maxMarginPerTrade
       size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
       if (size < 100) size = 100;
-      marginRequired = (size * entryPrice) / leverage;
       logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
     }
     logger.info(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
