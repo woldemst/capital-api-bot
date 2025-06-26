@@ -193,7 +193,7 @@ class TradingBot {
 
   // Analyze a single symbol
   async analyzeSymbol(symbol) {
-    logger.info(`\nAnalyzing ${symbol}...`);
+    logger.info(`\n\nAnalyzing ${symbol}...`);
 
     // Fetch and calculate all required data
     const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);

@@ -332,7 +332,7 @@ class TradingService {
       if (!message) return;
       const candle = message;
       symbol = candle.symbol || candle.epic;
-      logger.info(`\n=== Processing ${symbol} ===`);
+      logger.info(`\n\n=== Processing ${symbol} ===`);
       logger.info("")
       logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
       if (this.openTrades.length >= maxOpenTrades) {
@@ -422,6 +422,7 @@ class TradingService {
   async monitorOpenTrades(latestIndicatorsBySymbol) {
     const positionsData = await getOpenPositions();
     if (!positionsData?.positions) return;
+    const now = Date.now();
     for (const p of positionsData.positions) {
       const symbol = p.market.epic;
       const direction = p.position.direction.toLowerCase();
@@ -429,12 +430,48 @@ class TradingService {
       const entry = p.position.openLevel;
       const size = p.position.size;
       const stopLevel = p.position.stopLevel;
+      const tpLevel = p.position.limitLevel;
+      const openTime = new Date(p.position.createdDate).getTime();
       const price = direction === "buy" ? p.market.bid : p.market.offer;
       const profit = (direction === "buy" ? price - entry : entry - price) * size;
       const indicators = latestIndicatorsBySymbol[symbol];
       if (!indicators) continue;
 
-      // 1. Trailing stop logic (move SL up if price moves in favor)
+      // --- Helper imports ---
+      const { isTrendWeak, getTPProgress } = await import("../indicators.js");
+      const tpProgress = getTPProgress(entry, price, tpLevel, direction.toUpperCase());
+      const holdMinutes = (now - openTime) / 60000;
+
+      // 1. Partial close & trailing stop if 60% TP reached and trend is weak
+      if (tpProgress >= 60 && isTrendWeak(indicators, direction.toUpperCase())) {
+        // Partial close: close 50% of position if possible
+        if (size > 1) {
+          const partialSize = size / 2;
+          try {
+            await placePosition(symbol, direction, -partialSize, null, null, null); // Negative size to reduce
+            logger.info(`[PartialClose] Closed 50% of ${symbol} at ${price} (size: ${partialSize}) due to weak trend at 60% TP.`);
+          } catch (e) {
+            logger.warn(`[PartialClose] Could not partially close ${symbol}:`, e.message);
+          }
+        }
+        // Tighten trailing stop to lock in profit
+        const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
+        if ((direction === "buy" && newStop > stopLevel) || (direction === "sell" && newStop < stopLevel)) {
+          await updateTrailingStop(dealId, newStop);
+          logger.info(`[TrailingStop] Tightened for ${symbol} to ${newStop} after partial close.`);
+        }
+      }
+
+      // 2. Timed exit: if held > 1 hour and 40% TP reached, close fully
+      if (holdMinutes > 60 && tpProgress >= 40) {
+        if (typeof this.closePosition === "function") {
+          await this.closePosition(dealId);
+          logger.info(`[TimedExit] Closed ${symbol} after >1h and 40% TP reached. Profit: ${profit}`);
+          continue;
+        }
+      }
+
+      // 3. Trailing stop logic (move SL up if price moves in favor)
       if (profit > 0) {
         const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
         if ((direction === "buy" && newStop > stopLevel) || (direction === "sell" && newStop < stopLevel)) {
@@ -443,7 +480,7 @@ class TradingService {
         }
       }
 
-      // 2. Indicator-based exit: close if trend reverses and in profit
+      // 4. Indicator-based exit: close if trend reverses and in profit
       let exitReason = null;
       if (profit > 0) {
         // EMA cross exit
@@ -463,7 +500,6 @@ class TradingService {
         }
       }
       if (exitReason) {
-        // You need to implement closePosition in your API
         if (typeof this.closePosition === "function") {
           await this.closePosition(dealId);
           logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, locked profit: ${profit}`);

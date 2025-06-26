@@ -31,6 +31,15 @@ const logger = {
     }
   },
   
+  warn: (message, error) => {
+    const timestamp = new Date().toISOString();
+    if (typeof message === 'object') {
+      console.warn(`[WARN] ${timestamp} -\n${JSON.stringify(message, null, 2)}\n`, error || '');
+    } else {
+      console.warn(`[WARN] ${timestamp} - ${message}`, error || '');
+    }
+  },
+  
   price: (symbol, bid, ask) => {
     const timestamp = new Date().toISOString();
     console.log(`[PRICE] ${timestamp} - ${symbol}: Bid: ${bid} | Ask: ${ask}`);
