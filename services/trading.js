@@ -21,6 +21,9 @@ class TradingService {
     this.virtualPositions = [];
     this.orderAttempts = new Map();
     this.availableMargin = 0; // Initialize availableMargin
+    // --- Overtrading protection: cooldown per symbol ---
+    this.lastTradeTimestamps = {};
+    this.COOLDOWN_MINUTES = 15; // Minimum minutes between trades per symbol
   }
 
   setAccountBalance(balance) {
@@ -343,18 +346,23 @@ class TradingService {
         logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
+      // --- Overtrading protection ---
+      const now = Date.now();
+      const lastTrade = this.lastTradeTimestamps[symbol] || 0;
+      const minutesSinceLast = (now - lastTrade) / 60000;
+      if (minutesSinceLast < this.COOLDOWN_MINUTES) {
+        logger.info(`[Overtrading] Skipping ${symbol}: only ${minutesSinceLast.toFixed(1)} min since last trade (min ${this.COOLDOWN_MINUTES}m cooldown).`);
+        return;
+      }
       // Extract bid/ask from merged candle structure
       const bid = candle.close?.bid;
       const ask = candle.close?.ask;
-      // logger.info('bid ask', bid, ask);
       if (!this.validatePrices(bid, ask, symbol)) return;
-
-      // --- ADD THIS ---
       const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
       if (signal) {
         await this.executeTrade(signal, symbol, bid, ask);
+        this.lastTradeTimestamps[symbol] = now;
       }
-      // ---------------
     } catch (error) {
       logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
