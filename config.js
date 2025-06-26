@@ -33,6 +33,9 @@ export const TRADING = {
   // Partial profit taking
   PARTIAL_TP_ENABLED: true,
   PARTIAL_TP_PERCENTAGE: 0.5,
+
+  // Slippage control (in pips)
+  MAX_SLIPPAGE_PIPS: 2, // Maximum allowed slippage in pips
 };
 
 // Technical Analysis Configuration

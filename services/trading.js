@@ -196,7 +196,8 @@ class TradingService {
     params.stopLossPrice = validated.stopLossPrice;
     params.takeProfitPrice = validated.takeProfitPrice;
     try {
-      await this.executePosition(signal, symbol, params);
+      // Pass expected entry price for slippage check
+      await this.executePosition(signal, symbol, params, price);
     } catch (error) {
       logger.error(`[TradeExecution] Failed for ${symbol}:`, error);
       throw error;
@@ -242,7 +243,7 @@ class TradingService {
     );
   }
 
-  async executePosition(signal, symbol, params) {
+  async executePosition(signal, symbol, params, expectedPrice) {
     const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
     try {
       const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice);
@@ -253,6 +254,21 @@ class TradingService {
         if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
           logger.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
         }
+        // --- Slippage check ---
+        if (confirmation.level && expectedPrice) {
+          const { TRADING } = await import("../config.js");
+          // Calculate slippage in pips
+          const decimals = 5; // Most FX pairs
+          const pip = Math.pow(10, -decimals);
+          const slippage = Math.abs(confirmation.level - expectedPrice) / pip;
+          if (slippage > TRADING.MAX_SLIPPAGE_PIPS) {
+            logger.warn(`[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips (max allowed: ${TRADING.MAX_SLIPPAGE_PIPS})`);
+            // Optionally: take action (e.g., close trade, alert, etc.)
+          } else {
+            logger.info(`[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips`);
+          }
+        }
+        // --- End slippage check ---
       }
       return position;
     } catch (error) {
