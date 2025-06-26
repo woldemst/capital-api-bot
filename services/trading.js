@@ -515,13 +515,27 @@ class TradingService {
         }
       }
 
-      // 3. Trailing stop logic (move SL up if price moves in favor)
-      if (profit > 0) {
-        const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
-        if ((direction === "buy" && newStop > stopLevel) || (direction === "sell" && newStop < stopLevel)) {
-          await updateTrailingStop(dealId, newStop);
-          logger.info(`[TrailingStop] Updated for ${symbol} to ${newStop}`);
+      // 3. Dynamic trailing stop logic (trail as price moves in favor, not just profit > 0)
+      let shouldTrail = false;
+      let newStop = stopLevel;
+      if (direction === "buy") {
+        // Only trail up, never down
+        const candidate = price - (indicators.atr * (indicators.atr ? 1 : 1)); // You can make this multiplier configurable
+        if (candidate > stopLevel) {
+          newStop = candidate;
+          shouldTrail = true;
         }
+      } else {
+        // Only trail down, never up
+        const candidate = price + (indicators.atr * (indicators.atr ? 1 : 1));
+        if (candidate < stopLevel) {
+          newStop = candidate;
+          shouldTrail = true;
+        }
+      }
+      if (shouldTrail) {
+        await updateTrailingStop(dealId, newStop);
+        logger.info(`[TrailingStop] Dynamically updated for ${symbol} to ${newStop}`);
       }
 
       // 4. Indicator-based exit: close if trend reverses (regardless of profit)
