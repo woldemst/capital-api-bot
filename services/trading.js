@@ -383,13 +383,13 @@ class TradingService {
         return;
       }
       // --- Overtrading protection ---
-      const now = Date.now();
-      const lastTrade = this.lastTradeTimestamps[symbol] || 0;
-      const minutesSinceLast = (now - lastTrade) / 60000;
-      if (minutesSinceLast < this.COOLDOWN_MINUTES) {
-        logger.info(`[Overtrading] Skipping ${symbol}: only ${minutesSinceLast.toFixed(1)} min since last trade (min ${this.COOLDOWN_MINUTES}m cooldown).`);
-        return;
-      }
+      // const now = Date.now();
+      // const lastTrade = this.lastTradeTimestamps[symbol] || 0;
+      // const minutesSinceLast = (now - lastTrade) / 60000;
+      // if (minutesSinceLast < this.COOLDOWN_MINUTES) {
+      //   logger.info(`[Overtrading] Skipping ${symbol}: only ${minutesSinceLast.toFixed(1)} min since last trade (min ${this.COOLDOWN_MINUTES}m cooldown).`);
+      //   return;
+      // }
       // Extract bid/ask from merged candle structure
       const bid = candle.close?.bid;
       const ask = candle.close?.ask;
@@ -424,19 +424,20 @@ class TradingService {
     if (size < 100) size = 100;
 
     // --- Margin check for 5 simultaneous trades ---
-    // Assume leverage is 30:1 for forex (can be adjusted)
-    const leverage = 30;
-    // Margin required = (size * entryPrice) / leverage
-    const marginRequired = (size * entryPrice) / leverage;
     // Use available margin from account (set by updateAccountInfo)
     const availableMargin = this.availableMargin ?? this.accountBalance;
-    // Ensure margin for one trade is no more than 1/5 of available
-    const maxMarginPerTrade = availableMargin / 5;
+    // Divide available margin by max positions (from config)
+    const maxPositions = TRADING.MAX_POSITIONS || 5;
+    const maxMarginPerTrade = availableMargin / maxPositions;
+    const leverage = TRADING.LEVERAGE || 30;
+    // Margin required = (size * entryPrice) / leverage
+    let marginRequired = (size * entryPrice) / leverage;
     if (marginRequired > maxMarginPerTrade) {
-        // Reduce size so marginRequired == maxMarginPerTrade
-        size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
-        if (size < 100) size = 100;
-        logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
+      // Reduce size so marginRequired == maxMarginPerTrade
+      size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+      if (size < 100) size = 100;
+      marginRequired = (size * entryPrice) / leverage;
+      logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
     }
     logger.info(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
     return size;
@@ -464,8 +465,30 @@ class TradingService {
 
   // --- Improved: Monitor open trades and close if exit conditions are met ---
   async monitorOpenTrades(latestIndicatorsBySymbol) {
-    const positionsData = await getOpenPositions();
-    if (!positionsData?.positions) return;
+    // Simple retry logic for getOpenPositions (handles 500 errors and timeouts)
+    let positionsData = null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        positionsData = await getOpenPositions();
+        if (positionsData?.positions) break;
+      } catch (err) {
+        lastError = err;
+        const is500 = err?.response?.status === 500;
+        const isTimeout = (err?.code && err.code.toString().toUpperCase().includes('TIMEOUT'));
+        if (is500 || isTimeout) {
+          logger.warn(`[Monitor] getOpenPositions failed (attempt ${attempt}/3): ${err.message || err}`);
+          await new Promise(res => setTimeout(res, 1000 * attempt));
+        } else {
+          logger.error(`[Monitor] getOpenPositions failed:`, err);
+          break;
+        }
+      }
+    }
+    if (!positionsData?.positions) {
+      logger.error(`[Monitor] Could not fetch open positions after 3 attempts`, lastError);
+      return;
+    }
     const now = Date.now();
     for (const p of positionsData.positions) {
       const symbol = p.market.epic;
