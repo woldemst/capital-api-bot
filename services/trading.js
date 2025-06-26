@@ -20,6 +20,7 @@ class TradingService {
     this.virtualBalance = 10000;
     this.virtualPositions = [];
     this.orderAttempts = new Map();
+    this.availableMargin = 0; // Initialize availableMargin
   }
 
   setAccountBalance(balance) {
@@ -33,6 +34,9 @@ class TradingService {
   }
   setSymbolMinSizes(minSizes) {
     this.symbolMinSizes = minSizes;
+  }
+  setAvailableMargin(margin) {
+    this.availableMargin = margin;
   }
   isSymbolTraded(symbol) {
     return this.openTrades.includes(symbol);
@@ -365,7 +369,7 @@ class TradingService {
     // Margin required = (size * entryPrice) / leverage
     const marginRequired = (size * entryPrice) / leverage;
     // Use available margin from account (set by updateAccountInfo)
-    const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
+    const availableMargin = this.availableMargin ?? this.accountBalance;
     // Ensure margin for one trade is no more than 1/5 of available
     const maxMarginPerTrade = availableMargin / 5;
     if (marginRequired > maxMarginPerTrade) {
