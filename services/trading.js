@@ -317,13 +317,10 @@ class TradingService {
         logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
-      // const hour = new Date().getUTCHours();
-      // if (hour < 6 || hour > 22) {
-      //   logger.info(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
-      //   return;
-      // }
-      const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
-      const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
+      // Extract bid/ask from merged candle structure
+      const bid = candle.close?.bid;
+      const ask = candle.close?.ask;
+      // logger.info('bid ask', bid, ask);
       if (!this.validatePrices(bid, ask, symbol)) return;
 
       // --- ADD THIS ---

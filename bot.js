@@ -73,15 +73,36 @@ class TradingBot {
         const message = JSON.parse(data.toString());
         if (message.payload?.epic) {
           const candle = message.payload;
-          // Maintain a rolling array of last 50 candles per symbol
-          if (!this.latestCandles[candle.epic]) this.latestCandles[candle.epic] = [];
-          this.latestCandles[candle.epic].push(candle);
-          if (this.latestCandles[candle.epic].length > 50) {
-            this.latestCandles[candle.epic].shift();
-          }
-          // Only analyze on completed candles (avoid duplicates)
-          if (candle.complete || candle.snapshotTimeUTC) {
-            this.analyzeSymbol(candle.epic);
+          const symbol = candle.epic;
+          const timestamp = candle.t;
+
+          // Initialize storage for this symbol if needed
+          if (!this.latestCandles[symbol]) this.latestCandles[symbol] = {};
+
+          // Store bid/ask by timestamp
+          if (!this.latestCandles[symbol][timestamp]) this.latestCandles[symbol][timestamp] = {};
+          this.latestCandles[symbol][timestamp][candle.priceType] = candle;
+
+          // If both bid and ask are present for this timestamp, merge and analyze
+          const merged = this.latestCandles[symbol][timestamp];
+          if (merged.bid && merged.ask) {
+            const mergedCandle = {
+              epic: symbol,
+              timestamp,
+              open: { bid: merged.bid.o, ask: merged.ask.o },
+              high: { bid: merged.bid.h, ask: merged.ask.h },
+              low: { bid: merged.bid.l, ask: merged.ask.l },
+              close: { bid: merged.bid.c, ask: merged.ask.c },
+              lastTradedVolume: merged.bid.lastTradedVolume || merged.ask.lastTradedVolume,
+              complete: candle.complete,
+              snapshotTimeUTC: candle.snapshotTimeUTC,
+            };
+            // Store the merged candle for analysis
+            this.latestCandles[symbol].latest = mergedCandle;
+            // Only analyze on completed candles
+            if (candle.complete || candle.snapshotTimeUTC) {
+              this.analyzeSymbol(symbol);
+            }
           }
         } else {
           // Log all other messages for debugging
@@ -115,10 +136,7 @@ class TradingBot {
     }
     this.analysisInterval = setInterval(async () => {
       try {
-        const now = new Date();
-        const date = now.toLocaleDateString();
-        const time = now.toLocaleTimeString();
-        logger.info(`[${date} ${time}] Running scheduled analysis...`);
+        logger.info(`[Running scheduled analysis...`);
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
       } catch (error) {
@@ -171,7 +189,7 @@ class TradingBot {
 
   // Analyze a single symbol
   async analyzeSymbol(symbol) {
-    logger.info(`Analyzing ${symbol}...`);
+    logger.info(`\nAnalyzing ${symbol}...`);
 
     // Fetch and calculate all required data
     const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);
@@ -188,8 +206,8 @@ class TradingBot {
       h4Indicators: indicators.h4,
     };
 
-    // Use the latest real-time candle for bid/ask
-    const latestCandle = this.latestCandles[symbol];
+    // Use the latest real-time merged candle for bid/ask
+    const latestCandle = this.latestCandles[symbol]?.latest;
     if (!latestCandle) {
       logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
       return;
@@ -211,7 +229,7 @@ class TradingBot {
   // Analyze all symbols
   async analyzeAllSymbols() {
     for (const symbol of SYMBOLS) {
-      if (!this.latestCandles[symbol]) continue; // Only analyze if we have a candle
+      if (!this.latestCandles[symbol]?.latest) continue; // Only analyze if we have a merged candle
       try {
         await this.analyzeSymbol(symbol);
       } catch (error) {
@@ -264,10 +282,10 @@ class TradingBot {
       try {
         const latestIndicatorsBySymbol = {};
         for (const symbol of TRADING.SYMBOLS) {
-          const candles = this.latestCandles[symbol] || [];
-          logger.info(`[Monitor] Symbol: ${symbol}, candles available: ${candles.length}`);
-          if (candles.length > 0) {
-            latestIndicatorsBySymbol[symbol] = await calcIndicators(candles, symbol);
+          const mergedCandle = this.latestCandles[symbol]?.latest;
+          logger.info(`[Monitor] Symbol: ${symbol}, merged candle present: ${!!mergedCandle}`);
+          if (mergedCandle) {
+            latestIndicatorsBySymbol[symbol] = await calcIndicators([mergedCandle], symbol);
             logger.info(`[Monitor] Calculated indicators for ${symbol}`);
           }
         }
