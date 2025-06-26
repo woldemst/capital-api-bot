@@ -524,31 +524,29 @@ class TradingService {
         }
       }
 
-      // 4. Indicator-based exit: close if trend reverses and in profit
+      // 4. Indicator-based exit: close if trend reverses (regardless of profit)
       let exitReason = null;
-      if (profit > 0) {
-        // EMA cross exit
-        if ((direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
-            (direction === "sell" && indicators.emaFast > indicators.emaSlow)) {
-          exitReason = "EMA cross";
-        }
-        // MACD cross exit (optional, can combine with EMA)
-        if ((direction === "buy" && indicators.macd?.histogram < 0) ||
-            (direction === "sell" && indicators.macd?.histogram > 0)) {
-          exitReason = exitReason ? exitReason + ", MACD" : "MACD";
-        }
-        // RSI overbought/oversold exit (optional)
-        if ((direction === "buy" && indicators.rsi > 65) ||
-            (direction === "sell" && indicators.rsi < 35)) {
-          exitReason = exitReason ? exitReason + ", RSI" : "RSI";
-        }
+      // EMA cross exit
+      if ((direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
+          (direction === "sell" && indicators.emaFast > indicators.emaSlow)) {
+        exitReason = "EMA cross";
+      }
+      // MACD cross exit (optional, can combine with EMA)
+      if ((direction === "buy" && indicators.macd?.histogram < 0) ||
+          (direction === "sell" && indicators.macd?.histogram > 0)) {
+        exitReason = exitReason ? exitReason + ", MACD" : "MACD";
+      }
+      // RSI overbought/oversold exit (optional)
+      if ((direction === "buy" && indicators.rsi > 65) ||
+          (direction === "sell" && indicators.rsi < 35)) {
+        exitReason = exitReason ? exitReason + ", RSI" : "RSI";
       }
       if (exitReason) {
         if (typeof this.closePosition === "function") {
           await this.closePosition(dealId);
-          logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, locked profit: ${profit}`);
+          logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
         } else {
-          logger.info(`[Exit] Would close ${symbol} (${direction}) due to: ${exitReason}, locked profit: ${profit}`);
+          logger.info(`[Exit] Would close ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
         }
       }
     }
