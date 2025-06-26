@@ -4,15 +4,26 @@ import logger from "./utils/logger.js";
 
 const { RSI: RSI_CONFIG, MACD: MACD_CONFIG, BOLLINGER, ATR: ATR_CONFIG } = ANALYSIS;
 
-export async function calcIndicators(bars, symbol = '', timeframe = '') {
+export async function calcIndicators(bars, symbol = '', timeframe = '', priceType = 'mid') {
   if (!bars || !Array.isArray(bars) || bars.length === 0) {
     logger.error(`[Indicators] No bars provided for indicator calculation for ${symbol} ${timeframe}`);
     return {};
   }
 
-  const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
-  const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
-  const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
+  // Helper to extract price by type
+  function getPrice(val) {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    if (priceType === 'bid') return val.bid ?? 0;
+    if (priceType === 'ask') return val.ask ?? 0;
+    // Default: mid
+    if (val.bid != null && val.ask != null) return (val.bid + val.ask) / 2;
+    return val.bid ?? val.ask ?? 0;
+  }
+
+  const closes = bars.map((b) => getPrice(b.close));
+  const highs = bars.map((b) => getPrice(b.high));
+  const lows = bars.map((b) => getPrice(b.low));
 
   // Essential indicators per strategy
   const emaFast = EMA.calculate({ period: ANALYSIS.EMA.TREND.FAST, values: closes });

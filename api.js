@@ -216,14 +216,26 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
     //     console.log("Volume:", candle.lastTradedVolume);
     //   });
     // }
-    // return response.data;
     return {
       prices: response.data.prices.map((p) => ({
-        close: p.closePrice?.bid,
-        high: p.highPrice?.bid,
-        low: p.lowPrice?.bid,
-        open: p.openPrice?.bid,
+        close: {
+          bid: p.closePrice?.bid,
+          ask: p.closePrice?.ask,
+        },
+        high: {
+          bid: p.highPrice?.bid,
+          ask: p.highPrice?.ask,
+        },
+        low: {
+          bid: p.lowPrice?.bid,
+          ask: p.lowPrice?.ask,
+        },
+        open: {
+          bid: p.openPrice?.bid,
+          ask: p.openPrice?.ask,
+        },
         timestamp: p.snapshotTime,
+        volume: p.lastTradedVolume,
       })),
     };
   });
