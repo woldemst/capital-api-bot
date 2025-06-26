@@ -98,6 +98,13 @@ export const ANALYSIS = {
     REWARD_RATIO: 2.0, // Target 2:1 reward/risk
     PARTIAL_TAKE_PROFIT: 0.5, // Take 50% profit at 1:1
   },
+  // Range filter: skip signals in low volatility/ranging markets
+  RANGE_FILTER: {
+    ENABLED: true,
+    MIN_ATR_PCT: 0.0005, // ATR must be at least 0.05% of price
+    MIN_BB_WIDTH_PCT: 0.001, // BB width must be at least 0.1% of price
+    MIN_EMA_DIST_PCT: 0.0003, // Fast/slow EMA must be at least 0.03% apart
+  },
 };
 
 // Trading Sessions (UTC times)
