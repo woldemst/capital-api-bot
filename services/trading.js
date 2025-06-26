@@ -1,6 +1,7 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
 import logger from "../utils/logger.js";
+import { ATR } from "technicalindicators";
 const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
 
 const RSI_CONFIG = {
@@ -281,19 +282,24 @@ class TradingService {
       if (!data?.prices || data.prices.length < 14) {
         throw new Error("Insufficient data for ATR calculation");
       }
-      let tr = [];
-      const prices = data.prices;
-      for (let i = 1; i < prices.length; i++) {
-        const high = prices[i].highPrice?.ask || prices[i].high;
-        const low = prices[i].lowPrice?.bid || prices[i].low;
-        const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
-        const tr1 = high - low;
-        const tr2 = Math.abs(high - prevClose);
-        const tr3 = Math.abs(low - prevClose);
-        tr.push(Math.max(tr1, tr2, tr3));
-      }
-      const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-      return atr;
+      // Use mid price for ATR calculation for consistency
+      const highs = data.prices.map((b) => {
+        if (b.high && typeof b.high === 'object' && b.high.bid != null && b.high.ask != null) return (b.high.bid + b.high.ask) / 2;
+        if (typeof b.high === 'number') return b.high;
+        return b.high?.bid ?? b.high?.ask ?? 0;
+      });
+      const lows = data.prices.map((b) => {
+        if (b.low && typeof b.low === 'object' && b.low.bid != null && b.low.ask != null) return (b.low.bid + b.low.ask) / 2;
+        if (typeof b.low === 'number') return b.low;
+        return b.low?.bid ?? b.low?.ask ?? 0;
+      });
+      const closes = data.prices.map((b) => {
+        if (b.close && typeof b.close === 'object' && b.close.bid != null && b.close.ask != null) return (b.close.bid + b.close.ask) / 2;
+        if (typeof b.close === 'number') return b.close;
+        return b.close?.bid ?? b.close?.ask ?? 0;
+      });
+      const atrArr = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
+      return atrArr.length ? atrArr[atrArr.length - 1] : 0.001;
     } catch (error) {
       logger.error("[ATR] Error:", error);
       return 0.001;

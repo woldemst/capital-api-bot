@@ -1,4 +1,4 @@
-import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
+import { SMA, EMA, RSI, BollingerBands, MACD, ATR } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
 import logger from "./utils/logger.js";
 
@@ -31,15 +31,14 @@ export async function calcIndicators(bars, symbol = '', timeframe = '', priceTyp
   const ema9 = EMA.calculate({ period: ANALYSIS.EMA.ENTRY.FAST, values: closes });
   const ema21 = EMA.calculate({ period: ANALYSIS.EMA.ENTRY.SLOW, values: closes });
 
-  // Calculate ATR for dynamic stops
-  const tr = [];
-  for (let i = 1; i < bars.length; i++) {
-    const hl = highs[i] - lows[i];
-    const hc = Math.abs(highs[i] - closes[i - 1]);
-    const lc = Math.abs(lows[i] - closes[i - 1]);
-    tr.push(Math.max(hl, hc, lc));
-  }
-  const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
+  // Use library ATR for consistency
+  const atrArr = ATR.calculate({
+    period: 14,
+    high: highs,
+    low: lows,
+    close: closes,
+  });
+  const atr = atrArr.length ? atrArr[atrArr.length - 1] : null;
 
   const result = {
     // Trend EMAs
