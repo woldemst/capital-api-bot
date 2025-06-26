@@ -151,6 +151,10 @@ class TradingBot {
       const accountData = await getAccountInfo();
       if (accountData?.accounts?.[0]?.balance?.balance) {
         tradingService.setAccountBalance(accountData.accounts[0].balance.balance);
+        // Set available margin if present
+        if (typeof accountData.accounts[0].balance.available !== 'undefined') {
+          tradingService.setAvailableMargin(accountData.accounts[0].balance.available);
+        }
       } else {
         throw new Error("Invalid account data structure");
       }
