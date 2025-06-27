@@ -24,6 +24,19 @@ class TradingService {
     // --- Overtrading protection: cooldown per symbol ---
     this.lastTradeTimestamps = {};
     this.COOLDOWN_MINUTES = 15; // Minimum minutes between trades per symbol
+    this.winStreak = 0;
+    this.lossStreak = 0;
+    this.recentResults = [];
+    this.dynamicRiskPerTrade = RISK_PER_TRADE;
+    this.dynamicSignalThreshold = 3; // Default, will adapt
+    this.maxRiskPerTrade = 0.02; // 2% max
+    this.minRiskPerTrade = 0.003; // 0.3% min
+    this.maxSignalThreshold = 5;
+    this.minSignalThreshold = 2;
+    // --- Daily loss limit ---
+    this.dailyLoss = 0;
+    this.dailyLossLimitPct = 0.05; // 5 % vom Kontostand
+    this.lastLossReset = new Date().toDateString();
   }
 
   setAccountBalance(balance) {
@@ -70,15 +83,67 @@ class TradingService {
     // logger.info("Trend:", trendAnalysis.h4Trend);
   }
 
+  // Call this after each trade closes (profit > 0 = win, else loss)
+  updateTradeResult(profit) {
+    // -------- Daily reset ----------
+    const today = new Date().toDateString();
+    if (today !== this.lastLossReset) {
+      this.dailyLoss = 0;
+      this.lastLossReset = today;
+    }
+    // Track realised P/L
+    this.dailyLoss += profit;
+    if (this.dailyLoss < 0) logger.warn(`[Risk] Daily realised loss: ${this.dailyLoss.toFixed(2)} €`);
+
+    const isWin = profit > 0;
+    this.recentResults.push(isWin ? 1 : 0);
+    if (this.recentResults.length > 20) this.recentResults.shift();
+    if (isWin) {
+      this.winStreak++;
+      this.lossStreak = 0;
+    } else {
+      this.lossStreak++;
+      this.winStreak = 0;
+    }
+    this.updateDynamicRiskAndThreshold();
+  }
+
+  // Adjust risk and signal threshold based on streaks and win rate
+  updateDynamicRiskAndThreshold() {
+    // Win rate over last 20 trades
+    const winRate = this.recentResults.length ? this.recentResults.reduce((a,b)=>a+b,0)/this.recentResults.length : 0.5;
+    // Dynamic risk: increase after 2+ wins, decrease after 2+ losses
+    if (this.winStreak >= 2) {
+      this.dynamicRiskPerTrade = Math.min(this.dynamicRiskPerTrade * 1.2, this.maxRiskPerTrade);
+    } else if (this.lossStreak >= 2) {
+      this.dynamicRiskPerTrade = Math.max(this.dynamicRiskPerTrade * 0.7, this.minRiskPerTrade);
+    } else {
+      // Gradually revert to base risk
+      this.dynamicRiskPerTrade += (RISK_PER_TRADE - this.dynamicRiskPerTrade) * 0.1;
+    }
+    // Dynamic signal threshold: stricter if win rate < 50%, looser if > 65%
+    if (winRate > 0.65) {
+      this.dynamicSignalThreshold = Math.max(this.minSignalThreshold, this.dynamicSignalThreshold - 1);
+    } else if (winRate < 0.5) {
+      this.dynamicSignalThreshold = Math.min(this.maxSignalThreshold, this.dynamicSignalThreshold + 1);
+    } else {
+      // Gradually revert to default
+      this.dynamicSignalThreshold += (3 - this.dynamicSignalThreshold) * 0.2;
+    }
+    this.dynamicSignalThreshold = Math.round(this.dynamicSignalThreshold);
+    logger.info(`[Adaptive] Risk: ${(this.dynamicRiskPerTrade*100).toFixed(2)}%, SignalThreshold: ${this.dynamicSignalThreshold}, WinRate: ${(winRate*100).toFixed(1)}%`);
+  }
+
   evaluateSignals(buyConditions, sellConditions) {
-    // Relaxed: only 3/6 conditions needed for a signal
+    // Use adaptive threshold
+    const threshold = this.dynamicSignalThreshold || 3;
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
-    logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
+    logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}, Threshold: ${threshold}`);
     let signal = null;
-    if (buyScore >= 3) {
+    if (buyScore >= threshold) {
       signal = "buy";
-    } else if (sellScore >= 3) {
+    } else if (sellScore >= threshold) {
       signal = "sell";
     }
     return { signal, buyScore, sellScore };
@@ -122,11 +187,11 @@ class TradingService {
     const indicators = candle.indicators || {};
     const trendAnalysis = message.trendAnalysis;
     // --- Range filter ---
-    // const price = bid || ask || 1;
-    // if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
-    //   logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
-    //   return { signal: null, buyScore: 0, sellScore: 0 };
-    // }
+    const price = bid || ask || 1;
+    if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
+      logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
+      return { signal: null, buyScore: 0, sellScore: 0 };
+    }
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
@@ -246,9 +311,9 @@ class TradingService {
   async calculateTradeParameters(signal, symbol, bid, ask) {
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
-    const stopLossPips = 1.5 * atr;
+    const stopLossPips = 2 * atr;           // mehr Puffer
     const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-    const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
+    const takeProfitPips = 1.5 * stopLossPips; // 1.5:1 CRV (konservativer Exit)
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
     const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
     logger.info(`[calculateTradeParameters] Size: ${size}`);
@@ -338,7 +403,7 @@ class TradingService {
   async calculateATR(symbol) {
     try {
       const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 15);
-      if (!data?.prices || data.prices.length < 14) {
+      if (!data?.prices || data.prices.length < 21) {
         throw new Error("Insufficient data for ATR calculation");
       }
       // Use mid price for ATR calculation for consistency
@@ -357,7 +422,7 @@ class TradingService {
         if (typeof b.close === 'number') return b.close;
         return b.close?.bid ?? b.close?.ask ?? 0;
       });
-      const atrArr = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
+      const atrArr = ATR.calculate({ period: 21, high: highs, low: lows, close: closes });
       return atrArr.length ? atrArr[atrArr.length - 1] : 0.001;
     } catch (error) {
       logger.error("[ATR] Error:", error);
@@ -369,6 +434,12 @@ class TradingService {
     let symbol = null;
     try {
       if (!message) return;
+      // ---- Daily loss guard ----
+      const maxDailyLoss = -this.accountBalance * this.dailyLossLimitPct;
+      if (this.dailyLoss <= maxDailyLoss) {
+        logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}% ) hit. Skip all new trades for today.`);
+        return;
+      }
       const candle = message;
       symbol = candle.symbol || candle.epic;
       logger.info(`\n\n=== Processing ${symbol} ===`);
@@ -396,8 +467,9 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
+    // Use dynamic risk per trade
+    const riskAmount = balance * this.dynamicRiskPerTrade;
     // Simpler, more aggressive sizing (like old version)
-    const riskAmount = balance * RISK_PER_TRADE;
     const pipValue = this.getPipValue(symbol); // Dynamic pip value
     if (!pipValue || pipValue <= 0) {
       logger.error("Invalid pip value calculation");
@@ -484,6 +556,10 @@ class TradingService {
       const indicators = latestIndicatorsBySymbol[symbol];
       if (!indicators) continue;
 
+      // --- Track max profit for aggressive trailing and breakeven ---
+      if (!p.position._maxProfit) p.position._maxProfit = 0;
+      p.position._maxProfit = Math.max(p.position._maxProfit, profit);
+      const maxProfit = p.position._maxProfit;
       // --- Helper imports ---
       const { isTrendWeak, getTPProgress } = await import("../indicators.js");
       const tpProgress = getTPProgress(entry, price, tpLevel, direction.toUpperCase());
@@ -533,37 +609,56 @@ class TradingService {
         }
       }
 
-      // 3. Dynamic trailing stop logic (trail as price moves in favor, not just profit > 0)
+      // 3. Aggressive trailing stop as price nears TP
       let shouldTrail = false;
       let newStop = stopLevel;
       // --- Trailing stop validation ---
       const range = await getAllowedTPRange(symbol);
       const decimals = range.decimals || 5;
       const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-      if (direction === "buy") {
+      // Aggressive trailing: tighten as TP progress increases
+      let trailATR = indicators.atr;
+      if (tpProgress >= 80) trailATR = indicators.atr * 0.5; // Tighten trailing stop
+      else if (tpProgress >= 60) trailATR = indicators.atr * 0.7;
+      // Move stop to breakeven after 50% TP
+      let breakeven = false;
+      if (tpProgress >= 50 && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
+        newStop = entry;
+        breakeven = true;
+      } else if (direction === "buy") {
         // Only trail up, never down
-        const candidate = price - (indicators.atr * (indicators.atr ? 1 : 1));
+        const candidate = price - trailATR;
         if (candidate > stopLevel && candidate < price - minStopDistance) {
           newStop = candidate;
           shouldTrail = true;
         }
       } else {
         // Only trail down, never up
-        const candidate = price + (indicators.atr * (indicators.atr ? 1 : 1));
+        const candidate = price + trailATR;
         if (candidate < stopLevel && candidate > price + minStopDistance) {
           newStop = candidate;
           shouldTrail = true;
         }
       }
-      // logger.info(`[TrailingStop] Dynamic validation for ${symbol}: direction=${direction}, price=${price}, newStop=${newStop}, minStopDistance=${minStopDistance}, shouldTrail=${shouldTrail}`);
-      if (shouldTrail) {
+      if (breakeven && newStop !== stopLevel) {
         await updateTrailingStop(dealId, newStop);
-        logger.info(`[TrailingStop] Dynamically updated for ${symbol} to ${newStop}`);
-      } else if (newStop !== stopLevel) {
-        logger.warn(`[TrailingStop] Not updated for ${symbol}: newStop ${newStop} not valid (must be at least ${minStopDistance} from price ${price})`);
+        logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${newStop}`);
+      } else if (shouldTrail) {
+        await updateTrailingStop(dealId, newStop);
+        logger.info(`[TrailingStop] Aggressively updated for ${symbol} to ${newStop}`);
       }
 
-      // 4. Indicator-based exit: close if trend reverses (regardless of profit)
+      // 4. Dynamic exit on reversal: if price retraces 50% from max profit, close
+      if (maxProfit > 0 && profit < maxProfit * 0.5 && tpProgress > 30) {
+        if (typeof this.closePosition === "function") {
+          await this.closePosition(dealId);
+          logger.info(`[ReversalExit] Closed ${symbol} after retrace >50% from max profit. Locked: ${profit}`);
+          this.updateTradeResult(profit);
+          continue;
+        }
+      }
+
+      // 5. Indicator-based exit: close if trend reverses (regardless of profit)
       let exitReason = null;
       // EMA cross exit
       if ((direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
@@ -584,6 +679,7 @@ class TradingService {
         if (typeof this.closePosition === "function") {
           await this.closePosition(dealId);
           logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
+          this.updateTradeResult(profit); // <-- Track result
         } else {
           logger.info(`[Exit] Would close ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
         }
