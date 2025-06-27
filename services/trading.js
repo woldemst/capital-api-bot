@@ -37,6 +37,9 @@ class TradingService {
     this.dailyLoss = 0;
     this.dailyLossLimitPct = 0.05; // 5 % vom Kontostand
     this.lastLossReset = new Date().toDateString();
+    // --- Session trading window (MEZ / Berlin time) ---
+    this.sessionStart = 8;   // 08:00 MEZ
+    this.sessionEnd   = 18;  // 18:00 MEZ
   }
 
   setAccountBalance(balance) {
@@ -192,6 +195,19 @@ class TradingService {
     const trending = atrPct >= 0.006 && (adx === null ? true : adx > 25);
     logger.info(`[Regime] atrPct=${(atrPct*100).toFixed(2)}% adx=${adx} trending=${trending}`);
     return trending;
+  }
+
+  // Session filter: trade only during London & NY overlap (08‑18 MEZ)
+  isActiveSession() {
+    // Convert current UTC hour to MEZ (+2 in summer, +1 in winter).
+    const now = new Date();
+    // crude daylight‑saving approximation (March‑Oct = +2, else +1)
+    const month = now.getUTCMonth(); // 0=Jan
+    const offset = month >= 2 && month <= 9 ? 2 : 1;
+    const mezHour = (now.getUTCHours() + offset) % 24;
+    const active = mezHour >= this.sessionStart && mezHour <= this.sessionEnd;
+    if (!active) logger.info(`[Session] Outside active window (${this.sessionStart}‑${this.sessionEnd} MEZ). Hour=${mezHour}`);
+    return active;
   }
 
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
@@ -457,6 +473,9 @@ class TradingService {
         logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}% ) hit. Skip all new trades for today.`);
         return;
       }
+      // ---- Session trading window guard ----
+      if (!this.isActiveSession()) return;
+
       const candle = message;
       symbol = candle.symbol || candle.epic;
       logger.info(`\n\n=== Processing ${symbol} ===`);
