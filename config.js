@@ -40,6 +40,10 @@ export const TRADING = {
   // Signal threshold for entry
   MIN_BUY_CONDITIONS: 3, // Minimum buy conditions for a signal
   MIN_SELL_CONDITIONS: 3, // Minimum sell conditions for a signal
+
+  // Daily risk control
+  MAX_DAILY_LOSS: 0.04, // Stop trading after 4% loss in a day
+  MAX_DAILY_PROFIT: 0.06, // Stop trading after 6% profit in a day
 };
 
 // Technical Analysis Configuration
@@ -118,7 +122,7 @@ export const SESSIONS = {
 // Mode Configuration
 export const MODE = {
   BACKTEST_MODE: false,
-  DEV_MODE: false, // Set to false in production
+  DEV_MODE: true, // Set to false in production
 };
 
 // Development overrides for faster testing
