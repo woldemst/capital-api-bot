@@ -183,6 +183,17 @@ class TradingService {
     return true;
   }
 
+  // Regime filter: identify trending market (ATR % + ADX)
+  isTrending(indicators, price) {
+    if (!indicators || !price) return false;
+    const atrPct = indicators.atr ? indicators.atr / price : 0;
+    const adx = indicators.adx ?? null; // some TFs may supply adx
+    // Simple thresholds: ATR ≥ 0.6 %  AND  ADX > 25  → trend regime
+    const trending = atrPct >= 0.006 && (adx === null ? true : adx > 25);
+    logger.info(`[Regime] atrPct=${(atrPct*100).toFixed(2)}% adx=${adx} trending=${trending}`);
+    return trending;
+  }
+
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
     const trendAnalysis = message.trendAnalysis;
@@ -190,6 +201,12 @@ class TradingService {
     const price = bid || ask || 1;
     if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
       logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
+      return { signal: null, buyScore: 0, sellScore: 0 };
+    }
+    // --- Regime filter (trend) ---
+    const trending = this.isTrending(indicators.m15 || indicators, price);
+    if (!trending) {
+      logger.info(`[Regime] ${symbol} is not trending – skipping signal.`);
       return { signal: null, buyScore: 0, sellScore: 0 };
     }
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
