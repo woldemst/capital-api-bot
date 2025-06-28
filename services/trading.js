@@ -326,7 +326,8 @@ class TradingService {
 
   async executeTrade(signal, symbol, bid, ask) {
     logger.trade(signal.toUpperCase(), symbol, { bid, ask });
-    const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
+    const indicators = candle.indicators || {};
+    const params = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators.h4);
     // Validate TP/SL before placing trade
     const price = signal === "buy" ? ask : bid;
     const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
@@ -341,12 +342,15 @@ class TradingService {
     }
   }
 
-  async calculateTradeParameters(signal, symbol, bid, ask) {
+  async calculateTradeParameters(signal, symbol, bid, ask, h4Indicators) {
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
     const stopLossPips = 2 * atr;           // mehr Puffer
     const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-    const takeProfitPips = 1.5 * stopLossPips; // 1.5:1 CRV (konservativer Exit)
+    // Adaptive TP: higher TP if in strong trend, lower TP in choppy markets
+    const strongTrend = h4Indicators && h4Indicators.macd?.histogram > 0 && h4Indicators.emaFast > h4Indicators.emaSlow;
+    const takeProfitMultiplier = strongTrend ? 2.0 : 1.2;
+    const takeProfitPips = takeProfitMultiplier * stopLossPips;
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
     const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
     logger.info(`[calculateTradeParameters] Size: ${size}`);
@@ -600,6 +604,27 @@ class TradingService {
       const { isTrendWeak, getTPProgress } = await import("../indicators.js");
       const tpProgress = getTPProgress(entry, price, tpLevel, direction.toUpperCase());
       const holdMinutes = (now - openTime) / 60000;
+
+      // --- Pyramiding‑Light: add up to 2 extra legs when +1 R reached ---
+      if (!p.position._legsAdded) p.position._legsAdded = 0;
+      try {
+        const riskPips = Math.abs(entry - stopLevel);
+        const rewardPips = Math.abs(price - entry);
+        const R = rewardPips / riskPips;
+        // Add leg at +1 R and +2 R, max 2 legs
+        if (R >= (p.position._legsAdded + 1) && p.position._legsAdded < 2) {
+          const addSize = size * 0.5; // 50 % der Ursprung‑Größe
+          await placePosition(symbol, direction, addSize, null, stopLevel, tpLevel);
+          p.position._legsAdded += 1;
+          logger.info(`[Pyramiding] Added leg ${p.position._legsAdded} on ${symbol} (+${(p.position._legsAdded)} R). New size: ${size + addSize * p.position._legsAdded}`);
+          // Move SL aller Legs auf Breakeven
+          const breakevenStop = entry;
+          await updateTrailingStop(dealId, breakevenStop);
+          logger.info(`[Pyramiding] Stop moved to breakeven for ${symbol} at ${breakevenStop}`);
+        }
+      } catch (err) {
+        logger.warn(`[Pyramiding] Could not add leg for ${symbol}: ${err.message}`);
+      }
 
       // 1. Partial close & trailing stop if 60% TP reached and trend is weak
       if (tpProgress >= 60 && isTrendWeak(indicators, direction.toUpperCase())) {
