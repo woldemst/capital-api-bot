@@ -507,8 +507,19 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
-    // Use dynamic risk per trade
-    const riskAmount = balance * this.dynamicRiskPerTrade;
+    // --- Kelly Criterion Kick-In ---
+    const recent = this.recentResults.slice(-20);
+    const wins = recent.reduce((a, b) => a + b, 0);
+    const losses = recent.length - wins;
+    const winRate = recent.length > 0 ? wins / recent.length : 0.5;
+    const rewardRiskRatio = 1.5; // assume 1.5R average payoff
+    let kellyFraction = winRate - ((1 - winRate) / rewardRiskRatio);
+    kellyFraction = Math.max(0.001, Math.min(kellyFraction, this.maxRiskPerTrade));
+    const adjustedRisk = kellyFraction * 0.5; // safety factor to reduce aggressiveness
+    logger.info(`[Kelly] WinRate=${(winRate*100).toFixed(1)}% KellyFraction=${(kellyFraction*100).toFixed(2)}% AdjustedRisk=${(adjustedRisk*100).toFixed(2)}%`);
+
+    // Use dynamic risk per trade (now replaced by adjustedRisk)
+    const riskAmount = balance * adjustedRisk;
     // Simpler, more aggressive sizing (like old version)
     const pipValue = this.getPipValue(symbol); // Dynamic pip value
     if (!pipValue || pipValue <= 0) {
@@ -670,43 +681,44 @@ class TradingService {
         }
       }
 
-      // 3. Aggressive trailing stop as price nears TP
-      let shouldTrail = false;
-      let newStop = stopLevel;
+      // 3. Trailing Stop Step based on R multiples
+      // Remove old aggressive trailing stop logic and replace with stepped trailing stop
       // --- Trailing stop validation ---
       const range = await getAllowedTPRange(symbol);
       const decimals = range.decimals || 5;
       const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-      // Aggressive trailing: tighten as TP progress increases
-      let trailATR = indicators.atr;
-      if (tpProgress >= 80) trailATR = indicators.atr * 0.5; // Tighten trailing stop
-      else if (tpProgress >= 60) trailATR = indicators.atr * 0.7;
-      // Move stop to breakeven after 50% TP
-      let breakeven = false;
-      if (tpProgress >= 50 && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
-        newStop = entry;
-        breakeven = true;
-      } else if (direction === "buy") {
-        // Only trail up, never down
-        const candidate = price - trailATR;
-        if (candidate > stopLevel && candidate < price - minStopDistance) {
-          newStop = candidate;
-          shouldTrail = true;
-        }
-      } else {
-        // Only trail down, never up
-        const candidate = price + trailATR;
-        if (candidate < stopLevel && candidate > price + minStopDistance) {
-          newStop = candidate;
-          shouldTrail = true;
+
+      let stepTrail = false;
+      let steppedStop = stopLevel;
+      // Calculate R multiple
+      const rMultiple = profit / (Math.abs(entry - stopLevel) * size);
+      let trailDistance = null;
+
+      if (rMultiple >= 2) {
+        trailDistance = indicators.atr * 0.5;
+      } else if (rMultiple >= 1) {
+        trailDistance = indicators.atr * 0.8;
+      }
+
+      if (trailDistance) {
+        if (direction === "buy") {
+          const candidate = price - trailDistance;
+          if (candidate > stopLevel + minStopDistance) {
+            steppedStop = candidate;
+            stepTrail = true;
+          }
+        } else {
+          const candidate = price + trailDistance;
+          if (candidate < stopLevel - minStopDistance) {
+            steppedStop = candidate;
+            stepTrail = true;
+          }
         }
       }
-      if (breakeven && newStop !== stopLevel) {
-        await updateTrailingStop(dealId, newStop);
-        logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${newStop}`);
-      } else if (shouldTrail) {
-        await updateTrailingStop(dealId, newStop);
-        logger.info(`[TrailingStop] Aggressively updated for ${symbol} to ${newStop}`);
+
+      if (stepTrail && steppedStop !== stopLevel) {
+        await updateTrailingStop(dealId, steppedStop);
+        logger.info(`[TrailingStep] Updated for ${symbol} at ${steppedStop} based on +${rMultiple.toFixed(2)}R`);
       }
 
       // 4. Dynamic exit on reversal: if price retraces 50% from max profit, close
