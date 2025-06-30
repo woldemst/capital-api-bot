@@ -104,7 +104,7 @@ export const ANALYSIS = {
   },
   // Range filter: skip signals in low volatility/ranging markets
   RANGE_FILTER: {
-    ENABLED: true,
+    ENABLED: false,
     MIN_ATR_PCT: 0.0005, // ATR must be at least 0.05% of price
     MIN_BB_WIDTH_PCT: 0.001, // BB width must be at least 0.1% of price
     MIN_EMA_DIST_PCT: 0.0003, // Fast/slow EMA must be at least 0.03% apart

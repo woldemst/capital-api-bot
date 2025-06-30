@@ -190,9 +190,10 @@ class TradingService {
   isTrending(indicators, price) {
     if (!indicators || !price) return false;
     const atrPct = indicators.atr ? indicators.atr / price : 0;
-    const adx = indicators.adx ?? null; // some TFs may supply adx
-    // Simple thresholds: ATR ≥ 0.6 %  AND  ADX > 25  → trend regime
-    const trending = atrPct >= 0.006 && (adx === null ? true : adx > 25);
+    // Loosened: allow trading if ATR >= 0.0001 (0.01%)
+    // Ignore ADX for now (or use only if present and >15)
+    const adx = indicators.adx ?? null;
+    const trending = atrPct >= 0.0001 && (adx === null ? true : adx > 15);
     logger.info(`[Regime] atrPct=${(atrPct*100).toFixed(2)}% adx=${adx} trending=${trending}`);
     return trending;
   }
@@ -324,10 +325,9 @@ class TradingService {
     return { stopLossPrice: newSL, takeProfitPrice: newTP };
   }
 
-  async executeTrade(signal, symbol, bid, ask) {
+    async executeTrade(signal, symbol, bid, ask, h4Indicators) {
     logger.trade(signal.toUpperCase(), symbol, { bid, ask });
-    const indicators = candle.indicators || {};
-    const params = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators.h4);
+    const params = await this.calculateTradeParameters(signal, symbol, bid, ask, h4Indicators);
     // Validate TP/SL before placing trade
     const price = signal === "buy" ? ask : bid;
     const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
@@ -345,6 +345,10 @@ class TradingService {
   async calculateTradeParameters(signal, symbol, bid, ask, h4Indicators) {
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
+    if (!atr) {
+      logger.warn(`[Trade] Skipping ${symbol} because ATR could not be calculated.`);
+      return;
+    }
     const stopLossPips = 2 * atr;           // mehr Puffer
     const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
     // Adaptive TP: higher TP if in strong trend, lower TP in choppy markets
@@ -439,9 +443,10 @@ class TradingService {
 
   async calculateATR(symbol) {
     try {
-      const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 15);
+      const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 21);
       if (!data?.prices || data.prices.length < 21) {
-        throw new Error("Insufficient data for ATR calculation");
+        logger.warn(`[ATR] Not enough data to calculate ATR for ${symbol}. Needed 21, got ${data?.prices?.length || 0}. Skipping trade.`);
+        return null; // Signal to skip trade
       }
       // Use mid price for ATR calculation for consistency
       const highs = data.prices.map((b) => {
@@ -460,10 +465,10 @@ class TradingService {
         return b.close?.bid ?? b.close?.ask ?? 0;
       });
       const atrArr = ATR.calculate({ period: 21, high: highs, low: lows, close: closes });
-      return atrArr.length ? atrArr[atrArr.length - 1] : 0.001;
+      return atrArr.length ? atrArr[atrArr.length - 1] : null;
     } catch (error) {
-      logger.error("[ATR] Error:", error);
-      return 0.001;
+      logger.error(`[ATR] Unexpected error for ${symbol}: ${error.message}`);
+      return null;
     }
   }
 
@@ -471,19 +476,10 @@ class TradingService {
     let symbol = null;
     try {
       if (!message) return;
-      // ---- Daily loss guard ----
-      const maxDailyLoss = -this.accountBalance * this.dailyLossLimitPct;
-      if (this.dailyLoss <= maxDailyLoss) {
-        logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}% ) hit. Skip all new trades for today.`);
-        return;
-      }
-      // ---- Session trading window guard ----
-      if (!this.isActiveSession()) return;
-
       const candle = message;
       symbol = candle.symbol || candle.epic;
       logger.info(`\n\n=== Processing ${symbol} ===`);
-      logger.info("")
+      logger.info("");
       logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
       if (this.openTrades.length >= maxOpenTrades) {
         logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
@@ -497,10 +493,17 @@ class TradingService {
       const bid = candle.close?.bid;
       const ask = candle.close?.ask;
       if (!this.validatePrices(bid, ask, symbol)) return;
-      const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
-      if (signal) {
-        await this.executeTrade(signal, symbol, bid, ask);
+      // --- Diagnostic logging for entry ---
+      logger.info(`[ProcessPrice] Checking entry for ${symbol}. Bid: ${bid}, Ask: ${ask}`);
+      const { signal, buyScore, sellScore } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
+      logger.info(`[ProcessPrice] Signal: ${signal}, BuyScore: ${buyScore}, SellScore: ${sellScore}, Threshold: ${this.dynamicSignalThreshold}`);
+      if (!signal) {
+        logger.info(`[ProcessPrice] No entry signal for ${symbol}. Skipping.`);
+        return;
       }
+      // --- End diagnostics ---
+      const indicators = candle.indicators || {};
+      await this.executeTrade(signal, symbol, bid, ask, indicators.h4);
     } catch (error) {
       logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
