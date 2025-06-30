@@ -1,3 +1,6 @@
+// --- TradingBot: Main orchestrator for trading logic, data flow, and scheduling ---
+// Human-readable, robust, and well-commented for maintainability.
+
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession } from "./api.js";
 import { TRADING, MODE, DEV, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
@@ -20,7 +23,9 @@ class TradingBot {
     this.monitorInterval = null; // Add monitor interval for open trades
   }
 
-  // Initialize the bot and start necessary services
+  /**
+   * Initializes the bot, handles session retries, and starts trading or backtest mode.
+   */
   async initialize() {
     let retryCount = 0;
 
@@ -57,16 +62,21 @@ class TradingBot {
     }
   }
 
-  // Start live trading mode
+  /**
+   * Starts live trading mode: sets up WebSocket, session ping, analysis, and trade monitoring.
+   */
   async startLiveTrading(tokens) {
     this.setupWebSocket(tokens);
     this.startSessionPing();
     this.startAnalysisInterval();
-    this.startMonitorOpenTrades(); // Add monitor open trades interval
+    this.startMonitorOpenTrades();
     this.isRunning = true;
   }
 
-  // Set up WebSocket connection for real-time data
+  /**
+   * Sets up the WebSocket connection for real-time price data.
+   * Handles incoming messages and merges bid/ask candles for analysis.
+   */
   setupWebSocket(tokens) {
     webSocketService.connect(tokens, SYMBOLS, (data) => {
       try {
@@ -114,7 +124,9 @@ class TradingBot {
     });
   }
 
-  // Start session ping interval
+  /**
+   * Starts a periodic session ping to keep the API session alive.
+   */
   startSessionPing() {
     this.sessionPingInterval = setInterval(async () => {
       try {
@@ -126,14 +138,12 @@ class TradingBot {
     }, this.pingInterval);
   }
 
-  // Start analysis interval
+  /**
+   * Starts the periodic analysis interval for scheduled trading logic.
+   */
   startAnalysisInterval() {
     const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
-    if (MODE.DEV_MODE) {
-      logger.info(`[DEV] Starting analysis interval: ${interval}s`);
-    } else {
-      logger.info(`[PROD] Starting analysis interval: ${interval}s`);
-    }
+    logger.info(`[${MODE.DEV_MODE ? 'DEV' : 'PROD'}] Starting analysis interval: ${interval}s`);
     this.analysisInterval = setInterval(async () => {
       try {
         logger.info(`[Running scheduled analysis...`);
@@ -145,7 +155,9 @@ class TradingBot {
     }, interval);
   }
 
-  // Update account information and positions
+  /**
+   * Updates account balance, margin, and open trades in the trading service.
+   */
   async updateAccountInfo() {
     try {
       const accountData = await getAccountInfo();
@@ -170,7 +182,10 @@ class TradingBot {
     }
   }
 
-  // Get historical data for all timeframes
+  /**
+   * Fetches historical data for all required timeframes for a symbol.
+   * Returns H4, H1, and M15 data objects.
+   */
   async fetchHistoricalData(symbol) {
     const timeframes = MODE.DEV_MODE
       ? [DEV.TIMEFRAMES.TREND, DEV.TIMEFRAMES.SETUP, DEV.TIMEFRAMES.ENTRY]
@@ -191,7 +206,9 @@ class TradingBot {
     };
   }
 
-  // Analyze a single symbol
+  /**
+   * Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
+   */
   async analyzeSymbol(symbol) {
     logger.info(`\n\nAnalyzing ${symbol}...`);
 
@@ -230,10 +247,12 @@ class TradingBot {
     );
   }
 
-  // Analyze all symbols
+  /**
+   * Analyzes all symbols in the trading universe.
+   */
   async analyzeAllSymbols() {
     for (const symbol of SYMBOLS) {
-      if (!this.latestCandles[symbol]?.latest) continue; // Only analyze if we have a merged candle
+      if (!this.latestCandles[symbol]?.latest) continue;
       try {
         await this.analyzeSymbol(symbol);
       } catch (error) {
@@ -242,7 +261,9 @@ class TradingBot {
     }
   }
 
-  // Run backtest mode
+  /**
+   * Runs a simple backtest (skeleton for future expansion).
+   */
   async runBacktest() {
     try {
       const m1Data = await getHistorical("USDCAD", "MINUTE", 50);
@@ -252,7 +273,9 @@ class TradingBot {
     }
   }
 
-  // Clean shutdown
+  /**
+   * Cleanly shuts down the bot and all intervals/connections.
+   */
   async shutdown() {
     this.isRunning = false;
     clearInterval(this.analysisInterval);
@@ -260,7 +283,10 @@ class TradingBot {
     webSocketService.disconnect();
   }
 
-  // Fetch and store minDealSize and dealSizeIncrement for all symbols
+  /**
+   * Fetches and stores minDealSize and dealSizeIncrement for all symbols.
+   * Used for position sizing and validation.
+   */
   async fetchAndStoreSymbolMinSizes() {
     const minSizes = {};
     for (const symbol of SYMBOLS) {
@@ -278,7 +304,9 @@ class TradingBot {
     tradingService.setSymbolMinSizes(minSizes);
   }
 
-  // Monitor open trades every 2 minutes
+  /**
+   * Monitors open trades at a regular interval and triggers trade management logic.
+   */
   startMonitorOpenTrades() {
     logger.info("[Monitor] Starting open trade monitor interval (every 1 minute)");
     this.monitorInterval = setInterval(async () => {

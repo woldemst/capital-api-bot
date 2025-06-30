@@ -168,14 +168,19 @@ class TradingService {
     }
     return true;
   }
+  // --- Regime filter: identify trending market (ATR % + ADX)
+  /*
   isTrending(indicators, price) {
     if (!indicators || !price) return false;
     const atrPct = indicators.atr ? indicators.atr / price : 0;
+    // Loosened: allow trading if ATR >= 0.0001 (0.01%)
+    // Ignore ADX for now (or use only if present and >15)
     const adx = indicators.adx ?? null;
     const trending = atrPct >= 0.0001 && (adx === null ? true : adx > 15);
     logger.info(`[Regime] atrPct=${(atrPct*100).toFixed(2)}% adx=${adx} trending=${trending}`);
     return trending;
   }
+  */
   isActiveSession() {
     const now = new Date();
     const month = now.getUTCMonth();
@@ -195,11 +200,11 @@ class TradingService {
       logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
       return { signal: null, buyScore: 0, sellScore: 0 };
     }
-    const trending = this.isTrending(indicators.m15 || indicators, price);
-    if (!trending) {
-      logger.info(`[Regime] ${symbol} is not trending – skipping signal.`);
-      return { signal: null, buyScore: 0, sellScore: 0 };
-    }
+    // const trending = this.isTrending(indicators.m15 || indicators, price);
+    // if (!trending) {
+    //   logger.info(`[Regime] ${symbol} is not trending – skipping signal.`);
+    //   return { signal: null, buyScore: 0, sellScore: 0 };
+    // }
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
