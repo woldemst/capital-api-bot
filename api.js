@@ -1,3 +1,6 @@
+// --- API Utility: Handles all Capital.com REST API calls and session management ---
+// Human-readable, robust, and well-commented for maintainability.
+
 import { API } from "./config.js";
 import axios from "axios";
 import logger from "./utils/logger.js";
@@ -5,28 +8,36 @@ import logger from "./utils/logger.js";
 let cst, xsecurity;
 let sessionStartTime = Date.now();
 
-// Base headers for API requests
+/**
+ * Returns the headers required for API requests.
+ * Optionally includes Content-Type for POST/PUT requests.
+ */
 export const getHeaders = (includeContentType = false) => {
   const baseHeaders = {
     "X-SECURITY-TOKEN": xsecurity,
     "X-CAP-API-KEY": API.KEY,
     CST: cst,
   };
-
   return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
-// Helper: format Date in “YYYY-MM-DDTHH:mm:ss” (no ms, no Z)
+/**
+ * Formats a Date object as ISO string without milliseconds or timezone.
+ * Example: 2025-06-30T19:16:33
+ */
 function formatIsoNoMs(date) {
   if (!(date instanceof Date) || isNaN(date)) {
     throw new Error("Invalid date object passed to formatIsoNoMs");
   }
-  const iso = date.toISOString();
-  return iso.split(".")[0];
+  return date.toISOString().split(".")[0];
 }
 
 // Start a new session with the API
 export const startSession = async () => {
+  /**
+   * Starts a new session with the Capital.com API.
+   * Stores session tokens for future requests.
+   */
   try {
     const response = await axios.post(
       `${API.BASE_URL}/session`,
@@ -36,7 +47,7 @@ export const startSession = async () => {
         encryptedPassword: false,
       },
       {
-        headers: getHeaders(true), // Include headers for the reques
+        headers: getHeaders(true),
       }
     );
 
@@ -47,7 +58,6 @@ export const startSession = async () => {
     // Store the session tokens
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
-
     if (!cst || !xsecurity) {
       logger.warn("Session tokens not received in response headers");
       logger.info("Response headers:", response.headers);
@@ -58,7 +68,6 @@ export const startSession = async () => {
     return response.data;
   } catch (error) {
     logger.error("Failed to start session:", error.response ? error.response.data : error.message);
-    logger.error("Request config:", error.config);
     if (error.response) {
       logger.error("Response status:", error.response.status);
       logger.error("Response headers:", error.response.headers);
@@ -67,20 +76,26 @@ export const startSession = async () => {
   }
 };
 
-// ping
+/**
+ * Pings the API to keep the session alive.
+ * Logs the current session tokens for diagnostics.
+ */
 export const pingSession = async () => {
   try {
     const response = await axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() });
-    logger.info(`Ping response: ${JSON.stringify(response.data)}`);
-    logger.info(`securityToken: ${xsecurity}`);
-    logger.info(`CST: ${cst}`);
+    logger.info(`[API] Ping response: ${JSON.stringify(response.data)}`);
+    logger.info(`[API] securityToken: ${xsecurity}`);
+    logger.info(`[API] CST: ${cst}`);
   } catch (error) {
-    logger.error(`Error pinging session: ${error.message}`);
+    logger.error(`[API] Error pinging session: ${error.message}`);
     throw error;
   }
 };
 
-// Refresh session tokens
+/**
+ * Refreshes session tokens if more than 8.5 minutes have passed.
+ * Ensures all API calls remain authenticated.
+ */
 export const refreshSession = async () => {
   if (Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
   try {
@@ -88,24 +103,30 @@ export const refreshSession = async () => {
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
     sessionStartTime = Date.now();
-    logger.info("Session tokens refreshed");
+    logger.info("[API] Session tokens refreshed");
   } catch (error) {
-    logger.error(`Error refreshing session: ${error.message}`);
+    logger.error(`[API] Error refreshing session: ${error.message}`);
     throw error;
   }
 };
 
 // Get session details
-export const getSeesionDetails = async () => {
+export const getSessionDetails = async () => {
+  /**
+   * Gets session details for diagnostics.
+   */
   try {
     const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
-    logger.info(`session details: ${JSON.stringify(response.data)}`);
+    logger.info(`[API] Session details: ${JSON.stringify(response.data)}`);
   } catch (error) {
-    logger.error("session details:", error.response?.data || error.message);
+    logger.error("[API] Session details error:", error.response?.data || error.message);
   }
 };
 
-// Helper: Retry API call after session refresh if session error
+/**
+ * Helper: Retry an API call after refreshing the session if a session error is detected.
+ * Ensures robust error handling for all API requests.
+ */
 async function withSessionRetry(fn, ...args) {
   try {
     return await fn(...args);
@@ -120,26 +141,34 @@ async function withSessionRetry(fn, ...args) {
     ) {
       logger.warn("[API] Session error detected. Refreshing session and retrying...");
       await refreshSession();
-      // Try again once
-      return await fn(...args);
+      return await fn(...args); // Retry once
     }
     throw error;
   }
 }
 
 // Wrap main API calls with withSessionRetry
+/**
+ * Fetches account information (balance, margin, etc.).
+ */
 export const getAccountInfo = async () =>
   withSessionRetry(async () => {
     const response = await axios.get(`${API.BASE_URL}/accounts`, { headers: getHeaders() });
     return response.data;
   });
 
+/**
+ * Fetches a list of available markets (default: EURUSD).
+ */
 export const getMarkets = async () =>
   withSessionRetry(async () => {
     const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
     return Array.isArray(response.data.markets) ? response.data.markets : [];
   });
 
+/**
+ * Fetches detailed information for a specific market symbol.
+ */
 export async function getMarketDetails(symbol) {
   return await withSessionRetry(async () => {
     const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
@@ -148,6 +177,9 @@ export async function getMarketDetails(symbol) {
   });
 }
 
+/**
+ * Fetches open positions for the account.
+ */
 export const getOpenPositions = async () =>
   withSessionRetry(async () => {
     const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
@@ -155,12 +187,14 @@ export const getOpenPositions = async () =>
     return response.data;
   });
 
+/**
+ * Fetches historical price data for a symbol and timeframe.
+ * Returns an array of candle objects.
+ */
 export async function getHistorical(symbol, resolution, count, from = null, to = null) {
   return await withSessionRetry(async () => {
     const nowMs = Date.now();
-    if (!to) {
-      to = formatIsoNoMs(new Date(nowMs));
-    }
+    if (!to) to = formatIsoNoMs(new Date(nowMs));
     if (!from) {
       const resolutionToMs = {
         MINUTE: 1 * 60 * 1000,
@@ -170,11 +204,11 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
         HOUR_4: 4 * 60 * 60 * 1000,
         DAY: 24 * 60 * 60 * 1000,
       };
-      const stepMs = resolutionToMs[resolution] || resolutionToMs.m1;
+      const stepMs = resolutionToMs[resolution] || resolutionToMs.MINUTE;
       const fromMs = nowMs - count * stepMs;
       from = formatIsoNoMs(new Date(fromMs));
     }
-    logger.info(`from=${from} to=${to} in resolution=${resolution}`);
+    logger.info(`[API] Fetching historical: ${symbol} from=${from} to=${to} resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
       headers: getHeaders(true),
     });
@@ -190,9 +224,12 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
   });
 }
 
+/**
+ * Places a limit order for a symbol.
+ */
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
   return await withSessionRetry(async () => {
-    logger.info(`Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
+    logger.info(`[API] Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
     const order = {
       epic: symbol,
       direction: direction.toUpperCase(),
@@ -203,14 +240,17 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
     const response = await axios.post(`${API.BASE_URL}/workingorders`, order, {
       headers: getHeaders(true),
     });
-    logger.info("Order response:", response.data);
+    logger.info("[API] Order response:", response.data);
     return response.data;
   });
 }
 
+/**
+ * Updates the trailing stop for an open position.
+ */
 export async function updateTrailingStop(positionId, stopLevel) {
   return await withSessionRetry(async () => {
-    logger.info(`Updating trailing stop for position ${positionId} to ${stopLevel}`);
+    logger.info(`[API] Updating trailing stop for position ${positionId} to ${stopLevel}`);
     const response = await axios.put(
       `${API.BASE_URL}/positions/${positionId}`,
       {
@@ -221,16 +261,17 @@ export async function updateTrailingStop(positionId, stopLevel) {
         headers: getHeaders(true),
       }
     );
-    logger.info("Trailing stop updated successfully:", response.data);
+    logger.info("[API] Trailing stop updated successfully:", response.data);
     return response.data;
   });
 }
 
+/**
+ * Places a market position for a symbol with optional stop loss and take profit.
+ */
 export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
   return await withSessionRetry(async () => {
-    logger.info(`Placing ${direction} position for ${symbol} at market price...`);
-    logger.info(`Original size: ${size}, Using size: ${size}`);
-    logger.info(`Stop Loss: ${stopLevel}, Take Profit: ${profitLevel}`);
+    logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${stopLevel}, TP: ${profitLevel}`);
     const position = {
       epic: symbol,
       direction: direction.toUpperCase(),
@@ -241,26 +282,30 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
       profitLevel: profitLevel ? parseFloat(profitLevel).toFixed(5) : undefined,
       forceOpen: true,
     };
-    logger.info("Sending position request:", position);
+    logger.info("[API] Sending position request:", position);
     const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
-    logger.info("Position created successfully:", response.data);
+    logger.info("[API] Position created successfully:", response.data);
     return response.data;
   });
 }
 
+/**
+ * Gets deal confirmation for a given deal reference.
+ */
 export async function getDealConfirmation(dealReference) {
   return await withSessionRetry(async () => {
-    logger.info(`Getting confirmation for deal: ${dealReference}`);
+    logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
     const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
-    logger.info("[DealConfirmation]", response.data);
+    logger.info("[API] DealConfirmation", response.data);
     return response.data;
   });
 }
 
-// Close position by dealId
+/**
+ * Closes an open position by dealId.
+ */
 export async function closePosition(dealId) {
   try {
-    // Capital.com: DELETE /positions/{dealId}
     const response = await axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
       headers: getHeaders(true),
     });
@@ -272,30 +317,31 @@ export async function closePosition(dealId) {
   }
 }
 
-// Export session tokens for WebSocket connection
+/**
+ * Returns the current session tokens (CST and X-SECURITY-TOKEN).
+ */
 export function getSessionTokens() {
   return { cst, xsecurity };
 }
 
-// Get allowed TP/SL range for a symbol
+/**
+ * Gets allowed take profit and stop loss ranges for a symbol.
+ * Returns min/max distances and decimals for price calculations.
+ */
 export async function getAllowedTPRange(symbol) {
   try {
     const details = await getMarketDetails(symbol);
-    // Capital.com returns min/max distances in marketDetails.instrument
     const instr = details.instrument;
-    // For forex, these are usually in points (e.g. 10 = 0.0010 for EURUSD)
     return {
       minTPDistance: instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0,
       maxTPDistance: instr.limits?.limitDistance?.max || instr.limits?.limitLevel?.max || Number.POSITIVE_INFINITY,
       minSLDistance: instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0,
       maxSLDistance: instr.limits?.stopDistance?.max || instr.limits?.stopLevel?.max || Number.POSITIVE_INFINITY,
-      // For reference, also return the instrument decimals
       decimals: instr.lotSizeScale || instr.scalingFactor || 5,
-      // And the current market price (for level calculations)
       market: details.snapshot,
     };
   } catch (error) {
-    logger.error(`[getAllowedTPRange] Error for ${symbol}:`, error.message);
+    logger.error(`[API] getAllowedTPRange error for ${symbol}:`, error.message);
     return {
       minTPDistance: 0,
       maxTPDistance: Number.POSITIVE_INFINITY,
