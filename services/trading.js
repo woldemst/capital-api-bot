@@ -306,8 +306,16 @@ class TradingService {
       logger.info(`[${symbol}] Executing ${entrySignal.side} trade. Size: ${positionSize.toFixed(2)}. Reason: ${entrySignal.reason}`);
       // await api.placeOrder(symbol, entrySignal.side, positionSize, ...)
       this.lastTradeTimestamps[symbol] = Date.now();
-      // Track open trade
-      this.openTrades.push({ symbol, side: entrySignal.side, size: positionSize, entry: candle.close, time: Date.now() });
+      // Do NOT push to openTrades here; always refresh from broker after placing a trade
+      try {
+        const positions = await getOpenPositions();
+        if (positions?.positions) {
+          this.setOpenTrades(positions.positions.map((p) => p.market.epic));
+          logger.info(`[Trade] Refreshed open trades after placing new position. Currently open: ${positions.positions.length}`);
+        }
+      } catch (err) {
+        logger.warn(`[Trade] Could not refresh open trades after placing new position:`, err.message || err);
+      }
       // Update streaks
       this.updateStreaks(true); // Assume win for now, update on close
     } catch (err) {
