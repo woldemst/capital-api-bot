@@ -280,7 +280,7 @@ export async function placePosition(symbol, direction, size, level, stopLevel, p
       guaranteedStop: false,
       stopLevel: stopLevel ? parseFloat(stopLevel).toFixed(5) : undefined,
       profitLevel: profitLevel ? parseFloat(profitLevel).toFixed(5) : undefined,
-      forceOpen: true,
+      // forceOpen: true, // Removed as it's deprecated in newer API versions
     };
     logger.info("[API] Sending position request:", position);
     const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
