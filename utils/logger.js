@@ -16,42 +16,42 @@ const logger = {
   info: (message) => {
     const timestamp = new Date().toISOString();
     if (typeof message === 'object') {
-      console.log(`[INFO] ${timestamp} -\n${JSON.stringify(message, null, 2)}\n`);
+      console.log(`[INFO] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`);
     } else {
-      console.log(`[INFO] ${timestamp} - ${message}`);
+      console.log(`[INFO] ${timestamp} | ${message}`);
     }
   },
   
   error: (message, error) => {
     const timestamp = new Date().toISOString();
     if (typeof message === 'object') {
-      console.error(`[ERROR] ${timestamp} -\n${JSON.stringify(message, null, 2)}\n`, error || '');
+      console.error(`[ERROR] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`, error || '');
     } else {
-      console.error(`[ERROR] ${timestamp} - ${message}`, error || '');
+      console.error(`[ERROR] ${timestamp} | ${message}`, error || '');
     }
   },
   
   warn: (message, error) => {
     const timestamp = new Date().toISOString();
     if (typeof message === 'object') {
-      console.warn(`[WARN] ${timestamp} -\n${JSON.stringify(message, null, 2)}\n`, error || '');
+      console.warn(`[WARN] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`, error || '');
     } else {
-      console.warn(`[WARN] ${timestamp} - ${message}`, error || '');
+      console.warn(`[WARN] ${timestamp} | ${message}`, error || '');
     }
   },
   
   price: (symbol, bid, ask) => {
     const timestamp = new Date().toISOString();
-    console.log(`[PRICE] ${timestamp} - ${symbol}: Bid: ${bid} | Ask: ${ask}`);
+    console.log(`[PRICE] ${timestamp} | ${symbol}: Bid: ${bid} | Ask: ${ask}`);
     priceLogStream.write(`${timestamp},${symbol},${bid},${ask}\n`);
   },
   
   trade: (action, symbol, details) => {
     const timestamp = new Date().toISOString();
     if (typeof details === 'object') {
-      console.log(`[TRADE] ${timestamp} - ${action} ${symbol}:\n${JSON.stringify(details, null, 2)}\n`);
+      console.log(`[TRADE] ${timestamp} | ${action} ${symbol}:\n${JSON.stringify(details, null, 2)}\n`);
     } else {
-      console.log(`[TRADE] ${timestamp} - ${action} ${symbol}: ${details}`);
+      console.log(`[TRADE] ${timestamp} | ${action} ${symbol}: ${details}`);
     }
   },
   
@@ -62,7 +62,7 @@ const logger = {
     // Pretty-print JSON for readability
     const logLine = `${timestamp},${symbol},${timeframe},\n${JSON.stringify(data, null, 2)}\n`;
     fs.appendFileSync(filePath, logLine);
-    // console.log(`[INDICATOR] ${timestamp} - ${symbol} ${timeframe}:\n${JSON.stringify(data, null, 2)}`);
+    // console.log(`[INDICATOR] ${timestamp} | ${symbol} ${timeframe}:\n${JSON.stringify(data, null, 2)}`);
   }
 };
 

@@ -2,36 +2,17 @@ import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
 import logger from "../utils/logger.js";
 import { ATR } from "technicalindicators";
-const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
+const { RISK_PER_TRADE } = TRADING;
 
-// --- CONFIGURATION CONSTANTS ---
-const COOLDOWN_BETWEEN_TRADES_MINUTES = 15; // Minimum time between trades per symbol
-const MAX_WIN_STREAK = 2;
-const MAX_LOSS_STREAK = 2;
-const DEFAULT_SIGNAL_THRESHOLD = 3;
-const MAX_SIGNAL_THRESHOLD = 5;
-const MIN_SIGNAL_THRESHOLD = 2;
-const MAX_RISK_PER_TRADE = 0.02; // 2%
-const MIN_RISK_PER_TRADE = 0.003; // 0.3%
-const DAILY_LOSS_LIMIT_PCT = 0.05; // 5% of account balance
-const SESSION_START_HOUR = 8;   // 08:00 MEZ
-const SESSION_END_HOUR = 18;    // 18:00 MEZ
-
-// --- RSI CONFIGURATION ---
 const RSI_CONFIG = {
   OVERBOUGHT: 70,
   OVERSOLD: 30,
   EXIT_OVERBOUGHT: 65,
   EXIT_OVERSOLD: 35,
-};
+}; // Added missing properties
 
-/**
- * TradingService: Manages all trading logic, including signal generation, risk management, trade execution, and trade monitoring.
- * Refactored for clarity, maintainability, and human readability.
- */
 class TradingService {
   constructor() {
-    // --- State ---
     this.openTrades = [];
     this.accountBalance = 0;
     this.profitThresholdReached = false;
@@ -39,35 +20,44 @@ class TradingService {
     this.virtualBalance = 10000;
     this.virtualPositions = [];
     this.orderAttempts = new Map();
-    this.availableMargin = 0;
-    this.lastTradeTimestamps = {}; // For cooldown per symbol
+    this.availableMargin = 0; // Initialize availableMargin
+    // --- Overtrading protection: cooldown per symbol ---
+    this.lastTradeTimestamps = {};
+    this.COOLDOWN_MINUTES = 15; // Minimum minutes between trades per symbol
     this.winStreak = 0;
     this.lossStreak = 0;
     this.recentResults = [];
-    this.dynamicRiskPerTrade = TRADING.RISK_PER_TRADE;
-    this.dynamicSignalThreshold = DEFAULT_SIGNAL_THRESHOLD;
-    this.maxRiskPerTrade = MAX_RISK_PER_TRADE;
-    this.minRiskPerTrade = MIN_RISK_PER_TRADE;
-    this.maxSignalThreshold = MAX_SIGNAL_THRESHOLD;
-    this.minSignalThreshold = MIN_SIGNAL_THRESHOLD;
+    this.dynamicRiskPerTrade = RISK_PER_TRADE;
+    this.dynamicSignalThreshold = 3; // Default, will adapt
+    this.maxRiskPerTrade = 0.02; // 2% max
+    this.minRiskPerTrade = 0.003; // 0.3% min
+    this.maxSignalThreshold = 5;
+    this.minSignalThreshold = 2;
+    // --- Daily loss limit ---
     this.dailyLoss = 0;
-    this.dailyLossLimitPct = DAILY_LOSS_LIMIT_PCT;
+    this.dailyLossLimitPct = 0.05; // 5 % vom Kontostand
     this.lastLossReset = new Date().toDateString();
-    this.sessionStart = SESSION_START_HOUR;
-    this.sessionEnd = SESSION_END_HOUR;
   }
 
-  // --- State Setters ---
-  setAccountBalance(balance) { this.accountBalance = balance; }
-  setOpenTrades(trades) { this.openTrades = trades; }
-  setProfitThresholdReached(reached) { this.profitThresholdReached = reached; }
-  setSymbolMinSizes(minSizes) { this.symbolMinSizes = minSizes; }
-  setAvailableMargin(margin) { this.availableMargin = margin; }
+  setAccountBalance(balance) {
+    this.accountBalance = balance;
+  }
+  setOpenTrades(trades) {
+    this.openTrades = trades;
+  }
+  setProfitThresholdReached(reached) {
+    this.profitThresholdReached = reached;
+  }
+  setSymbolMinSizes(minSizes) {
+    this.symbolMinSizes = minSizes;
+  }
+  setAvailableMargin(margin) {
+    this.availableMargin = margin;
+  }
+  isSymbolTraded(symbol) {
+    return this.openTrades.includes(symbol);
+  }
 
-  // --- Trade State Checks ---
-  isSymbolTraded(symbol) { return this.openTrades.includes(symbol); }
-
-  // --- Price and Indicator Validation ---
   validatePrices(bid, ask, symbol) {
     if (typeof bid !== "number" || typeof ask !== "number" || isNaN(bid) || isNaN(ask)) {
       logger.error(`[PriceValidation] Invalid prices for ${symbol}. Bid: ${bid}, Ask: ${ask}`);
@@ -75,6 +65,7 @@ class TradingService {
     }
     return true;
   }
+
   validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
     if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
       logger.info("[Signal] Missing required indicators data");
@@ -83,23 +74,41 @@ class TradingService {
     return true;
   }
 
-  // --- Trade Result Tracking and Adaptive Risk ---
+  logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
+    // logger.info(`\n=== Analyzing ${symbol} ===`);
+    // logger.info("Current price:", { bid, ask });
+    // logger.info("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
+    // logger.info("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
+    // logger.info("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
+    // logger.info("Trend:", trendAnalysis.h4Trend);
+  }
+
+  // Call this after each trade closes (profit > 0 = win, else loss)
   updateTradeResult(profit) {
-    // Reset daily loss if new day
+    // -------- Daily reset ----------
     const today = new Date().toDateString();
     if (today !== this.lastLossReset) {
       this.dailyLoss = 0;
       this.lastLossReset = today;
     }
+    // Track realised P/L
     this.dailyLoss += profit;
     if (this.dailyLoss < 0) logger.warn(`[Risk] Daily realised loss: ${this.dailyLoss.toFixed(2)} €`);
+
     const isWin = profit > 0;
     this.recentResults.push(isWin ? 1 : 0);
     if (this.recentResults.length > 20) this.recentResults.shift();
-    if (isWin) { this.winStreak++; this.lossStreak = 0; }
-    else { this.lossStreak++; this.winStreak = 0; }
+    if (isWin) {
+      this.winStreak++;
+      this.lossStreak = 0;
+    } else {
+      this.lossStreak++;
+      this.winStreak = 0;
+    }
     this.updateDynamicRiskAndThreshold();
   }
+
+  // Adjust risk and signal threshold based on streaks and win rate
   updateDynamicRiskAndThreshold() {
     // Win rate over last 20 trades
     const winRate = this.recentResults.length ? this.recentResults.reduce((a,b)=>a+b,0)/this.recentResults.length : 0.5;
@@ -109,6 +118,7 @@ class TradingService {
     } else if (this.lossStreak >= 2) {
       this.dynamicRiskPerTrade = Math.max(this.dynamicRiskPerTrade * 0.7, this.minRiskPerTrade);
     } else {
+      // Gradually revert to base risk
       this.dynamicRiskPerTrade += (RISK_PER_TRADE - this.dynamicRiskPerTrade) * 0.1;
     }
     // Dynamic signal threshold: stricter if win rate < 50%, looser if > 65%
@@ -117,25 +127,29 @@ class TradingService {
     } else if (winRate < 0.5) {
       this.dynamicSignalThreshold = Math.min(this.maxSignalThreshold, this.dynamicSignalThreshold + 1);
     } else {
+      // Gradually revert to default
       this.dynamicSignalThreshold += (3 - this.dynamicSignalThreshold) * 0.2;
     }
     this.dynamicSignalThreshold = Math.round(this.dynamicSignalThreshold);
     logger.info(`[Adaptive] Risk: ${(this.dynamicRiskPerTrade*100).toFixed(2)}%, SignalThreshold: ${this.dynamicSignalThreshold}, WinRate: ${(winRate*100).toFixed(1)}%`);
   }
 
-  // --- Signal Evaluation ---
   evaluateSignals(buyConditions, sellConditions) {
+    // Use adaptive threshold
     const threshold = this.dynamicSignalThreshold || 3;
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
     logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}, Threshold: ${threshold}`);
     let signal = null;
-    if (buyScore >= threshold) signal = "buy";
-    else if (sellScore >= threshold) signal = "sell";
+    if (buyScore >= threshold) {
+      signal = "buy";
+    } else if (sellScore >= threshold) {
+      signal = "sell";
+    }
     return { signal, buyScore, sellScore };
   }
 
-  // --- Market Filters ---
+  // Range filter: skip signals in low volatility/ranging markets
   passesRangeFilter(indicators, price) {
     const { RANGE_FILTER } = ANALYSIS;
     if (!RANGE_FILTER?.ENABLED) return true;
@@ -168,43 +182,16 @@ class TradingService {
     }
     return true;
   }
-  // --- Regime filter: identify trending market (ATR % + ADX)
-  /*
-  isTrending(indicators, price) {
-    if (!indicators || !price) return false;
-    const atrPct = indicators.atr ? indicators.atr / price : 0;
-    // Loosened: allow trading if ATR >= 0.0001 (0.01%)
-    // Ignore ADX for now (or use only if present and >15)
-    const adx = indicators.adx ?? null;
-    const trending = atrPct >= 0.0001 && (adx === null ? true : adx > 15);
-    logger.info(`[Regime] atrPct=${(atrPct*100).toFixed(2)}% adx=${adx} trending=${trending}`);
-    return trending;
-  }
-  */
-  isActiveSession() {
-    const now = new Date();
-    const month = now.getUTCMonth();
-    const offset = month >= 2 && month <= 9 ? 2 : 1;
-    const mezHour = (now.getUTCHours() + offset) % 24;
-    const active = mezHour >= this.sessionStart && mezHour <= this.sessionEnd;
-    if (!active) logger.info(`[Session] Outside active window (${this.sessionStart}‑${this.sessionEnd} MEZ). Hour=${mezHour}`);
-    return active;
-  }
 
-  // --- Signal Generation ---
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
     const trendAnalysis = message.trendAnalysis;
+    // --- Range filter ---
     const price = bid || ask || 1;
     if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
       logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
       return { signal: null, buyScore: 0, sellScore: 0 };
     }
-    // const trending = this.isTrending(indicators.m15 || indicators, price);
-    // if (!trending) {
-    //   logger.info(`[Regime] ${symbol} is not trending – skipping signal.`);
-    //   return { signal: null, buyScore: 0, sellScore: 0 };
-    // }
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     if (!result.signal) {
       logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
@@ -213,53 +200,133 @@ class TradingService {
     }
     return result;
   }
-  generateBuyConditions(h4, h1, m15, trend, bid) {
+  generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
     return [
-      h4.emaFast > h4.emaSlow,
-      h4.macd?.histogram > 0,
-      h1.ema9 > h1.ema21,
-      h1.rsi < RSI_CONFIG.EXIT_OVERSOLD,
-      m15.isBullishCross,
-      m15.rsi < RSI_CONFIG.OVERSOLD,
-      bid <= m15.bb?.lower,
+      // H4 Trend conditions
+      h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
+      h4Indicators.macd?.histogram > 0, // Trend confirmation
+
+      // H1 Setup confirmation
+      h1Indicators.ema9 > h1Indicators.ema21,
+      h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
+
+      // M15 Entry conditions
+      m15Indicators.isBullishCross,
+      m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
+      bid <= m15Indicators.bb?.lower,
     ];
-  }
-  generateSellConditions(h4, h1, m15, trend, ask) {
-    return [
-      !h4.isBullishTrend,
-      h4.macd?.histogram < 0,
-      h1.ema9 < h1.ema21,
-      h1.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
-      m15.isBearishCross,
-      m15.rsi > RSI_CONFIG.OVERBOUGHT,
-      ask >= m15.bb?.upper,
-    ];
-  }
-  generateSignals(symbol, h4Data, h4, h1, m15, trend, bid, ask) {
-    if (!this.validateIndicatorData(h4Data, h4, h1, m15, trend)) return { signal: null };
-    const buyConditions = this.generateBuyConditions(h4, h1, m15, trend, bid);
-    const sellConditions = this.generateSellConditions(h4, h1, m15, trend, ask);
-    return this.evaluateSignals(buyConditions, sellConditions);
   }
 
-  // --- Trade Parameter Calculation ---
-  async calculateTradeParameters(signal, symbol, bid, ask, h4Indicators) {
+  generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
+    return [
+      // H4 Trend conditions
+      !h4Indicators.isBullishTrend,
+      h4Indicators.macd?.histogram < 0,
+
+      // H1 Setup confirmation
+      h1Indicators.ema9 < h1Indicators.ema21,
+      h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
+
+      // M15 Entry conditions
+      m15Indicators.isBearishCross,
+      m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
+      ask >= m15Indicators.bb?.upper,
+    ];
+  }
+
+  // Validate and adjust TP/SL to allowed range
+  async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
+    const range = await getAllowedTPRange(symbol);
+    let newTP = takeProfitPrice;
+    let newSL = stopLossPrice;
+    const decimals = range.decimals || 5;
+    // For forex, TP/SL must be at least minTPDistance away from entry, and not violate maxTPDistance
+    // For SELL: TP < entry, SL > entry. For BUY: TP > entry, SL < entry
+    if (direction === "buy") {
+      const minTP = entryPrice + range.minTPDistance * Math.pow(10, -decimals);
+      const maxTP = entryPrice + range.maxTPDistance * Math.pow(10, -decimals);
+      if (newTP < minTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) < min allowed (${minTP}). Adjusting.`);
+        newTP = minTP;
+      }
+      if (newTP > maxTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) > max allowed (${maxTP}). Adjusting.`);
+        newTP = maxTP;
+      }
+      // Repeat for SL
+      const minSL = entryPrice - range.maxSLDistance * Math.pow(10, -decimals);
+      const maxSL = entryPrice - range.minSLDistance * Math.pow(10, -decimals);
+      if (newSL < minSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) < min allowed (${minSL}). Adjusting.`);
+        newSL = minSL;
+      }
+      if (newSL > maxSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) > max allowed (${maxSL}). Adjusting.`);
+        newSL = maxSL;
+      }
+    } else {
+      // SELL
+      const minTP = entryPrice - range.maxTPDistance * Math.pow(10, -decimals);
+      const maxTP = entryPrice - range.minTPDistance * Math.pow(10, -decimals);
+      if (newTP > maxTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) > max allowed (${maxTP}). Adjusting.`);
+        newTP = maxTP;
+      }
+      if (newTP < minTP) {
+        logger.warn(`[TP Validation] TP (${newTP}) < min allowed ( ${minTP}). Adjusting.`);
+        newTP = minTP;
+      }
+      // Repeat for SL
+      const minSL = entryPrice + range.minSLDistance * Math.pow(10, -decimals);
+      const maxSL = entryPrice + range.maxSLDistance * Math.pow(10, -decimals);
+      if (newSL < minSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) < min allowed (${minSL}). Adjusting.`);
+        newSL = minSL;
+      }
+      if (newSL > maxSL) {
+        logger.warn(`[SL Validation] SL (${newSL}) > max allowed (${maxSL}). Adjusting.`);
+        newSL = maxSL;
+      }
+    }
+    return { stopLossPrice: newSL, takeProfitPrice: newTP };
+  }
+
+  async executeTrade(signal, symbol, bid, ask) {
+    logger.trade(signal.toUpperCase(), symbol, { bid, ask });
+    const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
+    // Validate TP/SL before placing trade
+    const price = signal === "buy" ? ask : bid;
+    const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
+    params.stopLossPrice = validated.stopLossPrice;
+    params.takeProfitPrice = validated.takeProfitPrice;
+    try {
+      // Pass expected entry price for slippage check
+      await this.executePosition(signal, symbol, params, price);
+    } catch (error) {
+      logger.error(`[TradeExecution] Failed for ${symbol}:`, error);
+      throw error;
+    }
+  }
+
+  async calculateTradeParameters(signal, symbol, bid, ask) {
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
-    const stopLossPips = 2 * atr; // More buffer
+    const stopLossPips = 2 * atr;           // mehr Puffer
     const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-    // Adaptive TP: higher TP if in strong trend, lower TP in choppy markets
-    const strongTrend = h4Indicators && h4Indicators.macd?.histogram > 0 && h4Indicators.emaFast > h4Indicators.emaSlow;
-    const takeProfitMultiplier = strongTrend ? 2.0 : 1.2;
-    const takeProfitPips = takeProfitMultiplier * stopLossPips;
+    const takeProfitPips = 1.5 * stopLossPips; // 1.5:1 CRV (konservativer Exit)
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-    const size = this.calculatePositionSize(this.accountBalance, price, stopLossPips, symbol);
-    logger.info(`[TradeParams] Size: ${size}`);
+    const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
+    logger.info(`[calculateTradeParameters] Size: ${size}`);
+
     // Trailing stop parameters
     const trailingStopParams = {
-      activationPrice: signal === "buy" ? price + stopLossPips : price - stopLossPips,
-      trailingDistance: atr,
+      activationPrice:
+        signal === "buy"
+          ? price + stopLossPips // Activate at 1R profit
+          : price - stopLossPips,
+      trailingDistance: atr, // Trail by 1 ATR
     };
+
     return {
       size,
       stopLossPrice,
@@ -267,133 +334,45 @@ class TradingService {
       stopLossPips,
       takeProfitPips,
       trailingStopParams,
-      partialTakeProfit: signal === "buy" ? price + stopLossPips : price - stopLossPips,
+      partialTakeProfit:
+        signal === "buy"
+          ? price + stopLossPips // Take partial at 1R
+          : price - stopLossPips,
     };
   }
 
-  // --- TP/SL Validation ---
-  async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
-    const range = await getAllowedTPRange(symbol);
-    let newTP = takeProfitPrice;
-    let newSL = stopLossPrice;
-    const decimals = range.decimals || 5;
-    if (direction === "buy") {
-      const minTP = entryPrice + range.minTPDistance * Math.pow(10, -decimals);
-      const maxTP = entryPrice + range.maxTPDistance * Math.pow(10, -decimals);
-      if (newTP < minTP) { logger.warn(`[TP Validation] TP (${newTP}) < min allowed (${minTP}). Adjusting.`); newTP = minTP; }
-      if (newTP > maxTP) { logger.warn(`[TP Validation] TP (${newTP}) > max allowed (${maxTP}). Adjusting.`); newTP = maxTP; }
-      const minSL = entryPrice - range.maxSLDistance * Math.pow(10, -decimals);
-      const maxSL = entryPrice - range.minSLDistance * Math.pow(10, -decimals);
-      if (newSL < minSL) { logger.warn(`[SL Validation] SL (${newSL}) < min allowed (${minSL}). Adjusting.`); newSL = minSL; }
-      if (newSL > maxSL) { logger.warn(`[SL Validation] SL (${newSL}) > max allowed (${maxSL}). Adjusting.`); newSL = maxSL; }
-    } else {
-      const minTP = entryPrice - range.maxTPDistance * Math.pow(10, -decimals);
-      const maxTP = entryPrice - range.minTPDistance * Math.pow(10, -decimals);
-      if (newTP > maxTP) { logger.warn(`[TP Validation] TP (${newTP}) > max allowed (${maxTP}). Adjusting.`); newTP = maxTP; }
-      if (newTP < minTP) { logger.warn(`[TP Validation] TP (${newTP}) < min allowed ( ${minTP}). Adjusting.`); newTP = minTP; }
-      const minSL = entryPrice + range.minSLDistance * Math.pow(10, -decimals);
-      const maxSL = entryPrice + range.maxSLDistance * Math.pow(10, -decimals);
-      if (newSL < minSL) { logger.warn(`[SL Validation] SL (${newSL}) < min allowed (${minSL}). Adjusting.`); newSL = minSL; }
-      if (newSL > maxSL) { logger.warn(`[SL Validation] SL (${newSL}) > max allowed (${maxSL}). Adjusting.`); newSL = maxSL; }
-    }
-    return { stopLossPrice: newSL, takeProfitPrice: newTP };
+  logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips) {
+    logger.info(
+      `[TradeParams] Entry: ${signal.toUpperCase()} | Size: ${size} | SL: ${stopLossPrice} (${stopLossPips}) | TP: ${takeProfitPrice}`
+    );
   }
 
-  // --- SIMPLIFIED TRADE EXECUTION ---
-  async executeTrade(symbol, signal, price, indicators) {
-    try {
-      if (!signal) {
-        logger.info(`[${symbol}] No valid signal to execute.`);
-        return null;
-      }
-      
-      // Calculate position size based on risk
-      const positionSize = Math.max(100, Math.round(price * 100) / 100); // Minimum 100 units
-      
-      // Calculate stop loss and take profit (simplified)
-      const atr = indicators?.atr || (price * 0.002); // Default to 0.2% if no ATR
-      const stopLossPrice = signal === "buy" ? price - (2 * atr) : price + (2 * atr);
-      const takeProfitPrice = signal === "buy" ? price + (3 * atr) : price - (3 * atr);
-      
-      logger.info(`[${symbol}] Executing ${signal.toUpperCase()} trade. Size: ${positionSize}. SL: ${stopLossPrice.toFixed(5)}, TP: ${takeProfitPrice.toFixed(5)}`);
-      
-      // Direct API call to place the position
-      const { placePosition, getDealConfirmation } = await import("../api.js");
-      
-      // Place the position directly
-      const position = await placePosition(
-        symbol, 
-        signal, // "buy" or "sell"
-        positionSize, 
-        null, // level (null for market orders)
-        stopLossPrice,
-        takeProfitPrice
-      );
-      
-      // Handle confirmation if needed
-      if (position?.dealReference) {
-        const confirmation = await getDealConfirmation(position.dealReference);
-        if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
-          logger.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
-          return null;
-        }
-        logger.info(`[${symbol}] Position successfully placed. Deal ID: ${confirmation.dealId}`);
-      }
-      
-      // Update last trade timestamp
-      this.lastTradeTimestamps[symbol] = Date.now();
-      
-      // Refresh open trades from broker
-      try {
-        const { getOpenPositions } = await import("../api.js");
-        const positions = await getOpenPositions();
-        if (positions?.positions) {
-          this.setOpenTrades(positions.positions.map((p) => p.market.epic));
-          logger.info(`[Trade] Refreshed open trades. Currently open: ${positions.positions.length}`);
-        }
-      } catch (err) {
-        logger.warn(`[Trade] Could not refresh open trades:`, err.message || err);
-      }
-      
-      return position;
-    } catch (err) {
-      logger.error(`[${symbol}] Trade execution failed: ${err.message}`);
-      return null;
-    }
-  }
-
-  updateStreaks(win) {
-    if (win) {
-      this.winStreak++;
-      this.lossStreak = 0;
-    } else {
-      this.lossStreak++;
-      this.winStreak = 0;
-    }
-  }
-
-  // --- Trade Execution ---
   async executePosition(signal, symbol, params, expectedPrice) {
     const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
     try {
       const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice);
       if (position?.dealReference) {
+        // Fetch and log deal confirmation
         const { getDealConfirmation } = await import("../api.js");
         const confirmation = await getDealConfirmation(position.dealReference);
         if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
           logger.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
         }
+        // --- Slippage check ---
         if (confirmation.level && expectedPrice) {
           const { TRADING } = await import("../config.js");
-          const decimals = 5;
+          // Calculate slippage in pips
+          const decimals = 5; // Most FX pairs
           const pip = Math.pow(10, -decimals);
           const slippage = Math.abs(confirmation.level - expectedPrice) / pip;
           if (slippage > TRADING.MAX_SLIPPAGE_PIPS) {
             logger.warn(`[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips (max allowed: ${TRADING.MAX_SLIPPAGE_PIPS})`);
+            // Optionally: take action (e.g., close trade, alert, etc.)
           } else {
             logger.info(`[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips`);
           }
         }
+        // --- End slippage check ---
       }
       return position;
     } catch (error) {
@@ -402,35 +381,47 @@ class TradingService {
     }
   }
 
-  // --- POSITION SIZING ---
-  calculatePositionSize(account, symbol, candle, indicators, entrySignal) {
-    // Dynamic risk per trade based on streaks and win rate
-    let risk = this.dynamicRiskPerTrade;
-    if (this.winStreak >= MAX_WIN_STREAK) risk = Math.max(this.minRiskPerTrade, risk * 0.7);
-    if (this.lossStreak >= MAX_LOSS_STREAK) risk = Math.min(this.maxRiskPerTrade, risk * 1.3);
-    risk = Math.max(this.minRiskPerTrade, Math.min(this.maxRiskPerTrade, risk));
+  async setupTrailingStop(symbol, signal, dealId, params) {
+    if (!dealId || !params?.trailingDistance) {
+      logger.warn("[TrailingStop] Missing required parameters");
+      return;
+    }
 
-    // Calculate stop distance (ATR-based)
-    const atr = indicators.atr || 0.001;
-    const stopDistance = atr * 2;
-    const riskAmount = account.balance * risk;
-    const positionSize = riskAmount / stopDistance;
-
-    // Enforce min/max size
-    const minSize = this.symbolMinSizes[symbol] || 1;
-    if (positionSize < minSize) return 0;
-    return positionSize;
+    setTimeout(async () => {
+      try {
+        const positions = await getOpenPositions();
+        const position = positions?.positions?.find((p) => p.market.epic === symbol);
+        if (position && position.profit > 0) {
+          await updateTrailingStop(dealId, params.trailingDistance);
+        }
+      } catch (error) {
+        logger.error("[TrailingStop] Error:", error.message);
+      }
+    }, 5 * 60 * 1000);
   }
-  getPipValue(symbol) { return symbol.includes("JPY") ? 0.01 : 0.0001; }
 
-  // --- ATR Calculation ---
   async calculateATR(symbol) {
     try {
       const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 15);
-      if (!data?.prices || data.prices.length < 21) throw new Error("Insufficient data for ATR calculation");
-      const highs = data.prices.map((b) => (b.high && typeof b.high === 'object' && b.high.bid != null && b.high.ask != null) ? (b.high.bid + b.high.ask) / 2 : (typeof b.high === 'number' ? b.high : b.high?.bid ?? b.high?.ask ?? 0));
-      const lows = data.prices.map((b) => (b.low && typeof b.low === 'object' && b.low.bid != null && b.low.ask != null) ? (b.low.bid + b.low.ask) / 2 : (typeof b.low === 'number' ? b.low : b.low?.bid ?? b.low?.ask ?? 0));
-      const closes = data.prices.map((b) => (b.close && typeof b.close === 'object' && b.close.bid != null && b.close.ask != null) ? (b.close.bid + b.close.ask) / 2 : (typeof b.close === 'number' ? b.close : b.close?.bid ?? b.close?.ask ?? 0));
+      if (!data?.prices || data.prices.length < 21) {
+        throw new Error("Insufficient data for ATR calculation");
+      }
+      // Use mid price for ATR calculation for consistency
+      const highs = data.prices.map((b) => {
+        if (b.high && typeof b.high === 'object' && b.high.bid != null && b.high.ask != null) return (b.high.bid + b.high.ask) / 2;
+        if (typeof b.high === 'number') return b.high;
+        return b.high?.bid ?? b.high?.ask ?? 0;
+      });
+      const lows = data.prices.map((b) => {
+        if (b.low && typeof b.low === 'object' && b.low.bid != null && b.low.ask != null) return (b.low.bid + b.low.ask) / 2;
+        if (typeof b.low === 'number') return b.low;
+        return b.low?.bid ?? b.low?.ask ?? 0;
+      });
+      const closes = data.prices.map((b) => {
+        if (b.close && typeof b.close === 'object' && b.close.bid != null && b.close.ask != null) return (b.close.bid + b.close.ask) / 2;
+        if (typeof b.close === 'number') return b.close;
+        return b.close?.bid ?? b.close?.ask ?? 0;
+      });
       const atrArr = ATR.calculate({ period: 21, high: highs, low: lows, close: closes });
       return atrArr.length ? atrArr[atrArr.length - 1] : 0.001;
     } catch (error) {
@@ -439,90 +430,18 @@ class TradingService {
     }
   }
 
-  // --- MAIN TRADE LOOP ---
-  async onNewCandle({ symbol, candles, indicators, account }) {
-    // 1. Check if trading session is open
-    if (!this.isWithinSession()) {
-      logger.info(`[${symbol}] Outside trading session hours.`);
-      return;
-    }
-
-    // 2. Reset daily loss if new day
-    this.resetDailyLossIfNeeded();
-
-    // 3. Check daily loss limit
-    if (this.dailyLossExceeded()) {
-      logger.warn(`[${symbol}] Daily loss limit reached. No more trades today.`);
-      return;
-    }
-
-    // 4. Cooldown between trades
-    if (!this.canTradeNow(symbol)) {
-      logger.info(`[${symbol}] Cooldown active. Waiting before next trade.`);
-      return;
-    }
-
-    // 5. Get latest candle and indicators
-    const candle = candles[candles.length - 1];
-    if (!candle || !indicators) {
-      logger.warn(`[${symbol}] Missing candle or indicators.`);
-      return;
-    }
-
-    // 6. Evaluate entry signal
-    const entrySignal = this.getEntrySignal(symbol, candle, indicators);
-    if (!entrySignal) {
-      logger.debug(`[${symbol}] No entry signal.`);
-      return;
-    }
-
-    // 7. Calculate position size
-    const positionSize = this.calculatePositionSize(account, symbol, candle, indicators, entrySignal);
-    if (!positionSize || positionSize <= 0) {
-      logger.warn(`[${symbol}] Position size too small or invalid.`);
-      return;
-    }
-
-    // 8. Execute trade
-    await this.executeTrade(symbol, entrySignal, positionSize, candle, indicators);
-  }
-
-  // --- SESSION & LOSS MANAGEMENT ---
-  isWithinSession() {
-    const now = new Date();
-    const hour = now.getHours();
-    return hour >= this.sessionStart && hour < this.sessionEnd;
-  }
-
-  resetDailyLossIfNeeded() {
-    const today = new Date().toDateString();
-    if (this.lastLossReset !== today) {
-      this.dailyLoss = 0;
-      this.lastLossReset = today;
-      logger.info('Daily loss counter reset.');
-    }
-  }
-
-  dailyLossExceeded() {
-    return this.dailyLoss <= -this.dailyLossLimitPct * this.accountBalance;
-  }
-
-  canTradeNow(symbol) {
-    const last = this.lastTradeTimestamps[symbol];
-    if (!last) return true;
-    const now = Date.now();
-    return (now - last) > COOLDOWN_BETWEEN_TRADES_MINUTES * 60 * 1000;
-  }
-
-  // --- Signal Processing ---
   async processPrice(message, maxOpenTrades) {
     let symbol = null;
     try {
       if (!message) return;
+      // ---- Daily loss guard ----
+      const maxDailyLoss = -this.accountBalance * this.dailyLossLimitPct;
+      if (this.dailyLoss <= maxDailyLoss) {
+        logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}% ) hit. Skip all new trades for today.`);
+        return;
+      }
       const candle = message;
       symbol = candle.symbol || candle.epic;
-      logger.info(`\n\n=== Processing ${symbol} ===`);
-      logger.info("");
       logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
       if (this.openTrades.length >= maxOpenTrades) {
         logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
@@ -532,21 +451,66 @@ class TradingService {
         logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
         return;
       }
+      // No cooldown logic: allow high-frequency trading
       const bid = candle.close?.bid;
       const ask = candle.close?.ask;
       if (!this.validatePrices(bid, ask, symbol)) return;
-      logger.info(`[ProcessPrice] Checking entry for ${symbol}. Bid: ${bid}, Ask: ${ask}`);
-      const { signal, buyScore, sellScore } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
-      logger.info(`[ProcessPrice] Signal: ${signal}, BuyScore: ${buyScore}, SellScore: ${sellScore}, Threshold: ${this.dynamicSignalThreshold}`);
-      if (!signal) {
-        logger.info(`[ProcessPrice] No entry signal for ${symbol}. Skipping.`);
-        return;
+      const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
+      if (signal) {
+        await this.executeTrade(signal, symbol, bid, ask);
       }
-      const indicators = candle.indicators || {};
-      await this.executeTrade(symbol, signal, bid, ask, indicators.h4);
     } catch (error) {
       logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
+  }
+
+  positionSize(balance, entryPrice, stopLossPrice, symbol) {
+    // Use dynamic risk per trade
+    const riskAmount = balance * this.dynamicRiskPerTrade;
+    // Simpler, more aggressive sizing (like old version)
+    const pipValue = this.getPipValue(symbol); // Dynamic pip value
+    if (!pipValue || pipValue <= 0) {
+      logger.error("Invalid pip value calculation");
+      return 100; // Fallback with warning
+    }
+    const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
+    if (stopLossPips === 0) return 0;
+    let size = riskAmount / (stopLossPips * pipValue);
+    size = size * 1000;
+    size = Math.floor(size / 100) * 100;
+    if (size < 100) size = 100;
+    // --- Margin check for 5 simultaneous trades (no max positions from config, just divide by 5) ---
+    const leverage = 30;
+    const marginRequired = (size * entryPrice) / leverage;
+    const availableMargin = this.accountBalance;
+    const maxMarginPerTrade = availableMargin / 5;
+    if (marginRequired > maxMarginPerTrade) {
+      size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+      if (size < 100) size = 100;
+      logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
+    }
+    logger.info(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
+    return size;
+  }
+
+  // Add pip value determination
+  getPipValue(symbol) {
+    return symbol.includes("JPY") ? 0.01 : 0.0001;
+  }
+
+  generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
+    if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis)) {
+      return { signal: null };
+    }
+    // this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
+    const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid);
+    const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask);
+    const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
+    return {
+      signal,
+      buyScore,
+      sellScore,
+    };
   }
 
   // --- Improved: Monitor open trades and close if exit conditions are met ---
@@ -563,16 +527,16 @@ class TradingService {
         const is500 = err?.response?.status === 500;
         const isTimeout = (err?.code && err.code.toString().toUpperCase().includes('TIMEOUT'));
         if (is500 || isTimeout) {
-          logger.warn(`[Monitor] getOpenPositions failed (attempt ${attempt}/3): ${err.message || err}`);
+          logger.warn(`[Monitoring] getOpenPositions failed (attempt ${attempt}/3): ${err.message || err}`);
           await new Promise(res => setTimeout(res, 1000 * attempt));
         } else {
-          logger.error(`[Monitor] getOpenPositions failed:`, err);
+          logger.error(`[Monitoring] getOpenPositions failed:`, err);
           break;
         }
       }
     }
     if (!positionsData?.positions) {
-      logger.error(`[Monitor] Could not fetch open positions after 3 attempts`, lastError);
+      logger.error(`[Monitoring] Could not fetch open positions after 3 attempts`, lastError);
       return;
     }
     const now = Date.now();
@@ -598,27 +562,6 @@ class TradingService {
       const { isTrendWeak, getTPProgress } = await import("../indicators.js");
       const tpProgress = getTPProgress(entry, price, tpLevel, direction.toUpperCase());
       const holdMinutes = (now - openTime) / 60000;
-
-      // --- Pyramiding‑Light: add up to 2 extra legs when +1 R reached ---
-      if (!p.position._legsAdded) p.position._legsAdded = 0;
-      try {
-        const riskPips = Math.abs(entry - stopLevel);
-        const rewardPips = Math.abs(price - entry);
-        const R = rewardPips / riskPips;
-        // Add leg at +1 R and +2 R, max 2 legs
-        if (R >= (p.position._legsAdded + 1) && p.position._legsAdded < 2) {
-          const addSize = size * 0.5; // 50 % der Ursprung‑Größe
-          await placePosition(symbol, direction, addSize, null, stopLevel, tpLevel);
-          p.position._legsAdded += 1;
-          logger.info(`[Pyramiding] Added leg ${p.position._legsAdded} on ${symbol} (+${(p.position._legsAdded)} R). New size: ${size + addSize * p.position._legsAdded}`);
-          // Move SL aller Legs auf Breakeven
-          const breakevenStop = entry;
-          await updateTrailingStop(dealId, breakevenStop);
-          logger.info(`[Pyramiding] Stop moved to breakeven for ${symbol} at ${breakevenStop}`);
-        }
-      } catch (err) {
-        logger.warn(`[Pyramiding] Could not add leg for ${symbol}: ${err.message}`);
-      }
 
       // 1. Partial close & trailing stop if 60% TP reached and trend is weak
       if (tpProgress >= 60 && isTrendWeak(indicators, direction.toUpperCase())) {
@@ -664,44 +607,43 @@ class TradingService {
         }
       }
 
-      // 3. Trailing Stop Step based on R multiples
-      // Remove old aggressive trailing stop logic and replace with stepped trailing stop
+      // 3. Aggressive trailing stop as price nears TP
+      let shouldTrail = false;
+      let newStop = stopLevel;
       // --- Trailing stop validation ---
       const range = await getAllowedTPRange(symbol);
       const decimals = range.decimals || 5;
       const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-
-      let stepTrail = false;
-      let steppedStop = stopLevel;
-      // Calculate R multiple
-      const rMultiple = profit / (Math.abs(entry - stopLevel) * size);
-      let trailDistance = null;
-
-      if (rMultiple >= 2) {
-        trailDistance = indicators.atr * 0.5;
-      } else if (rMultiple >= 1) {
-        trailDistance = indicators.atr * 0.8;
-      }
-
-      if (trailDistance) {
-        if (direction === "buy") {
-          const candidate = price - trailDistance;
-          if (candidate > stopLevel + minStopDistance) {
-            steppedStop = candidate;
-            stepTrail = true;
-          }
-        } else {
-          const candidate = price + trailDistance;
-          if (candidate < stopLevel - minStopDistance) {
-            steppedStop = candidate;
-            stepTrail = true;
-          }
+      // Aggressive trailing: tighten as TP progress increases
+      let trailATR = indicators.atr;
+      if (tpProgress >= 80) trailATR = indicators.atr * 0.5; // Tighten trailing stop
+      else if (tpProgress >= 60) trailATR = indicators.atr * 0.7;
+      // Move stop to breakeven after 50% TP
+      let breakeven = false;
+      if (tpProgress >= 50 && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
+        newStop = entry;
+        breakeven = true;
+      } else if (direction === "buy") {
+        // Only trail up, never down
+        const candidate = price - trailATR;
+        if (candidate > stopLevel && candidate < price - minStopDistance) {
+          newStop = candidate;
+          shouldTrail = true;
+        }
+      } else {
+        // Only trail down, never up
+        const candidate = price + trailATR;
+        if (candidate < stopLevel && candidate > price + minStopDistance) {
+          newStop = candidate;
+          shouldTrail = true;
         }
       }
-
-      if (stepTrail && steppedStop !== stopLevel) {
-        await updateTrailingStop(dealId, steppedStop);
-        logger.info(`[TrailingStep] Updated for ${symbol} at ${steppedStop} based on +${rMultiple.toFixed(2)}R`);
+      if (breakeven && newStop !== stopLevel) {
+        await updateTrailingStop(dealId, newStop);
+        logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${newStop}`);
+      } else if (shouldTrail) {
+        await updateTrailingStop(dealId, newStop);
+        logger.info(`[TrailingStop] Aggressively updated for ${symbol} to ${newStop}`);
       }
 
       // 4. Dynamic exit on reversal: if price retraces 50% from max profit, close
@@ -752,45 +694,6 @@ class TradingService {
       logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
     }
   }
-
-  // --- EXIT LOGIC (SKELETON, FOR CLARITY) ---
-  manageOpenTrades(candle, indicators) {
-    // For each open trade, check exit conditions
-    for (const trade of this.openTrades) {
-      // Example: aggressive trailing stop, break-even, reversal exit, partial exit
-      // ...implement exit logic here...
-      // Log exit actions
-      // logger.info(`[${trade.symbol}] Exiting trade at ${candle.close} due to ...`);
-    }
-  }
-
-  // --- ENTRY SIGNAL LOGIC ---
-  getEntrySignal(symbol, candle, indicators) {
-    // Example: Use regime, RSI, and trend for entry
-    const { regime, rsi, adx, atr } = indicators;
-    if (!regime || !rsi) return null;
-
-    // Regime filter (trend strength)
-    if (typeof adx === 'number' && adx < 15) return null;
-    if (typeof atr === 'number' && atr < 0.0005) return null;
-
-    // Adaptive signal threshold
-    let threshold = this.dynamicSignalThreshold;
-    if (this.winStreak >= MAX_WIN_STREAK) threshold++;
-    if (this.lossStreak >= MAX_LOSS_STREAK) threshold--;
-    threshold = Math.max(this.minSignalThreshold, Math.min(this.maxSignalThreshold, threshold));
-
-    // Buy signal
-    if (regime > threshold && rsi < RSI_CONFIG.OVERSOLD) {
-      return { side: 'buy', reason: 'Regime+RSI' };
-    }
-    // Sell signal
-    if (regime < -threshold && rsi > RSI_CONFIG.OVERBOUGHT) {
-      return { side: 'sell', reason: 'Regime+RSI' };
-    }
-    return null;
-  }
 }
 
 export default new TradingService();
-
