@@ -210,7 +210,7 @@ class TradingBot {
    * Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
    */
   async analyzeSymbol(symbol) {
-    logger.info(`\n\nAnalyzing ${symbol}...`);
+    logger.info(`\n\n=== Processing ${symbol} ===`);
 
     // Fetch and calculate all required data
     const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);
@@ -308,21 +308,21 @@ class TradingBot {
    * Monitors open trades at a regular interval and triggers trade management logic.
    */
   startMonitorOpenTrades() {
-    logger.info("[Monitor] Starting open trade monitor interval (every 1 minute)");
+    logger.info("[Monitoring] Starting open trade monitor interval (every 1 minute)");
     this.monitorInterval = setInterval(async () => {
-      logger.info(`[Monitor] Checking open trades at ${new Date().toISOString()}`);
+      logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
       try {
         const latestIndicatorsBySymbol = {};
         for (const symbol of TRADING.SYMBOLS) {
           const mergedCandle = this.latestCandles[symbol]?.latest;
-          logger.info(`[Monitor] Symbol: ${symbol}, merged candle present: ${!!mergedCandle}`);
+          logger.info(`[Monitoring] Symbol: ${symbol}, merged candle present: ${!!mergedCandle}`);
           if (mergedCandle) {
             latestIndicatorsBySymbol[symbol] = await calcIndicators([mergedCandle], symbol);
-            logger.info(`[Monitor] Calculated indicators for ${symbol}`);
+            logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
           }
         }
         await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
-        logger.info("[Monitor] monitorOpenTrades completed");
+        logger.info("[Monitoring] monitorOpenTrades completed");
       } catch (error) {
         logger.error("[Bot] Error in monitorOpenTrades:", error);
       }

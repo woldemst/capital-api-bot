@@ -50,10 +50,11 @@ export const startSession = async () => {
         headers: getHeaders(true),
       }
     );
-
-    logger.info(`<========= Session started =========>`);
-    // logger.info(response.data);
+    
+    console.log(""); 
+    logger.info("Session started");
     // logger.info(""); // Blank line for spacing
+    // logger.info(response.data);
 
     // Store the session tokens
     cst = response.headers["cst"];
