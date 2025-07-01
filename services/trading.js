@@ -253,7 +253,7 @@ class TradingService {
     const takeProfitMultiplier = strongTrend ? 2.0 : 1.2;
     const takeProfitPips = takeProfitMultiplier * stopLossPips;
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-    const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
+    const size = this.calculatePositionSize(this.accountBalance, price, stopLossPips, symbol);
     logger.info(`[TradeParams] Size: ${size}`);
     // Trailing stop parameters
     const trailingStopParams = {
@@ -299,27 +299,66 @@ class TradingService {
     return { stopLossPrice: newSL, takeProfitPrice: newTP };
   }
 
-  // --- TRADE EXECUTION & MANAGEMENT ---
-  async executeTrade(symbol, entrySignal, positionSize, candle, indicators) {
+  // --- SIMPLIFIED TRADE EXECUTION ---
+  async executeTrade(symbol, signal, price, indicators) {
     try {
-      // Place order (pseudo-code, replace with actual API call)
-      logger.info(`[${symbol}] Executing ${entrySignal.side} trade. Size: ${positionSize.toFixed(2)}. Reason: ${entrySignal.reason}`);
-      // await api.placeOrder(symbol, entrySignal.side, positionSize, ...)
+      if (!signal) {
+        logger.info(`[${symbol}] No valid signal to execute.`);
+        return null;
+      }
+      
+      // Calculate position size based on risk
+      const positionSize = Math.max(100, Math.round(price * 100) / 100); // Minimum 100 units
+      
+      // Calculate stop loss and take profit (simplified)
+      const atr = indicators?.atr || (price * 0.002); // Default to 0.2% if no ATR
+      const stopLossPrice = signal === "buy" ? price - (2 * atr) : price + (2 * atr);
+      const takeProfitPrice = signal === "buy" ? price + (3 * atr) : price - (3 * atr);
+      
+      logger.info(`[${symbol}] Executing ${signal.toUpperCase()} trade. Size: ${positionSize}. SL: ${stopLossPrice.toFixed(5)}, TP: ${takeProfitPrice.toFixed(5)}`);
+      
+      // Direct API call to place the position
+      const { placePosition, getDealConfirmation } = await import("../api.js");
+      
+      // Place the position directly
+      const position = await placePosition(
+        symbol, 
+        signal, // "buy" or "sell"
+        positionSize, 
+        null, // level (null for market orders)
+        stopLossPrice,
+        takeProfitPrice
+      );
+      
+      // Handle confirmation if needed
+      if (position?.dealReference) {
+        const confirmation = await getDealConfirmation(position.dealReference);
+        if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
+          logger.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+          return null;
+        }
+        logger.info(`[${symbol}] Position successfully placed. Deal ID: ${confirmation.dealId}`);
+      }
+      
+      // Update last trade timestamp
       this.lastTradeTimestamps[symbol] = Date.now();
-      // Do NOT push to openTrades here; always refresh from broker after placing a trade
+      
+      // Refresh open trades from broker
       try {
+        const { getOpenPositions } = await import("../api.js");
         const positions = await getOpenPositions();
         if (positions?.positions) {
           this.setOpenTrades(positions.positions.map((p) => p.market.epic));
-          logger.info(`[Trade] Refreshed open trades after placing new position. Currently open: ${positions.positions.length}`);
+          logger.info(`[Trade] Refreshed open trades. Currently open: ${positions.positions.length}`);
         }
       } catch (err) {
-        logger.warn(`[Trade] Could not refresh open trades after placing new position:`, err.message || err);
+        logger.warn(`[Trade] Could not refresh open trades:`, err.message || err);
       }
-      // Update streaks
-      this.updateStreaks(true); // Assume win for now, update on close
+      
+      return position;
     } catch (err) {
       logger.error(`[${symbol}] Trade execution failed: ${err.message}`);
+      return null;
     }
   }
 
@@ -504,7 +543,7 @@ class TradingService {
         return;
       }
       const indicators = candle.indicators || {};
-      await this.executeTrade(signal, symbol, bid, ask, indicators.h4);
+      await this.executeTrade(symbol, signal, bid, ask, indicators.h4);
     } catch (error) {
       logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
@@ -754,3 +793,4 @@ class TradingService {
 }
 
 export default new TradingService();
+
