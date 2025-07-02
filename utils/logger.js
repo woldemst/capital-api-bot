@@ -40,10 +40,15 @@ const logger = {
     }
   },
   
-  price: (symbol, bid, ask) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[PRICE] ${timestamp} | ${symbol}: Bid: ${bid} | Ask: ${ask}`);
-    priceLogStream.write(`${timestamp},${symbol},${bid},${ask}\n`);
+  price: (symbol, bid, ask, row) => {
+    // If a custom row is provided (for trade logs), write it as-is
+    if (row) {
+      priceLogStream.write(row + "\n");
+    } else {
+      const timestamp = new Date().toISOString();
+      console.log(`[PRICE] ${timestamp} | ${symbol}: Bid: ${bid} | Ask: ${ask}`);
+      priceLogStream.write(`${timestamp},${symbol},${bid},${ask}\n`);
+    }
   },
   
   trade: (action, symbol, details) => {
