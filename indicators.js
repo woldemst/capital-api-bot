@@ -86,7 +86,6 @@ export async function calcIndicators(bars, symbol = "", timeframe = "", priceTyp
       ema9[ema9.length - 1] < ema21[ema21.length - 1] &&
       ema9[ema9.length - 2] >= ema21[ema21.length - 2],
   };
-  logger.indicator(symbol, timeframe, result);
   return result;
 }
 
@@ -142,20 +141,12 @@ export async function analyzeTrend(symbol, getHistorical) {
 export function isTrendWeak(indicators, direction) {
   if (!indicators) return false;
   // Weakness for BUY: bearish cross, MACD < 0, RSI falling
-  if (direction === 'BUY') {
-    return (
-      indicators.isBearishCross ||
-      (indicators.macd && indicators.macd.histogram < 0) ||
-      (indicators.rsi && indicators.rsi < 50)
-    );
+  if (direction === "BUY") {
+    return indicators.isBearishCross || (indicators.macd && indicators.macd.histogram < 0) || (indicators.rsi && indicators.rsi < 50);
   }
   // Weakness for SELL: bullish cross, MACD > 0, RSI rising
-  if (direction === 'SELL') {
-    return (
-      indicators.isBullishCross ||
-      (indicators.macd && indicators.macd.histogram > 0) ||
-      (indicators.rsi && indicators.rsi > 50)
-    );
+  if (direction === "SELL") {
+    return indicators.isBullishCross || (indicators.macd && indicators.macd.histogram > 0) || (indicators.rsi && indicators.rsi > 50);
   }
   return false;
 }
@@ -170,7 +161,7 @@ export function isTrendWeak(indicators, direction) {
  */
 export function getTPProgress(entry, current, tp, direction) {
   if (!entry || !current || !tp) return 0;
-  if (direction === 'BUY') {
+  if (direction === "BUY") {
     if (tp <= entry) return 0;
     return Math.max(0, Math.min(100, ((current - entry) / (tp - entry)) * 100));
   } else {
