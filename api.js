@@ -53,7 +53,6 @@ export const startSession = async () => {
     
     console.log(""); 
     logger.info("Session started");
-    // logger.info(""); // Blank line for spacing
     // logger.info(response.data);
 
     // Store the session tokens

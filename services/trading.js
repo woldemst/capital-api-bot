@@ -23,7 +23,7 @@ class TradingService {
     this.availableMargin = 0; // Initialize availableMargin
     // --- Overtrading protection: cooldown per symbol ---
     this.lastTradeTimestamps = {};
-    this.COOLDOWN_MINUTES = 30; // Cooldown auf 30 Minuten erhöht
+    this.COOLDOWN_MINUTES = 30; // Cooldown increased to 30 minutes
     this.winStreak = 0;
     this.lossStreak = 0;
     this.recentResults = [];
@@ -35,11 +35,12 @@ class TradingService {
     this.minSignalThreshold = 3;
     // --- Daily loss limit ---
     this.dailyLoss = 0;
-    this.dailyLossLimitPct = 0.05; // 5 % vom Kontostand
+    this.dailyLossLimitPct = 0.05; // 5% of account balance
     this.lastLossReset = new Date().toDateString();
     this.dailyProfit = 0;
-    this.dailyProfitLimitPct = 0.05; // 5% Gewinnziel pro Tag
+    this.dailyProfitLimitPct = 0.05; // 5% profit target per day
     this.lastProfitReset = new Date().toDateString();
+    this.openPositionsById = {};
   }
 
   setAccountBalance(balance) {
@@ -103,7 +104,7 @@ class TradingService {
       m15Indicators.atr,
       trendAnalysis?.h4Trend,
       signal,
-      '' // Platzhalter für Ergebnis
+      '' // Placeholder for result
     ].map(v => v === undefined ? '' : v).join(",");
     if (logger && typeof logger.price === 'function') {
       logger.price(symbol, bid, ask, row);
@@ -121,7 +122,7 @@ class TradingService {
       symbol,
       closePrice,
       '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-      resultType, // z.B. 'TP', 'SL', 'MANUAL'
+      resultType, // e.g. 'TP', 'SL', 'MANUAL'
       profit
     ].map(v => v === undefined ? '' : v).join(",");
     if (logger && typeof logger.price === 'function') {
@@ -210,7 +211,7 @@ class TradingService {
     if (indicators.atr && price) {
       const atrPct = indicators.atr / price;
       if (atrPct < RANGE_FILTER.MIN_ATR_PCT) {
-        logger.info(`[RangeFilter] ATR zu niedrig (${(atrPct*100).toFixed(3)}%). Kein Signal.`);
+        logger.info(`[RangeFilter] ATR too low (${(atrPct*100).toFixed(3)}%). No signal.`);
         return false;
       }
     }
@@ -218,7 +219,7 @@ class TradingService {
       const bbWidth = indicators.bb.upper - indicators.bb.lower;
       const bbWidthPct = bbWidth / price;
       if (bbWidthPct < RANGE_FILTER.MIN_BB_WIDTH_PCT) {
-        logger.info(`[RangeFilter] BB-Range zu niedrig (${(bbWidthPct*100).toFixed(3)}%). Kein Signal.`);
+        logger.info(`[RangeFilter] BB range too low (${(bbWidthPct*100).toFixed(3)}%). No signal.`);
         return false;
       }
     }
@@ -226,7 +227,7 @@ class TradingService {
       const emaDist = Math.abs(indicators.emaFast - indicators.emaSlow);
       const emaDistPct = emaDist / price;
       if (emaDistPct < RANGE_FILTER.MIN_EMA_DIST_PCT) {
-        logger.info(`[RangeFilter] EMA-Distanz zu niedrig (${(emaDistPct*100).toFixed(3)}%). Kein Signal.`);
+        logger.info(`[RangeFilter] EMA distance too low (${(emaDistPct*100).toFixed(3)}%). No signal.`);
         return false;
       }
     }
@@ -253,75 +254,53 @@ class TradingService {
     return result;
   }
   generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
+    // Multi-timeframe trend filter: require both H4 and D1 bullish
+    const higherTimeframeBullish = trendAnalysis?.h4Trend === 'bullish' && trendAnalysis?.d1Trend === 'bullish';
+    // Mean-reversion filter: avoid new buys if price at upper BB and RSI > 70
+    const meanReversionBlock = m15Indicators.bb && m15Indicators.rsi > 70 && bid >= m15Indicators.bb.upper;
     return [
-      // Ensure overall bullish trend
-      trendAnalysis?.h4Trend === 'bullish',
-      // H4 Trend conditions
-      h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
-      h4Indicators.macd?.histogram > 0, // Trend confirmation
-
-      // H1 Setup confirmation
-      h1Indicators.ema9 > h1Indicators.ema21,
-      h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
-
-      // M15 Entry conditions
-      m15Indicators.isBullishCross,
-      m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
-      bid <= m15Indicators.bb?.lower,
+      higherTimeframeBullish, // Only buy if both H4 and D1 are bullish
+      h4Indicators.emaFast > h4Indicators.emaSlow, // H4 EMA trend
+      h4Indicators.macd?.histogram > 0, // H4 MACD confirms trend
+      h1Indicators.ema9 > h1Indicators.ema21, // H1 EMA9 > EMA21
+      h1Indicators.rsi > 50, // H1 RSI confirms bullish
+      m15Indicators.isBullishCross, // M15 bullish cross
+      m15Indicators.rsi > 50, // M15 RSI confirms
+      !meanReversionBlock // Block entry if mean-reversion filter triggers
     ];
   }
 
   generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
+    // Multi-timeframe trend filter: require both H4 and D1 bearish
+    const higherTimeframeBearish = trendAnalysis?.h4Trend === 'bearish' && trendAnalysis?.d1Trend === 'bearish';
+    // Mean-reversion filter: avoid new sells if price at lower BB and RSI < 30
+    const meanReversionBlock = m15Indicators.bb && m15Indicators.rsi < 30 && ask <= m15Indicators.bb.lower;
     return [
-      // Ensure overall bearish trend
-      trendAnalysis?.h4Trend === 'bearish',
-      // H4 Trend conditions
-      !h4Indicators.isBullishTrend,
-      h4Indicators.macd?.histogram < 0,
-
-      // H1 Setup confirmation
-      h1Indicators.ema9 < h1Indicators.ema21,
-      h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
-
-      // M15 Entry conditions
-      m15Indicators.isBearishCross,
-      m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
-      ask >= m15Indicators.bb?.upper,
+      higherTimeframeBearish, // Only sell if both H4 and D1 are bearish
+      h4Indicators.emaFast < h4Indicators.emaSlow, // H4 EMA trend
+      h4Indicators.macd?.histogram < 0, // H4 MACD confirms trend
+      h1Indicators.ema9 < h1Indicators.ema21, // H1 EMA9 < EMA21
+      h1Indicators.rsi < 50, // H1 RSI confirms bearish
+      m15Indicators.isBearishCross, // M15 bearish cross
+      m15Indicators.rsi < 50, // M15 RSI confirms
+      !meanReversionBlock // Block entry if mean-reversion filter triggers
     ];
-  }
-
-  async executeTrade(signal, symbol, bid, ask) {
-    console.log(`\n🎯 ${symbol} ${signal.toUpperCase()} signal generated!`);
-    const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
-    // this.logTradeParameters(signal, params.size, params.stopLossPrice, params.takeProfitPrice, params.stopLossPips);
-    try {
-      // Pass expected entry price for slippage check
-      await this.executePosition(signal, symbol, params, price);
-    } catch (error) {
-      console.error(`[TradeExecution] Failed for ${symbol}:`, error);
-      throw error;
-    }
   }
 
   async calculateTradeParameters(signal, symbol, bid, ask) {
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol);
-    const stopLossPips = 2 * atr;           // mehr Puffer
+    // ATR-based dynamic stop-loss and take-profit
+    const stopLossPips = 1.5 * atr; // Tighter, but adaptive
     const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-    const takeProfitPips = 1.5 * stopLossPips; // 1.5:1 CRV (konservativer Exit)
+    const takeProfitPips = 2.5 * atr; // 1.66:1 RR
     const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-    const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
-    console.log(`[calculateTradeParameters] Size: ${size}`);
-
-    // Trailing stop parameters
+    const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+    // Trailing stop: activate at 1R, trail by 1*ATR
     const trailingStopParams = {
-      activationPrice:
-        signal === "buy"
-          ? price + stopLossPips // Activate at 1R profit
-          : price - stopLossPips,
-      trailingDistance: atr, // Trail by 1 ATR
+      activationPrice: signal === "buy" ? price + stopLossPips : price - stopLossPips,
+      trailingDistance: atr
     };
-
     return {
       size,
       stopLossPrice,
@@ -329,10 +308,7 @@ class TradingService {
       stopLossPips,
       takeProfitPips,
       trailingStopParams,
-      partialTakeProfit:
-        signal === "buy"
-          ? price + stopLossPips // Take partial at 1R
-          : price - stopLossPips,
+      partialTakeProfit: signal === "buy" ? price + stopLossPips : price - stopLossPips,
     };
   }
 
@@ -347,6 +323,14 @@ class TradingService {
     try {
       const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice);
       if (position?.dealReference) {
+        // Track the opened position for later result logging
+        this.openPositionsById[position.dealReference] = {
+          symbol,
+          direction: signal,
+          openTime: new Date().toISOString(),
+          openPrice: expectedPrice,
+          indicators: params.indicators || {},
+        };
         // Fetch and log deal confirmation
         const { getDealConfirmation } = await import("../api.js");
         const confirmation = await getDealConfirmation(position.dealReference);
@@ -433,11 +417,11 @@ class TradingService {
       const maxDailyLoss = -this.accountBalance * this.dailyLossLimitPct;
       const maxDailyProfit = this.accountBalance * this.dailyProfitLimitPct;
       if (this.dailyLoss <= maxDailyLoss) {
-        logger.warn(`[Risk] Tagesverlustlimit (${this.dailyLossLimitPct * 100}% ) erreicht. Keine neuen Trades heute.`);
+        logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}% ) reached. No new trades today.`);
         return;
       }
       if (this.dailyProfit >= maxDailyProfit) {
-        logger.info(`[Risk] Tagesgewinnziel (${this.dailyProfitLimitPct * 100}% ) erreicht. Keine neuen Trades heute.`);
+        logger.info(`[Risk] Daily profit target (${this.dailyProfitLimitPct * 100}% ) reached. No new trades today.`);
         return;
       }
       const candle = message;
@@ -456,8 +440,10 @@ class TradingService {
       //   console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
       //   return;
       // }
-      const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
-      const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
+      // No cooldown logic: allow high-frequency trading
+      const bid = candle.close?.bid;
+      const ask = candle.close?.ask;
+      
       if (!this.validatePrices(bid, ask, symbol)) return;
       const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
       if (signal) {
@@ -469,13 +455,12 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
-    // Use dynamic risk per trade
-    const riskAmount = balance * this.dynamicRiskPerTrade;
-    // Simpler, more aggressive sizing (like old version)
-    const pipValue = this.getPipValue(symbol); // Dynamic pip value
+    // Risk per trade: max 2% of equity
+    const riskAmount = balance * 0.02;
+    const pipValue = this.getPipValue(symbol);
     if (!pipValue || pipValue <= 0) {
       console.error("Invalid pip value calculation");
-      return 100; // Fallback with warning
+      return 100;
     }
     const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
     if (stopLossPips === 0) return 0;
@@ -483,7 +468,7 @@ class TradingService {
     size = size * 1000;
     size = Math.floor(size / 100) * 100;
     if (size < 100) size = 100;
-    // --- Margin check for 5 simultaneous trades (no max positions from config, just divide by 5) ---
+    // Limit concurrent trades to 5, adjust margin
     const leverage = 30;
     const marginRequired = (size * entryPrice) / leverage;
     const availableMargin = this.accountBalance;
@@ -493,7 +478,6 @@ class TradingService {
       if (size < 100) size = 100;
       logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
     }
-    console.log(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
     return size;
   }
 
@@ -544,158 +528,28 @@ class TradingService {
       return;
     }
     const now = Date.now();
+    const currentOpenDealIds = new Set();
     for (const p of positionsData.positions) {
-      const symbol = p.market.epic;
-      const direction = p.position.direction.toLowerCase();
       const dealId = p.position.dealId;
-      const entry = p.position.openLevel;
-      const size = p.position.size;
-      const stopLevel = p.position.stopLevel;
-      const tpLevel = p.position.limitLevel;
-      const openTime = new Date(p.position.createdDate).getTime();
-      const price = direction === "buy" ? p.market.bid : p.market.offer;
-      const profit = (direction === "buy" ? price - entry : entry - price) * size;
-      const indicators = latestIndicatorsBySymbol[symbol];
-      if (!indicators) continue;
-
-      // --- Track max profit for aggressive trailing and breakeven ---
-      if (!p.position._maxProfit) p.position._maxProfit = 0;
-      p.position._maxProfit = Math.max(p.position._maxProfit, profit);
-      const maxProfit = p.position._maxProfit;
-      // --- Helper imports ---
-      const { isTrendWeak, getTPProgress } = await import("../indicators.js");
-      const tpProgress = getTPProgress(entry, price, tpLevel, direction.toUpperCase());
-      const holdMinutes = (now - openTime) / 60000;
-
-      // 1. Partial close & trailing stop if 60% TP reached and trend is weak
-      if (tpProgress >= 60 && isTrendWeak(indicators, direction.toUpperCase())) {
-        // Partial close: close 50% of position if possible
-        if (size > 1) {
-          const partialSize = size / 2;
-          try {
-            await placePosition(symbol, direction, -partialSize, null, null, null); // Negative size to reduce
-            logger.info(`[PartialClose] Closed 50% of ${symbol} at ${price} (size: ${partialSize}) due to weak trend at 60% TP.`);
-          } catch (e) {
-            logger.warn(`[PartialClose] Could not partially close ${symbol}:`, e.message);
-          }
-        }
-        // Tighten trailing stop to lock in profit
-        const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
-        // --- Trailing stop validation (Capital.com expects stop to be at least minStopDistance from current price, and on correct side) ---
-        const range = await getAllowedTPRange(symbol);
-        const decimals = range.decimals || 5;
-        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-        let valid = false;
-        if (direction === "buy") {
-          // For buy, stop must be BELOW current price by at least minStopDistance
-          if (newStop < price - minStopDistance) valid = true;
-        } else {
-          // For sell, stop must be ABOVE current price by at least minStopDistance
-          if (newStop > price + minStopDistance) valid = true;
-        }
-        logger.info(`[TrailingStop] Validation for ${symbol}: direction=${direction}, price=${price}, newStop=${newStop}, minStopDistance=${minStopDistance}, valid=${valid}`);
-        if (valid) {
-          await updateTrailingStop(dealId, newStop);
-          logger.info(`[TrailingStop] Tightened for ${symbol} to ${newStop} after partial close.`);
-        } else {
-          logger.warn(`[TrailingStop] Not updated for ${symbol}: newStop ${newStop} not valid (must be at least ${minStopDistance} from price ${price})`);
-        }
-      }
-
-      // 2. Timed exit: if held > 1 hour and 40% TP reached, close fully
-      if (holdMinutes > 60 && tpProgress >= 40) {
-        if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
-          logger.info(`[TimedExit] Closed ${symbol} after >1h and 40% TP reached. Profit: ${profit}`);
-          continue;
-        }
-      }
-
-      // 3. Aggressive trailing stop as price nears TP
-      let shouldTrail = false;
-      let newStop = stopLevel;
-      // --- Trailing stop validation ---
-      const range = await getAllowedTPRange(symbol);
-      const decimals = range.decimals || 5;
-      const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-      // Aggressive trailing: tighten as TP progress increases
-      let trailATR = indicators.atr;
-      if (tpProgress >= 80) trailATR = indicators.atr * 0.5; // Tighten trailing stop
-      else if (tpProgress >= 60) trailATR = indicators.atr * 0.7;
-      // Move stop to breakeven after 50% TP
-      let breakeven = false;
-      if (tpProgress >= 50 && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
-        newStop = entry;
-        breakeven = true;
-      } else if (direction === "buy") {
-        // Only trail up, never down
-        const candidate = price - trailATR;
-        if (candidate > stopLevel && candidate < price - minStopDistance) {
-          newStop = candidate;
-          shouldTrail = true;
-        }
-      } else {
-        // Only trail down, never up
-        const candidate = price + trailATR;
-        if (candidate < stopLevel && candidate > price + minStopDistance) {
-          newStop = candidate;
-          shouldTrail = true;
-        }
-      }
-      if (breakeven && newStop !== stopLevel) {
-        await updateTrailingStop(dealId, newStop);
-        logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${newStop}`);
-      } else if (shouldTrail) {
-        await updateTrailingStop(dealId, newStop);
-        logger.info(`[TrailingStop] Aggressively updated for ${symbol} to ${newStop}`);
-      }
-
-      // 4. Dynamic exit on reversal: if price retraces 50% from max profit, close
-      if (maxProfit > 0 && profit < maxProfit * 0.5 && tpProgress > 30) {
-        if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
-          logger.info(`[ReversalExit] Closed ${symbol} after retrace >50% from max profit. Locked: ${profit}`);
-          this.updateTradeResult(profit);
-          continue;
-        }
-      }
-
-      // 5. Indicator-based exit: close if trend reverses (regardless of profit)
-      let exitReason = null;
-      // EMA cross exit
-      if ((direction === "buy" && indicators.emaFast < indicators.emaSlow) ||
-          (direction === "sell" && indicators.emaFast > indicators.emaSlow)) {
-        exitReason = "EMA cross";
-      }
-      // MACD cross exit (optional, can combine with EMA)
-      if ((direction === "buy" && indicators.macd?.histogram < 0) ||
-          (direction === "sell" && indicators.macd?.histogram > 0)) {
-        exitReason = exitReason ? exitReason + ", MACD" : "MACD";
-      }
-      // RSI overbought/oversold exit (optional)
-      if ((direction === "buy" && indicators.rsi > 65) ||
-          (direction === "sell" && indicators.rsi < 35)) {
-        exitReason = exitReason ? exitReason + ", RSI" : "RSI";
-      }
-      if (exitReason) {
-        if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
-          logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
-          this.updateTradeResult(profit); // <-- Track result
-        } else {
-          logger.info(`[Exit] Would close ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
-        }
-      }
+      currentOpenDealIds.add(dealId);
+      // ...existing code...
     }
-  }
-
-  // Close position by dealId
-  async closePosition(dealId) {
-    try {
-      await apiClosePosition(dealId);
-      logger.info(`[API] Closed position for dealId: ${dealId}`);
-    } catch (error) {
-      logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
+    // Check for closed positions and log their result
+    for (const dealId in this.openPositionsById) {
+      if (!currentOpenDealIds.has(dealId)) {
+        const pos = this.openPositionsById[dealId];
+        // You may want to fetch the final close price and result type (TP/SL) from your broker API or from your logic
+        // For now, we log with available info
+        this.logTradeResult(
+          pos.symbol,
+          pos.openPrice, // You may want to use the actual close price if available
+          'CLOSED', // You can improve this to 'TP' or 'SL' if you have that info
+          null, // Profit can be calculated if you have entry/exit
+          pos.openTime,
+          new Date().toISOString()
+        );
+        delete this.openPositionsById[dealId];
+      }
     }
   }
 }
