@@ -78,13 +78,13 @@ class TradingService {
   }
 
   /**
-   * Logs a compact CSV line with current market state for later ML analysis.
-   * Only writes to the price log file, not to other log files.
+   * Logs the signal with all indicator values, price, and time as a CSV row in the price log.
+   * Called on signal event.
    */
   logMarketConditions(symbol, bid, ask, h4Indicators = {}, h1Indicators = {}, m15Indicators = {}, trendAnalysis = {}, signal = null, tradeResult = null) {
-    // Prepare a flat CSV line for later ML analysis
     const ts = new Date().toISOString();
     const row = [
+      'SIGNAL',
       ts,
       symbol,
       bid,
@@ -103,14 +103,29 @@ class TradingService {
       m15Indicators.atr,
       trendAnalysis?.h4Trend,
       signal,
-      tradeResult?.outcome,
-      tradeResult?.profit,
-      tradeResult?.tpHit,
-      tradeResult?.slHit
+      '' // Platzhalter für Ergebnis
     ].map(v => v === undefined ? '' : v).join(",");
-    // Schreibe nur ins Price-Log
     if (logger && typeof logger.price === 'function') {
-      logger.price(symbol, bid, ask, row); // row als Zusatz für spätere Auswertung
+      logger.price(symbol, bid, ask, row);
+    }
+  }
+
+  /**
+   * Logs the result (TP/SL, price, profit, time) as a CSV row in the price log.
+   * Called after position close (TP/SL).
+   */
+  logTradeResult(symbol, closePrice, resultType, profit, openTime, closeTime) {
+    const row = [
+      'RESULT',
+      closeTime || new Date().toISOString(),
+      symbol,
+      closePrice,
+      '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+      resultType, // z.B. 'TP', 'SL', 'MANUAL'
+      profit
+    ].map(v => v === undefined ? '' : v).join(",");
+    if (logger && typeof logger.price === 'function') {
+      logger.price(symbol, closePrice, '', row);
     }
   }
 
@@ -172,7 +187,7 @@ class TradingService {
   }
 
   evaluateSignals(buyConditions, sellConditions) {
-    // Adaptive threshold, aber Minimum 4
+    // Adaptive threshold, but minimum 4
     const threshold = Math.max(this.dynamicSignalThreshold || 3, 4);
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
@@ -188,7 +203,7 @@ class TradingService {
 
   // Range filter: skip signals in low volatility/ranging markets
   passesRangeFilter(indicators, price) {
-    // Volatilitätsfilter immer aktivieren
+    // Volatility filter always enabled
     const RANGE_FILTER = { ENABLED: true, MIN_ATR_PCT: 0.0007, MIN_BB_WIDTH_PCT: 0.001, MIN_EMA_DIST_PCT: 0.0004 };
     if (!RANGE_FILTER?.ENABLED) return true;
     if (!indicators) return true;
@@ -227,8 +242,6 @@ class TradingService {
       logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
       return { signal: null, buyScore: 0, sellScore: 0 };
     }
-    // Log market snapshot before signal evaluation
-    this.logMarketConditions(symbol, bid, ask, indicators.h4, indicators.h1, indicators.m15 || indicators, trendAnalysis);
     const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
     // Log again, now including the decided signal
     this.logMarketConditions(symbol, bid, ask, indicators.h4, indicators.h1, indicators.m15 || indicators, trendAnalysis, result.signal);
@@ -416,7 +429,7 @@ class TradingService {
     let symbol = null;
     try {
       if (!message) return;
-      // ---- Tagesverlust- und Gewinnlimit ----
+      // ---- Daily loss and profit limit ----
       const maxDailyLoss = -this.accountBalance * this.dailyLossLimitPct;
       const maxDailyProfit = this.accountBalance * this.dailyProfitLimitPct;
       if (this.dailyLoss <= maxDailyLoss) {
