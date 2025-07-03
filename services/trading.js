@@ -601,8 +601,10 @@ class TradingService {
       const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
       // Aggressive trailing: tighten as TP progress increases
       let trailATR = indicators.atr;
-      if (tpProgress >= 80) trailATR = indicators.atr * 0.5; // Tighten trailing stop
-      else if (tpProgress >= 60) trailATR = indicators.atr * 0.7;
+      // Make trailing stop more conservative: minimum 1.5x ATR
+      if (trailATR < indicators.atr * 1.5) trailATR = indicators.atr * 1.5;
+      if (tpProgress >= 80) trailATR = Math.max(trailATR, indicators.atr * 1.0); // Tighten trailing stop, but not below 1.0 ATR
+      else if (tpProgress >= 60) trailATR = Math.max(trailATR, indicators.atr * 1.2);
       // Move stop to breakeven after 50% TP
       let breakeven = false;
       if (tpProgress >= 50 && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
