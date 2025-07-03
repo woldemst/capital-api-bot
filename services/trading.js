@@ -2,6 +2,8 @@ import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
 import logger from "../utils/logger.js";
 import { ATR } from "technicalindicators";
+import { getCurrentTradesLogPath, logTradeSnapshot, logTradeResult } from '../utils/tradeLogger.js';
+
 const { RISK_PER_TRADE } = TRADING;
 
 const RSI_CONFIG = {
@@ -575,7 +577,7 @@ class TradingService {
       const maxMinutesOpen = 120; // 8 bars x 15min = 120min
       if (holdMinutes > maxMinutesOpen) {
         if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
+          await this.closePosition(dealId, 'time_exit');
           logger.info(`[TimeExit] Closed ${symbol} after ${holdMinutes.toFixed(1)} min (max allowed: ${maxMinutesOpen} min). Profit: ${profit}`);
           continue;
         }
@@ -584,7 +586,7 @@ class TradingService {
       // 2. Timed exit: if held > 1 hour and 40% TP reached, close fully
       if (holdMinutes > 60 && tpProgress >= 40) {
         if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
+          await this.closePosition(dealId, 'timed_exit');
           logger.info(`[TimedExit] Closed ${symbol} after >1h and 40% TP reached. Profit: ${profit}`);
           continue;
         }
@@ -632,7 +634,7 @@ class TradingService {
       // 4. Dynamic exit on reversal: if price retraces 50% from max profit, close
       if (maxProfit > 0 && profit < maxProfit * 0.5 && tpProgress > 30) {
         if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
+          await this.closePosition(dealId, 'reversal_exit');
           logger.info(`[ReversalExit] Closed ${symbol} after retrace >50% from max profit. Locked: ${profit}`);
           this.updateTradeResult(profit);
           continue;
@@ -658,7 +660,7 @@ class TradingService {
       }
       if (exitReason) {
         if (typeof this.closePosition === "function") {
-          await this.closePosition(dealId);
+          await this.closePosition(dealId, `exit: ${exitReason}`);
           logger.info(`[Exit] Closed ${symbol} (${direction}) due to: ${exitReason}, profit/loss: ${profit}`);
           this.updateTradeResult(profit); // <-- Track result
         } else {
@@ -729,10 +731,11 @@ class TradingService {
   }
 
   // Close position by dealId
-  async closePosition(dealId) {
+  async closePosition(dealId, result) {
     try {
       await apiClosePosition(dealId);
       logger.info(`[API] Closed position for dealId: ${dealId}`);
+      if (result) logTradeResult(dealId, result);
     } catch (error) {
       logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
     }
