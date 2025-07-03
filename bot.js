@@ -7,6 +7,7 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
+import { logTradeSnapshot } from "./utils/tradeLogger.js";
 
 const { SYMBOLS, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
@@ -322,6 +323,11 @@ class TradingBot {
           }
         }
         await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+        // --- Log trades every 15 minutes ---
+        if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 14.5 * 60 * 1000) {
+          await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
+          this._lastTradeLogTime = Date.now();
+        }
         logger.info("[Monitoring] monitorOpenTrades completed");
       } catch (error) {
         logger.error("[Bot] Error in monitorOpenTrades:", error);
