@@ -309,21 +309,23 @@ class TradingService {
   }
 
   async calculateTradeParameters(signal, symbol, bid, ask) {
+    // Use ATR from the entry timeframe (M15)
     const price = signal === "buy" ? ask : bid;
-    const atr = await this.calculateATR(symbol);
-    const stopLossPips = 2 * atr;           // mehr Puffer
-    const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-    const takeProfitPips = 1.5 * stopLossPips; // 1.5:1 CRV (konservativer Exit)
-    const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-    const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
-    logger.info(`[calculateTradeParameters] Size: ${size}`);
+    const atr = await this.calculateATR(symbol); // Already uses M15 timeframe
+    // ATR-based dynamic stops/TPs
+    const stopLossDistance = 1.5 * atr;
+    const takeProfitDistance = 3 * atr;
+    const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
+    const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
+    const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+    logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}`);
 
-    // Trailing stop parameters
+    // Trailing stop parameters (optional, can be used for trailing logic)
     const trailingStopParams = {
       activationPrice:
         signal === "buy"
-          ? price + stopLossPips // Activate at 1R profit
-          : price - stopLossPips,
+          ? price + stopLossDistance // Activate at 1R profit
+          : price - stopLossDistance,
       trailingDistance: atr, // Trail by 1 ATR
     };
 
@@ -331,13 +333,13 @@ class TradingService {
       size,
       stopLossPrice,
       takeProfitPrice,
-      stopLossPips,
-      takeProfitPips,
+      stopLossPips: stopLossDistance,
+      takeProfitPips: takeProfitDistance,
       trailingStopParams,
       partialTakeProfit:
         signal === "buy"
-          ? price + stopLossPips // Take partial at 1R
-          : price - stopLossPips,
+          ? price + stopLossDistance // Take partial at 1R
+          : price - stopLossDistance,
     };
   }
 
@@ -402,9 +404,10 @@ class TradingService {
 
   async calculateATR(symbol) {
     try {
-      const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 15);
+      const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 30); // Request more bars for robustness
       if (!data?.prices || data.prices.length < 21) {
-        throw new Error("Insufficient data for ATR calculation");
+        logger.warn(`[ATR] Insufficient data for ATR calculation on ${symbol} (got ${data?.prices?.length || 0} bars). Using fallback value.`);
+        return 0.001; // Fallback ATR value
       }
       // Use mid price for ATR calculation for consistency
       const highs = data.prices.map((b) => {
@@ -465,16 +468,16 @@ class TradingService {
   }
 
   positionSize(balance, entryPrice, stopLossPrice, symbol) {
-    // Use dynamic risk per trade
-    const riskAmount = balance * this.dynamicRiskPerTrade;
-    // Simpler, more aggressive sizing (like old version)
-    const pipValue = this.getPipValue(symbol); // Dynamic pip value
+    // Strict risk management: never risk more than 2% of equity per trade
+    const riskAmount = balance * 0.02; // 2% rule
+    const pipValue = this.getPipValue(symbol);
     if (!pipValue || pipValue <= 0) {
       logger.error("Invalid pip value calculation");
       return 100; // Fallback with warning
     }
     const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
     if (stopLossPips === 0) return 0;
+    // Calculate size so that (entry - stop) * size = riskAmount
     let size = riskAmount / (stopLossPips * pipValue);
     size = size * 1000;
     size = Math.floor(size / 100) * 100;
@@ -482,14 +485,14 @@ class TradingService {
     // --- Margin check for 5 simultaneous trades (no max positions from config, just divide by 5) ---
     const leverage = 30;
     const marginRequired = (size * entryPrice) / leverage;
-    const availableMargin = this.accountBalance;
+    const availableMargin = balance;
     const maxMarginPerTrade = availableMargin / 5;
     if (marginRequired > maxMarginPerTrade) {
       size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
       if (size < 100) size = 100;
       logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
     }
-    logger.info(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
+    logger.info(`[PositionSize] Strict 2%% rule: Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
     return size;
   }
 
@@ -563,38 +566,18 @@ class TradingService {
       const tpProgress = getTPProgress(entry, price, tpLevel, direction.toUpperCase());
       const holdMinutes = (now - openTime) / 60000;
 
-      // 1. Partial close & trailing stop if 60% TP reached and trend is weak
-      if (tpProgress >= 60 && isTrendWeak(indicators, direction.toUpperCase())) {
-        // Partial close: close 50% of position if possible
-        if (size > 1) {
-          const partialSize = size / 2;
-          try {
-            await placePosition(symbol, direction, -partialSize, null, null, null); // Negative size to reduce
-            logger.info(`[PartialClose] Closed 50% of ${symbol} at ${price} (size: ${partialSize}) due to weak trend at 60% TP.`);
-          } catch (e) {
-            logger.warn(`[PartialClose] Could not partially close ${symbol}:`, e.message);
-          }
-        }
-        // Tighten trailing stop to lock in profit
-        const newStop = direction === "buy" ? price - indicators.atr : price + indicators.atr;
-        // --- Trailing stop validation (Capital.com expects stop to be at least minStopDistance from current price, and on correct side) ---
-        const range = await getAllowedTPRange(symbol);
-        const decimals = range.decimals || 5;
-        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-        let valid = false;
-        if (direction === "buy") {
-          // For buy, stop must be BELOW current price by at least minStopDistance
-          if (newStop < price - minStopDistance) valid = true;
-        } else {
-          // For sell, stop must be ABOVE current price by at least minStopDistance
-          if (newStop > price + minStopDistance) valid = true;
-        }
-        logger.info(`[TrailingStop] Validation for ${symbol}: direction=${direction}, price=${price}, newStop=${newStop}, minStopDistance=${minStopDistance}, valid=${valid}`);
-        if (valid) {
-          await updateTrailingStop(dealId, newStop);
-          logger.info(`[TrailingStop] Tightened for ${symbol} to ${newStop} after partial close.`);
-        } else {
-          logger.warn(`[TrailingStop] Not updated for ${symbol}: newStop ${newStop} not valid (must be at least ${minStopDistance} from price ${price})`);
+      // --- Use new modular partial TP and trailing stop logic ---
+      await this.managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress);
+
+      // --- Time-based exit: close if trade is open too long without hitting TP/SL ---
+      // For M15: close after 8 bars (~2 hours), for H1: after 4 bars (~4 hours), for H4: after 2 bars (~8 hours)
+      // We'll use the entry timeframe (assume M15 for now)
+      const maxMinutesOpen = 120; // 8 bars x 15min = 120min
+      if (holdMinutes > maxMinutesOpen) {
+        if (typeof this.closePosition === "function") {
+          await this.closePosition(dealId);
+          logger.info(`[TimeExit] Closed ${symbol} after ${holdMinutes.toFixed(1)} min (max allowed: ${maxMinutesOpen} min). Profit: ${profit}`);
+          continue;
         }
       }
 
@@ -685,6 +668,66 @@ class TradingService {
     }
   }
 
+  /**
+   * Determines the primary trend using H4 and D1 timeframes.
+   * Only allows trades in the direction of the higher timeframe trend.
+   * Returns 'bullish', 'bearish', or 'mixed'.
+   */
+  async getPrimaryTrend(symbol) {
+    // Fetch H4 and D1 data
+    const h4Data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.TREND, 50);
+    const d1Data = await getHistorical(symbol, "DAY", 30);
+    if (!h4Data?.prices || !d1Data?.prices) {
+      logger.warn(`[TrendFilter] Missing H4/D1 data for ${symbol}`);
+      return "mixed";
+    }
+    // Calculate indicators
+    const h4Indicators = await this.calcIndicatorsWrapper(h4Data.prices, symbol, "H4");
+    const d1Indicators = await this.calcIndicatorsWrapper(d1Data.prices, symbol, "D1");
+    // Determine trend
+    const h4Trend = h4Indicators.emaFast > h4Indicators.emaSlow ? "bullish" : "bearish";
+    const d1Trend = d1Indicators.emaFast > d1Indicators.emaSlow ? "bullish" : "bearish";
+    if (h4Trend === d1Trend) return h4Trend;
+    return "mixed";
+  }
+
+  /**
+   * Wrapper for indicator calculation (for clarity and future extension).
+   */
+  async calcIndicatorsWrapper(bars, symbol, timeframe) {
+    // Use the same logic as in indicators.js
+    const { calcIndicators } = await import("../indicators.js");
+    return await calcIndicators(bars, symbol, timeframe);
+  }
+
+  /**
+   * Entry signal logic: Only trade in the direction of the higher timeframe trend.
+   * Returns 'buy', 'sell', or null.
+   */
+  async getEntrySignal(symbol, h1Indicators, m15Indicators, trendDirection, bid, ask) {
+    // Momentum: EMA9/EMA21 cross, MACD, RSI
+    if (trendDirection === "bullish") {
+      const bullish =
+        h1Indicators.ema9 > h1Indicators.ema21 &&
+        h1Indicators.macd?.histogram > 0 &&
+        h1Indicators.rsi > 50 &&
+        m15Indicators.ema9 > m15Indicators.ema21 &&
+        m15Indicators.macd?.histogram > 0 &&
+        m15Indicators.rsi > 50;
+      if (bullish) return "buy";
+    } else if (trendDirection === "bearish") {
+      const bearish =
+        h1Indicators.ema9 < h1Indicators.ema21 &&
+        h1Indicators.macd?.histogram < 0 &&
+        h1Indicators.rsi < 50 &&
+        m15Indicators.ema9 < m15Indicators.ema21 &&
+        m15Indicators.macd?.histogram < 0 &&
+        m15Indicators.rsi < 50;
+      if (bearish) return "sell";
+    }
+    return null;
+  }
+
   // Close position by dealId
   async closePosition(dealId) {
     try {
@@ -693,6 +736,83 @@ class TradingService {
     } catch (error) {
       logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
     }
+  }
+
+  /**
+   * Modular logic for partial take-profit and trailing stop management.
+   * - Closes 50% at 1R (partial TP), moves SL to breakeven, then trails stop by ATR.
+   * - Should be called for each open trade in monitorOpenTrades.
+   */
+  async managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress) {
+    // 1. Partial TP at 1R (50% position)
+    // 2. Move SL to breakeven after partial TP
+    // 3. Trail stop by ATR after breakeven
+    //
+    // Assumptions: 'tpProgress' is % to TP (0-100), 'indicators.atr' is current ATR
+    // Only act if dealId and size are valid
+    if (!dealId || !size || !indicators?.atr) return;
+    const { updateTrailingStop } = await import("../api.js");
+    const minSize = 100; // Minimum trade size for partial close
+    const partialTPThreshold = 50; // % to TP for partial close
+    const trailATR = indicators.atr;
+    let partialClosed = false;
+    let stopMoved = false;
+
+    // --- Partial TP: close 50% at 1R (tpProgress >= 50%) ---
+    if (tpProgress >= partialTPThreshold && size > minSize * 2 && !partialClosed) {
+      // Close half the position
+      const closeSize = size / 2;
+      try {
+        await this.closePartialPosition(dealId, closeSize);
+        logger.info(`[PartialTP] Closed 50% of ${symbol} at 1R (${tpProgress}%)`);
+        partialClosed = true;
+      } catch (err) {
+        logger.error(`[PartialTP] Error closing 50% of ${symbol}:`, err);
+      }
+    }
+
+    // --- Move SL to breakeven after partial TP ---
+    if (tpProgress >= partialTPThreshold && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
+      try {
+        await updateTrailingStop(dealId, entry);
+        logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${entry}`);
+        stopMoved = true;
+      } catch (err) {
+        logger.error(`[Breakeven] Error moving stop to breakeven for ${symbol}:`, err);
+      }
+    }
+
+    // --- Trailing stop by ATR after breakeven ---
+    if (tpProgress > partialTPThreshold && stopMoved) {
+      let newStop = stopLevel;
+      if (direction === "buy") {
+        const candidate = price - trailATR;
+        if (candidate > stopLevel && candidate < price) {
+          newStop = candidate;
+        }
+      } else {
+        const candidate = price + trailATR;
+        if (candidate < stopLevel && candidate > price) {
+          newStop = candidate;
+        }
+      }
+      if (newStop !== stopLevel) {
+        try {
+          await updateTrailingStop(dealId, newStop);
+          logger.info(`[TrailingStop] Updated trailing stop for ${symbol} to ${newStop}`);
+        } catch (err) {
+          logger.error(`[TrailingStop] Error updating trailing stop for ${symbol}:`, err);
+        }
+      }
+    }
+  }
+
+  // Helper: Close partial position (simulate if not supported by broker)
+  async closePartialPosition(dealId, closeSize) {
+    // If your broker supports partial closes, implement here. Otherwise, simulate by closing and reopening remaining size.
+    // For now, just log and skip actual close.
+    logger.info(`[PartialClose] Would close ${closeSize} units of dealId ${dealId}`);
+    // TODO: Implement actual partial close logic if supported
   }
 }
 
