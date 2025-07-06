@@ -5,7 +5,7 @@ import { API } from "./config.js";
 import axios from "axios";
 import logger from "./utils/logger.js";
 
-let cst, xsecurity;
+let cst, xsecurity; 
 let sessionStartTime = Date.now();
 
 /**
@@ -168,7 +168,7 @@ export const getMarkets = async () =>
   });
 
 /**
- * Fetches detailed information for a specific market symbol.
+ * Fetches detailed information for a specific market symbol.x  
  */
 export async function getMarketDetails(symbol) {
   return await withSessionRetry(async () => {
