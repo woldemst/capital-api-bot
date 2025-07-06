@@ -122,7 +122,7 @@ export const SESSIONS = {
 // Mode Configuration
 export const MODE = {
   BACKTEST_MODE: false,
-  DEV_MODE: false, // Set to false in production
+  DEV_MODE: true, // Set to false in production
 };
 
 // Development overrides for faster testing
