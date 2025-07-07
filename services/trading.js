@@ -503,13 +503,13 @@ class TradingService {
     return symbol.includes("JPY") ? 0.01 : 0.0001;
   }
 
-  generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
-    if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis)) {
+  generateSignals(symbol, h4Data, cehcIndicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
+    if (!this.validateIndicatorData(h4Data, cehcIndicators, h1Indicators, m15Indicators, trendAnalysis)) {
       return { signal: null };
     }
     // this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
-    const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid);
-    const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask);
+    const buyConditions = this.generateBuyConditions(cehcIndicators, h1Indicators, m15Indicators, trendAnalysis, bid);
+    const sellConditions = this.generateSellConditions(cehcIndicators, h1Indicators, m15Indicators, trendAnalysis, ask);
     const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
     return {
       signal,

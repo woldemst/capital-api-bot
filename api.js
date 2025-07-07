@@ -248,8 +248,24 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
 
 /**
  * Updates the trailing stop for an open position.
+ * Ensures stopLevel is at least minSLDistance away from current price.
  */
-export async function updateTrailingStop(positionId, stopLevel) {
+export async function updateTrailingStop(positionId, stopLevel, symbol, direction, price) {
+  // Fetch allowed stop range and enforce min distance
+  if (symbol && direction && typeof price === 'number') {
+    const range = await getAllowedTPRange(symbol);
+    const decimals = range.decimals || 5;
+    const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+    if (direction === "buy") {
+      if ((price - stopLevel) < minStopDistance) {
+        stopLevel = price - minStopDistance;
+      }
+    } else {
+      if ((stopLevel - price) < minStopDistance) {
+        stopLevel = price + minStopDistance;
+      }
+    }
+  }
   return await withSessionRetry(async () => {
     logger.info(`[API] Updating trailing stop for position ${positionId} to ${stopLevel}`);
     const response = await axios.put(
@@ -269,8 +285,24 @@ export async function updateTrailingStop(positionId, stopLevel) {
 
 /**
  * Places a market position for a symbol with optional stop loss and take profit.
+ * Ensures stopLevel is at least minSLDistance away from price.
  */
-export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel) {
+export async function placePosition(symbol, direction, size, level, stopLevel, profitLevel, price) {
+  // Fetch allowed stop range and enforce min distance
+  if (symbol && direction && typeof price === 'number' && stopLevel) {
+    const range = await getAllowedTPRange(symbol);
+    const decimals = range.decimals || 5;
+    const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+    if (direction === "buy") {
+      if ((price - stopLevel) < minStopDistance) {
+        stopLevel = price - minStopDistance;
+      }
+    } else {
+      if ((stopLevel - price) < minStopDistance) {
+        stopLevel = price + minStopDistance;
+      }
+    }
+  }
   return await withSessionRetry(async () => {
     logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${stopLevel}, TP: ${profitLevel}`);
     const position = {

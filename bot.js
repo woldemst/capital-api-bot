@@ -315,9 +315,9 @@ class TradingBot {
    * Monitors open trades at a regular interval and triggers trade management logic.
    */
   startMonitorOpenTrades() {
-    logger.info("[Monitoring] Starting open trade monitor interval (every 1 minute)");
+    logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
     this.monitorInterval = setInterval(async () => {
-      logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+      logger.info(`\n\n[Monitoring] Checking open trades at ${new Date().toISOString()}`);
       try {
         const latestIndicatorsBySymbol = {};
         for (const symbol of TRADING.SYMBOLS) {
