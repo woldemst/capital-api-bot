@@ -314,13 +314,13 @@ class TradingService {
     // Use ATR from the entry timeframe (M15)
     const price = signal === "buy" ? ask : bid;
     const atr = await this.calculateATR(symbol); // Already uses M15 timeframe
-    // ATR-based dynamic stops/TPs
-    const stopLossDistance = 1.5 * atr;
+    // ATR-based dynamic stops/TPs (wider stop)
+    const stopLossDistance = 2.5 * atr; // Increased from 1.5x to 2.5x ATR
     const takeProfitDistance = 3 * atr;
     const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
     const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
-    const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
-    logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}`);
+    const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol); // Risk is correct for new stop
+    logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}, StopLossDistance: ${stopLossDistance}`);
 
     // Trailing stop parameters (optional, can be used for trailing logic)
     const trailingStopParams = {
@@ -328,7 +328,7 @@ class TradingService {
         signal === "buy"
           ? price + stopLossDistance // Activate at 1R profit
           : price - stopLossDistance,
-      trailingDistance: atr, // Trail by 1 ATR
+      trailingDistance: 1.5 * atr, // Trail by at least 1.5x ATR
     };
 
     return {
@@ -354,7 +354,8 @@ class TradingService {
   async executePosition(signal, symbol, params, expectedPrice) {
     const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
     try {
-      const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice);
+      // Pass symbol, direction, and price to placePosition for min stop enforcement
+      const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice, expectedPrice);
       if (position?.dealReference) {
         // Fetch and log deal confirmation
         const { getDealConfirmation } = await import("../api.js");
@@ -569,7 +570,7 @@ class TradingService {
       const holdMinutes = (now - openTime) / 60000;
 
       // --- Use new modular partial TP and trailing stop logic ---
-      await this.managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress);
+      await this.managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress, holdMinutes);
 
       // --- Time-based exit: close if trade is open too long without hitting TP/SL ---
       // For M15: close after 8 bars (~2 hours), for H1: after 4 bars (~4 hours), for H4: after 2 bars (~8 hours)
@@ -626,10 +627,10 @@ class TradingService {
         }
       }
       if (breakeven && newStop !== stopLevel) {
-        await updateTrailingStop(dealId, newStop);
+        await updateTrailingStop(dealId, newStop, symbol, direction, price);
         logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${newStop}`);
       } else if (shouldTrail) {
-        await updateTrailingStop(dealId, newStop);
+        await updateTrailingStop(dealId, newStop, symbol, direction, price);
         logger.info(`[TrailingStop] Aggressively updated for ${symbol} to ${newStop}`);
       }
 
@@ -747,25 +748,21 @@ class TradingService {
    * Modular logic for partial take-profit and trailing stop management.
    * - Closes 50% at 1R (partial TP), moves SL to breakeven, then trails stop by ATR.
    * - Should be called for each open trade in monitorOpenTrades.
+   *
+   * Now: Trailing stop only activates if (trend is weak && >1h && >50% TP) OR (>1h && >70% TP)
+   * Trailing stop always at least 1.5x ATR from price.
    */
-  async managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress) {
-    // 1. Partial TP at 1R (50% position)
-    // 2. Move SL to breakeven after partial TP
-    // 3. Trail stop by ATR after breakeven
-    //
-    // Assumptions: 'tpProgress' is % to TP (0-100), 'indicators.atr' is current ATR
-    // Only act if dealId and size are valid
+  async managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress, holdMinutes) {
     if (!dealId || !size || !indicators?.atr) return;
     const { updateTrailingStop } = await import("../api.js");
-    const minSize = 100; // Minimum trade size for partial close
-    const partialTPThreshold = 50; // % to TP for partial close
-    const trailATR = indicators.atr;
+    const minSize = 100;
+    const partialTPThreshold = 50;
+    const trailATR = 1.5 * indicators.atr; // Always trail by at least 1.5x ATR
     let partialClosed = false;
     let stopMoved = false;
 
     // --- Partial TP: close 50% at 1R (tpProgress >= 50%) ---
     if (tpProgress >= partialTPThreshold && size > minSize * 2 && !partialClosed) {
-      // Close half the position
       const closeSize = size / 2;
       try {
         await this.closePartialPosition(dealId, closeSize);
@@ -779,7 +776,7 @@ class TradingService {
     // --- Move SL to breakeven after partial TP ---
     if (tpProgress >= partialTPThreshold && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
       try {
-        await updateTrailingStop(dealId, entry);
+        await updateTrailingStop(dealId, entry, symbol, direction, price);
         logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${entry}`);
         stopMoved = true;
       } catch (err) {
@@ -787,8 +784,17 @@ class TradingService {
       }
     }
 
-    // --- Trailing stop by ATR after breakeven ---
-    if (tpProgress > partialTPThreshold && stopMoved) {
+    // --- Trailing stop logic per user rules ---
+    // Only activate trailing stop if:
+    // (trend is weak && >1h && >50% TP) OR (>1h && >70% TP)
+    let shouldTrail = false;
+    if (
+      (indicators.adx !== undefined && indicators.adx < 20 && holdMinutes > 60 && tpProgress >= 50) ||
+      (holdMinutes > 60 && tpProgress >= 70)
+    ) {
+      shouldTrail = true;
+    }
+    if (shouldTrail) {
       let newStop = stopLevel;
       if (direction === "buy") {
         const candidate = price - trailATR;
@@ -803,7 +809,7 @@ class TradingService {
       }
       if (newStop !== stopLevel) {
         try {
-          await updateTrailingStop(dealId, newStop);
+          await updateTrailingStop(dealId, newStop, symbol, direction, price);
           logger.info(`[TrailingStop] Updated trailing stop for ${symbol} to ${newStop}`);
         } catch (err) {
           logger.error(`[TrailingStop] Error updating trailing stop for ${symbol}:`, err);
