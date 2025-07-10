@@ -47,6 +47,7 @@ class TradingBot {
           await this.runBacktest();
         }
 
+        this.scheduleMidnightSessionRefresh(); // <-- Schedule midnight refresh
         return; // Success, exit the retry loop
       } catch (error) {
         retryCount++;
@@ -342,6 +343,32 @@ class TradingBot {
         logger.error("[Bot] Error in monitorOpenTrades:", error);
       }
     }, 1 * 60 * 1000); // every 1 min
+  }
+
+  /**
+   * Schedules a session refresh at midnight every day.
+   */
+  scheduleMidnightSessionRefresh() {
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0); // Next 00:00
+    const msUntilMidnight = nextMidnight - now;
+    setTimeout(() => {
+      this.refreshSessionAtMidnight();
+      // After first run, repeat every 24h
+      setInterval(() => this.refreshSessionAtMidnight(), 24 * 60 * 60 * 1000);
+    }, msUntilMidnight);
+    logger.info(`[Bot] Scheduled session refresh at midnight in ${(msUntilMidnight/1000/60).toFixed(2)} minutes.`);
+  }
+
+  async refreshSessionAtMidnight() {
+    try {
+      logger.info('[Bot] Refreshing session at midnight...');
+      await refreshSession();
+      logger.info('[Bot] Session refreshed at midnight.');
+    } catch (error) {
+      logger.error('[Bot] Midnight session refresh failed:', error);
+    }
   }
 }
 
