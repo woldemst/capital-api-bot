@@ -239,6 +239,7 @@ class TradingService {
   // Validate and adjust TP/SL to allowed range
   async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
     const range = await getAllowedTPRange(symbol);
+    
     let newTP = takeProfitPrice;
     let newSL = stopLossPrice;
     const decimals = range.decimals || 5;
@@ -598,6 +599,7 @@ class TradingService {
       let newStop = stopLevel;
       // --- Trailing stop validation ---
       const range = await getAllowedTPRange(symbol);
+
       const decimals = range.decimals || 5;
       const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
       // Aggressive trailing: tighten as TP progress increases
@@ -808,6 +810,19 @@ class TradingService {
         }
       }
       if (newStop !== stopLevel) {
+        // --- Enforce broker minimum stop distance ---
+        const range = await getAllowedTPRange(symbol);
+
+        const decimals = range.decimals || 5;
+        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+        if (direction === "buy" && price - newStop < minStopDistance) {
+          logger.warn(`[TrailingStop] New stop (${newStop}) too close to price (${price}). Min distance: ${minStopDistance}`);
+          return;
+        }
+        if (direction === "sell" && newStop - price < minStopDistance) {
+          logger.warn(`[TrailingStop] New stop (${newStop}) too close to price (${price}). Min distance: ${minStopDistance}`);
+          return;
+        }
         try {
           await updateTrailingStop(dealId, newStop, symbol, direction, price);
           logger.info(`[TrailingStop] Updated trailing stop for ${symbol} to ${newStop}`);
