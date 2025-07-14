@@ -7,6 +7,7 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
+import { logTradeSnapshot } from "./utils/tradeLogger.js";
 
 const { SYMBOLS, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
@@ -21,6 +22,7 @@ class TradingBot {
     this.retryDelay = 30000; // 30 seconds
     this.latestCandles = {}; // Store latest candles for each symbol
     this.monitorInterval = null; // Add monitor interval for open trades
+    this.maxCandleHistory = 120; // Rolling window size for indicators
   }
 
   /**
@@ -45,6 +47,7 @@ class TradingBot {
           await this.runBacktest();
         }
 
+        this.scheduleMidnightSessionRefresh(); // <-- Schedule midnight refresh
         return; // Success, exit the retry loop
       } catch (error) {
         retryCount++;
@@ -87,14 +90,14 @@ class TradingBot {
           const timestamp = candle.t;
 
           // Initialize storage for this symbol if needed
-          if (!this.latestCandles[symbol]) this.latestCandles[symbol] = {};
+          if (!this.latestCandles[symbol]) this.latestCandles[symbol] = { history: [], byTimestamp: {} };
 
           // Store bid/ask by timestamp
-          if (!this.latestCandles[symbol][timestamp]) this.latestCandles[symbol][timestamp] = {};
-          this.latestCandles[symbol][timestamp][candle.priceType] = candle;
+          if (!this.latestCandles[symbol].byTimestamp[timestamp]) this.latestCandles[symbol].byTimestamp[timestamp] = {};
+          this.latestCandles[symbol].byTimestamp[timestamp][candle.priceType] = candle;
 
           // If both bid and ask are present for this timestamp, merge and analyze
-          const merged = this.latestCandles[symbol][timestamp];
+          const merged = this.latestCandles[symbol].byTimestamp[timestamp];
           if (merged.bid && merged.ask) {
             const mergedCandle = {
               epic: symbol,
@@ -109,6 +112,11 @@ class TradingBot {
             };
             // Store the merged candle for analysis
             this.latestCandles[symbol].latest = mergedCandle;
+            // Maintain rolling history for indicators
+            this.latestCandles[symbol].history.push(mergedCandle);
+            if (this.latestCandles[symbol].history.length > this.maxCandleHistory) {
+              this.latestCandles[symbol].history.shift();
+            }
             // Only analyze on completed candles
             if (candle.complete || candle.snapshotTimeUTC) {
               this.analyzeSymbol(symbol);
@@ -308,25 +316,59 @@ class TradingBot {
    * Monitors open trades at a regular interval and triggers trade management logic.
    */
   startMonitorOpenTrades() {
-    logger.info("[Monitoring] Starting open trade monitor interval (every 1 minute)");
+    logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
     this.monitorInterval = setInterval(async () => {
-      logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+      logger.info(`\n\n[Monitoring] Checking open trades at ${new Date().toISOString()}`);
       try {
         const latestIndicatorsBySymbol = {};
         for (const symbol of TRADING.SYMBOLS) {
-          const mergedCandle = this.latestCandles[symbol]?.latest;
-          logger.info(`[Monitoring] Symbol: ${symbol}, merged candle present: ${!!mergedCandle}`);
-          if (mergedCandle) {
-            latestIndicatorsBySymbol[symbol] = await calcIndicators([mergedCandle], symbol);
+          const history = this.latestCandles[symbol]?.history;
+          logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
+          if (history && history.length > 5) { // Lowered from 20 to 5 for faster indicator logging
+            latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
             logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
+          } else {
+            logger.warn(`[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`);
+            latestIndicatorsBySymbol[symbol] = {};
           }
         }
         await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+        // --- Log trades every 15 minutes ---
+        if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 14.5 * 60 * 1000) {
+          await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
+          this._lastTradeLogTime = Date.now();
+        }
         logger.info("[Monitoring] monitorOpenTrades completed");
       } catch (error) {
         logger.error("[Bot] Error in monitorOpenTrades:", error);
       }
     }, 1 * 60 * 1000); // every 1 min
+  }
+
+  /**
+   * Schedules a session refresh at midnight every day.
+   */
+  scheduleMidnightSessionRefresh() {
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0); // Next 00:00
+    const msUntilMidnight = nextMidnight - now;
+    setTimeout(() => {
+      this.refreshSessionAtMidnight();
+      // After first run, repeat every 24h
+      setInterval(() => this.refreshSessionAtMidnight(), 24 * 60 * 60 * 1000);
+    }, msUntilMidnight);
+    logger.info(`[Bot] Scheduled session refresh at midnight in ${(msUntilMidnight/1000/60).toFixed(2)} minutes.`);
+  }
+
+  async refreshSessionAtMidnight() {
+    try {
+      logger.info('[Bot] Refreshing session at midnight...');
+      await refreshSession();
+      logger.info('[Bot] Session refreshed at midnight.');
+    } catch (error) {
+      logger.error('[Bot] Midnight session refresh failed:', error);
+    }
   }
 }
 
