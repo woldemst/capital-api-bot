@@ -18,7 +18,7 @@ class TradingService {
     this.openTrades = [];
     this.accountBalance = 0;
     this.profitThresholdReached = false;
-    this.symbolMinSizes = {};
+
     this.virtualBalance = 10000;
     this.virtualPositions = [];
     this.orderAttempts = new Map();
@@ -50,9 +50,7 @@ class TradingService {
   setProfitThresholdReached(reached) {
     this.profitThresholdReached = reached;
   }
-  setSymbolMinSizes(minSizes) {
-    this.symbolMinSizes = minSizes;
-  }
+
   setAvailableMargin(margin) {
     this.availableMargin = margin;
   }

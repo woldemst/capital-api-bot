@@ -291,26 +291,6 @@ class TradingBot {
     webSocketService.disconnect();
   }
 
-  /**
-   * Fetches and stores minDealSize and dealSizeIncrement for all symbols.
-   * Used for position sizing and validation.
-   */
-  async fetchAndStoreSymbolMinSizes() {
-    const minSizes = {};
-    for (const symbol of SYMBOLS) {
-      try {
-        const details = await import("./api.js").then((api) => api.getMarketDetails(symbol));
-        const minDealSize = details.instrument?.minDealSize || 1;
-        const dealSizeIncrement = details.instrument?.dealSizeIncrement || 1;
-        minSizes[symbol] = { minDealSize, dealSizeIncrement };
-        logger.info(`[SymbolConfig] ${symbol}: minDealSize=${minDealSize}, dealSizeIncrement=${dealSizeIncrement}`);
-      } catch (e) {
-        logger.warn(`[SymbolConfig] Could not fetch min size for ${symbol}:`, e.message);
-        minSizes[symbol] = { minDealSize: 1, dealSizeIncrement: 1 };
-      }
-    }
-    tradingService.setSymbolMinSizes(minSizes);
-  }
 
   /**
    * Monitors open trades at a regular interval and triggers trade management logic.
