@@ -2,23 +2,11 @@ import { EMA, RSI, BollingerBands, MACD, ATR } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
 import logger from "./utils/logger.js";
 
-const {
-  RSI: RSI_CONFIG,
-  MACD: MACD_CONFIG,
-  BOLLINGER,
-  ATR: ATR_CONFIG,
-} = ANALYSIS;
+const { RSI: RSI_CONFIG, MACD: MACD_CONFIG, BOLLINGER, ATR: ATR_CONFIG } = ANALYSIS;
 
-export async function calcIndicators(
-  bars,
-  symbol = "",
-  timeframe = "",
-  priceType = "mid"
-) {
+export async function calcIndicators(bars, symbol = "", timeframe = "", priceType = "mid") {
   if (!bars || !Array.isArray(bars) || bars.length === 0) {
-    logger.error(
-      `[Indicators] No bars provided for indicator calculation for ${symbol} ${timeframe}`
-    );
+    logger.error(`[Indicators] No bars provided for indicator calculation for ${symbol} ${timeframe}`);
     return {};
   }
 
@@ -138,10 +126,8 @@ export async function analyzeTrend(symbol, getHistorical) {
     const d1Indicators = await calcIndicators(d1Data.prices);
 
     // Determine trend direction
-    const h4Trend =
-      h4Indicators.emaFast > h4Indicators.emaSlow ? "bullish" : "bearish";
-    const d1Trend =
-      d1Indicators.emaFast > d1Indicators.emaSlow ? "bullish" : "bearish";
+    const h4Trend = h4Indicators.emaFast > h4Indicators.emaSlow ? "bullish" : "bearish";
+    const d1Trend = d1Indicators.emaFast > d1Indicators.emaSlow ? "bullish" : "bearish";
 
     console.log(`${symbol} H4 Trend: ${h4Trend}, D1 Trend: ${d1Trend}`);
 
@@ -151,11 +137,7 @@ export async function analyzeTrend(symbol, getHistorical) {
       h4Indicators,
       d1Indicators,
       overallTrend:
-        h4Trend === "bullish" && d1Trend === "bullish"
-          ? "bullish"
-          : h4Trend === "bearish" && d1Trend === "bearish"
-          ? "bearish"
-          : "mixed",
+        h4Trend === "bullish" && d1Trend === "bullish" ? "bullish" : h4Trend === "bearish" && d1Trend === "bearish" ? "bearish" : "mixed",
     };
   } catch (error) {
     console.error(`Error analyzing trend for ${symbol}:`, error);
@@ -173,19 +155,11 @@ export function isTrendWeak(indicators, direction) {
   if (!indicators) return false;
   // Weakness for BUY: bearish cross, MACD < 0, RSI falling
   if (direction === "BUY") {
-    return (
-      indicators.isBearishCross ||
-      (indicators.macd && indicators.macd.histogram < 0) ||
-      (indicators.rsi && indicators.rsi < 50)
-    );
+    return indicators.isBearishCross || (indicators.macd && indicators.macd.histogram < 0) || (indicators.rsi && indicators.rsi < 50);
   }
   // Weakness for SELL: bullish cross, MACD > 0, RSI rising
   if (direction === "SELL") {
-    return (
-      indicators.isBullishCross ||
-      (indicators.macd && indicators.macd.histogram > 0) ||
-      (indicators.rsi && indicators.rsi > 50)
-    );
+    return indicators.isBullishCross || (indicators.macd && indicators.macd.histogram > 0) || (indicators.rsi && indicators.rsi > 50);
   }
   return false;
 }

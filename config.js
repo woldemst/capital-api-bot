@@ -50,13 +50,9 @@ export const TRADING = {
 export const ANALYSIS = {
   // Multi-Timeframe Strategy
   TIMEFRAMES: {
-    D1: "DAY", // Daily trend direction
-    H4: "HOUR_4", // 4-hour trend direction
-    H1: "HOUR", // 1-hour trend direction
-
-    TREND: "HOUR_4", // Trend direction
-    SETUP: "HOUR", // Trade setup
-    ENTRY: "MINUTE_15", // Entry/Exit timing
+    d1: "DAY", // Daily trend direction
+    h4: "HOUR_4", // 4-hour trend direction
+    h1: "HOUR" // 1-hour trend direction
   },
 
   // EMAs for trend and entry
