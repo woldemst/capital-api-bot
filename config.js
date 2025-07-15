@@ -13,7 +13,7 @@ export const API = {
 export const TRADING = {
   // Instruments and timeframes
   SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
-  TIMEFRAMES: ["MINUTE", "MINUTE_5", "MINUTE_15", "MINUTE_30", "HOUR", "HOUR_4", "DAY"],
+  TIMEFRAMES: ["MINUTE_15", "HOUR", "HOUR_4", "DAY"],
 
   // Position sizing and risk management
   LEVERAGE: 30,
@@ -50,6 +50,10 @@ export const TRADING = {
 export const ANALYSIS = {
   // Multi-Timeframe Strategy
   TIMEFRAMES: {
+    D1: "DAY", // Daily trend direction
+    H4: "HOUR_4", // 4-hour trend direction
+    H1: "HOUR", // 1-hour trend direction
+
     TREND: "HOUR_4", // Trend direction
     SETUP: "HOUR", // Trade setup
     ENTRY: "MINUTE_15", // Entry/Exit timing
@@ -120,10 +124,8 @@ export const SESSIONS = {
 };
 
 // Mode Configuration
-export const MODE = {
-  BACKTEST_MODE: false,
-  DEV_MODE: true, // Set to false in production
-};
+export const DEV_MODE = true; // Set to false in production
+
 
 // Development overrides for faster testing
 export const DEV = {
