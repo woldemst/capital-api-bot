@@ -2,7 +2,7 @@
 // Human-readable, robust, and well-commented for maintainability.
 
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession } from "./api.js";
-import { TRADING, MODE, DEV, ANALYSIS } from "./config.js";
+import { TRADING, DEV_MODE, DEV, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
@@ -10,7 +10,6 @@ import logger from "./utils/logger.js";
 import { logTradeSnapshot } from "./utils/tradeLogger.js";
 
 const { SYMBOLS, MAX_POSITIONS } = TRADING;
-const { BACKTEST_MODE } = MODE;
 
 class TradingBot {
   constructor() {
@@ -41,11 +40,7 @@ class TradingBot {
           throw new Error("Invalid session tokens");
         }
 
-        if (!BACKTEST_MODE) {
-          await this.startLiveTrading(tokens);
-        } else {
-          await this.runBacktest();
-        }
+        await this.startLiveTrading(tokens);
 
         this.scheduleMidnightSessionRefresh(); // <-- Schedule midnight refresh
         return; // Success, exit the retry loop
@@ -78,7 +73,7 @@ class TradingBot {
 
   /**
    * Sets up the WebSocket connection for real-time price data.
-   * Handles incoming messages and merges bid/ask candles for analysis.
+   * Only stores the latest candle for each symbol (no merging, no history).
    */
   setupWebSocket(tokens) {
     webSocketService.connect(tokens, SYMBOLS, (data) => {
@@ -87,44 +82,8 @@ class TradingBot {
         if (message.payload?.epic) {
           const candle = message.payload;
           const symbol = candle.epic;
-          const timestamp = candle.t;
-
-          // Initialize storage for this symbol if needed
-          if (!this.latestCandles[symbol]) this.latestCandles[symbol] = { history: [], byTimestamp: {} };
-
-          // Store bid/ask by timestamp
-          if (!this.latestCandles[symbol].byTimestamp[timestamp]) this.latestCandles[symbol].byTimestamp[timestamp] = {};
-          this.latestCandles[symbol].byTimestamp[timestamp][candle.priceType] = candle;
-
-          // If both bid and ask are present for this timestamp, merge and analyze
-          const merged = this.latestCandles[symbol].byTimestamp[timestamp];
-          if (merged.bid && merged.ask) {
-            const mergedCandle = {
-              epic: symbol,
-              timestamp,
-              open: { bid: merged.bid.o, ask: merged.ask.o },
-              high: { bid: merged.bid.h, ask: merged.ask.h },
-              low: { bid: merged.bid.l, ask: merged.ask.l },
-              close: { bid: merged.bid.c, ask: merged.ask.c },
-              lastTradedVolume: merged.bid.lastTradedVolume || merged.ask.lastTradedVolume,
-              complete: candle.complete,
-              snapshotTimeUTC: candle.snapshotTimeUTC,
-            };
-            // Store the merged candle for analysis
-            this.latestCandles[symbol].latest = mergedCandle;
-            // Maintain rolling history for indicators
-            this.latestCandles[symbol].history.push(mergedCandle);
-            if (this.latestCandles[symbol].history.length > this.maxCandleHistory) {
-              this.latestCandles[symbol].history.shift();
-            }
-            // Only analyze on completed candles
-            if (candle.complete || candle.snapshotTimeUTC) {
-              this.analyzeSymbol(symbol);
-            }
-          }
-        } else {
-          // Log all other messages for debugging
-          // console.log("[WebSocket] Message received but no epic:", message);
+          // Just store the latest candle for each symbol
+          this.latestCandles[symbol] = { latest: candle };
         }
       } catch (error) {
         logger.error("WebSocket message processing error:", error.message, data?.toString());
@@ -133,7 +92,7 @@ class TradingBot {
   }
 
   /**
-   * Starts a periodic session ping to keep the API session alive.
+   * Starts a periodic session ping to keep the API session alive.=
    */
   startSessionPing() {
     this.sessionPingInterval = setInterval(async () => {
@@ -150,8 +109,8 @@ class TradingBot {
    * Starts the periodic analysis interval for scheduled trading logic.
    */
   startAnalysisInterval() {
-    const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
-    logger.info(`[${MODE.DEV_MODE ? 'DEV' : 'PROD'}] Starting analysis interval: ${interval}s`);
+    const interval = DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 5 * 60 * 1000;
+    logger.info(`[${DEV_MODE ? "DEV" : "PROD"}] Starting analysis interval: ${interval}s`);
     this.analysisInterval = setInterval(async () => {
       try {
         logger.info(`[Running scheduled analysis...`);
@@ -172,7 +131,7 @@ class TradingBot {
       if (accountData?.accounts?.[0]?.balance?.balance) {
         tradingService.setAccountBalance(accountData.accounts[0].balance.balance);
         // Set available margin if present
-        if (typeof accountData.accounts[0].balance.available !== 'undefined') {
+        if (typeof accountData.accounts[0].balance.available !== "undefined") {
           tradingService.setAvailableMargin(accountData.accounts[0].balance.available);
         }
       } else {
@@ -192,12 +151,13 @@ class TradingBot {
 
   /**
    * Fetches historical data for all required timeframes for a symbol.
-   * Returns H4, H1, and M15 data objects.
+   * Returns D1, H4, and H1 data objects.
    */
+  
   async fetchHistoricalData(symbol) {
-    const timeframes = MODE.DEV_MODE
+    const timeframes = DEV_MODE
       ? [DEV.TIMEFRAMES.TREND, DEV.TIMEFRAMES.SETUP, DEV.TIMEFRAMES.ENTRY]
-      : [ANALYSIS.TIMEFRAMES.TREND, ANALYSIS.TIMEFRAMES.SETUP, ANALYSIS.TIMEFRAMES.ENTRY];
+      : [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
     const count = 220; // Fetch enough candles for EMA200
     const delays = [1000, 1000, 1000];
@@ -208,9 +168,9 @@ class TradingBot {
       results.push(data);
     }
     return {
-      h4Data: results[0],
-      h1Data: results[1],
-      m15Data: results[2],
+      d1Data: results[0], // Daily data for trend direction
+      h4Data: results[1], // 4-hour data for trend analysis
+      h1Data: results[2], // 1-hour data for setup confirmation
     };
   }
 
@@ -221,12 +181,12 @@ class TradingBot {
     logger.info(`\n\n=== Processing ${symbol} ===`);
 
     // Fetch and calculate all required data
-    const { h4Data, h1Data, m15Data } = await this.fetchHistoricalData(symbol);
+    const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
 
     const indicators = {
+      d1: await calcIndicators(d1Data.prices), // Daily trend direction
       h4: await calcIndicators(h4Data.prices), // Trend direction
       h1: await calcIndicators(h1Data.prices), // Setup confirmation
-      m15: await calcIndicators(m15Data.prices), // Entry/Exit timing
     };
 
     // We don't need separate trend analysis anymore as it's part of the H4 indicators
@@ -247,9 +207,9 @@ class TradingBot {
         symbol: symbol,
         indicators,
         trendAnalysis,
+        d1Data: d1Data.prices,
         h4Data: h4Data.prices,
         h1Data: h1Data.prices,
-        m15Data: m15Data.prices,
       },
       MAX_POSITIONS
     );
@@ -270,18 +230,6 @@ class TradingBot {
   }
 
   /**
-   * Runs a simple backtest (skeleton for future expansion).
-   */
-  async runBacktest() {
-    try {
-      const m1Data = await getHistorical("USDCAD", "MINUTE", 50);
-      logger.info(`Backtest data fetched for USDCAD: ${m1Data.prices.length} candles`);
-    } catch (error) {
-      logger.error("Backtest error:", error.message);
-    }
-  }
-
-  /**
    * Cleanly shuts down the bot and all intervals/connections.
    */
   async shutdown() {
@@ -290,7 +238,6 @@ class TradingBot {
     clearInterval(this.sessionRefreshInterval);
     webSocketService.disconnect();
   }
-
 
   /**
    * Monitors open trades at a regular interval and triggers trade management logic.
@@ -304,17 +251,20 @@ class TradingBot {
         for (const symbol of TRADING.SYMBOLS) {
           const history = this.latestCandles[symbol]?.history;
           logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
-          if (history && history.length > 5) { // Lowered from 20 to 5 for faster indicator logging
+          if (history && history.length > 5) {
+            // Lowered from 20 to 5 for faster indicator logging
             latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
             logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
           } else {
-            logger.warn(`[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`);
+            logger.warn(
+              `[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`
+            );
             latestIndicatorsBySymbol[symbol] = {};
           }
         }
         await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
-        // --- Log trades every 15 minutes ---
-        if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 14.5 * 60 * 1000) {
+        // --- Log trades every hour ---
+        if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
           await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
           this._lastTradeLogTime = Date.now();
         }
@@ -338,16 +288,16 @@ class TradingBot {
       // After first run, repeat every 24h
       setInterval(() => this.refreshSessionAtMidnight(), 24 * 60 * 60 * 1000);
     }, msUntilMidnight);
-    logger.info(`[Bot] Scheduled session refresh at midnight in ${(msUntilMidnight/1000/60).toFixed(2)} minutes.`);
+    logger.info(`[Bot] Scheduled session refresh at midnight in ${(msUntilMidnight / 1000 / 60).toFixed(2)} minutes.`);
   }
 
   async refreshSessionAtMidnight() {
     try {
-      logger.info('[Bot] Refreshing session at midnight...');
+      logger.info("[Bot] Refreshing session at midnight...");
       await refreshSession();
-      logger.info('[Bot] Session refreshed at midnight.');
+      logger.info("[Bot] Session refreshed at midnight.");
     } catch (error) {
-      logger.error('[Bot] Midnight session refresh failed:', error);
+      logger.error("[Bot] Midnight session refresh failed:", error);
     }
   }
 }

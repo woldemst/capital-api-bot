@@ -25,7 +25,6 @@ class TradingService {
     this.availableMargin = 0; // Initialize availableMargin
     // --- Overtrading protection: cooldown per symbol ---
     this.lastTradeTimestamps = {};
-    this.COOLDOWN_MINUTES = 15; // Minimum minutes between trades per symbol
     this.winStreak = 0;
     this.lossStreak = 0;
     this.recentResults = [];
@@ -66,20 +65,20 @@ class TradingService {
     return true;
   }
 
-  validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-    if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
+  validateIndicatorData(d1Data, h4Indicators, h1Indicators, trendAnalysis) {
+    if (!d1Data || !h4Indicators || !h1Indicators || !trendAnalysis) {
       logger.info("[Signal] Missing required indicators data");
       return false;
     }
     return true;
   }
 
-  logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
+  logMarketConditions(symbol, bid, ask, d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
     // logger.info(`\n=== Analyzing ${symbol} ===`);
     // logger.info("Current price:", { bid, ask });
+    // logger.info("[D1] EMA Fast:", d1Indicators.emaFast, "EMA Slow:", d1Indicators.emaSlow);
     // logger.info("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
     // logger.info("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
-    // logger.info("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
     // logger.info("Trend:", trendAnalysis.h4Trend);
   }
 
@@ -188,11 +187,11 @@ class TradingService {
     const trendAnalysis = message.trendAnalysis;
     // --- Range filter ---
     const price = bid || ask || 1;
-    if (!this.passesRangeFilter(indicators.m15 || indicators, price)) {
+    if (!this.passesRangeFilter(indicators.h1 || indicators, price)) {
       logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
       return { signal: null, buyScore: 0, sellScore: 0 };
     }
-    const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
+    const result = this.generateSignals(symbol, message.d1Data, indicators.d1, indicators.h4, indicators.h1, trendAnalysis, bid, ask);
     if (!result.signal) {
       logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
     } else {
@@ -200,37 +199,29 @@ class TradingService {
     }
     return result;
   }
-  generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
+  generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, bid) {
     return [
+      // D1 Trend filter
+      d1Indicators.emaFast > d1Indicators.emaSlow,
       // H4 Trend conditions
-      h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
-      h4Indicators.macd?.histogram > 0, // Trend confirmation
-
+      h4Indicators.emaFast > h4Indicators.emaSlow,
+      h4Indicators.macd?.histogram > 0,
       // H1 Setup confirmation
       h1Indicators.ema9 > h1Indicators.ema21,
-      h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
-
-      // M15 Entry conditions
-      m15Indicators.isBullishCross,
-      m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
-      bid <= m15Indicators.bb?.lower,
+      h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD,
     ];
   }
 
-  generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
+  generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, ask) {
     return [
+      // D1 Trend filter
+      d1Indicators.emaFast < d1Indicators.emaSlow,
       // H4 Trend conditions
       !h4Indicators.isBullishTrend,
       h4Indicators.macd?.histogram < 0,
-
       // H1 Setup confirmation
       h1Indicators.ema9 < h1Indicators.ema21,
       h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
-
-      // M15 Entry conditions
-      m15Indicators.isBearishCross,
-      m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
-      ask >= m15Indicators.bb?.upper,
     ];
   }
 
@@ -385,6 +376,10 @@ class TradingService {
     }
   }
 
+
+
+
+
   async setupTrailingStop(symbol, signal, dealId, params) {
     if (!dealId || !params?.trailingDistance) {
       logger.warn("[TrailingStop] Missing required parameters");
@@ -503,13 +498,12 @@ class TradingService {
     return symbol.includes("JPY") ? 0.01 : 0.0001;
   }
 
-  generateSignals(symbol, h4Data, cehcIndicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
-    if (!this.validateIndicatorData(h4Data, cehcIndicators, h1Indicators, m15Indicators, trendAnalysis)) {
+  generateSignals(symbol, d1Data, d1Indicators, h4Indicators, h1Indicators, trendAnalysis, bid, ask) {
+    if (!this.validateIndicatorData(d1Data, h4Indicators, h1Indicators, trendAnalysis)) {
       return { signal: null };
     }
-    // this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
-    const buyConditions = this.generateBuyConditions(cehcIndicators, h1Indicators, m15Indicators, trendAnalysis, bid);
-    const sellConditions = this.generateSellConditions(cehcIndicators, h1Indicators, m15Indicators, trendAnalysis, ask);
+    const buyConditions = this.generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, bid);
+    const sellConditions = this.generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, ask);
     const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
     return {
       signal,
@@ -709,25 +703,19 @@ class TradingService {
    * Entry signal logic: Only trade in the direction of the higher timeframe trend.
    * Returns 'buy', 'sell', or null.
    */
-  async getEntrySignal(symbol, h1Indicators, m15Indicators, trendDirection, bid, ask) {
+  async getEntrySignal(symbol, h1Indicators, trendDirection, bid, ask) {
     // Momentum: EMA9/EMA21 cross, MACD, RSI
     if (trendDirection === "bullish") {
       const bullish =
         h1Indicators.ema9 > h1Indicators.ema21 &&
         h1Indicators.macd?.histogram > 0 &&
-        h1Indicators.rsi > 50 &&
-        m15Indicators.ema9 > m15Indicators.ema21 &&
-        m15Indicators.macd?.histogram > 0 &&
-        m15Indicators.rsi > 50;
+        h1Indicators.rsi > 50;
       if (bullish) return "buy";
     } else if (trendDirection === "bearish") {
       const bearish =
         h1Indicators.ema9 < h1Indicators.ema21 &&
         h1Indicators.macd?.histogram < 0 &&
-        h1Indicators.rsi < 50 &&
-        m15Indicators.ema9 < m15Indicators.ema21 &&
-        m15Indicators.macd?.histogram < 0 &&
-        m15Indicators.rsi < 50;
+        h1Indicators.rsi < 50;
       if (bearish) return "sell";
     }
     return null;
