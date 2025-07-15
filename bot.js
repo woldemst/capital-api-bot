@@ -67,7 +67,7 @@ class TradingBot {
     this.setupWebSocket(tokens);
     this.startSessionPing();
     this.startAnalysisInterval();
-    this.startMonitorOpenTrades();
+    // this.startMonitorOpenTrades();
     this.isRunning = true;
   }
 
@@ -153,7 +153,7 @@ class TradingBot {
    * Fetches historical data for all required timeframes for a symbol.
    * Returns D1, H4, and H1 data objects.
    */
-  
+
   async fetchHistoricalData(symbol) {
     const timeframes = DEV_MODE
       ? [DEV.TIMEFRAMES.TREND, DEV.TIMEFRAMES.SETUP, DEV.TIMEFRAMES.ENTRY]
@@ -167,6 +167,8 @@ class TradingBot {
       const data = await getHistorical(symbol, timeframes[i], count);
       results.push(data);
     }
+    console.log('result data', results);
+    
     return {
       d1Data: results[0], // Daily data for trend direction
       h4Data: results[1], // 4-hour data for trend analysis
@@ -183,36 +185,38 @@ class TradingBot {
     // Fetch and calculate all required data
     const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
 
-    const indicators = {
-      d1: await calcIndicators(d1Data.prices), // Daily trend direction
-      h4: await calcIndicators(h4Data.prices), // Trend direction
-      h1: await calcIndicators(h1Data.prices), // Setup confirmation
-    };
+    console.log('d1Data', d1Data, 'h4Data', h4Data, 'h1Data', h1Data);
+    
+    // const indicators = {
+    //   d1: await calcIndicators(d1Data.prices), // Daily trend direction
+    //   h4: await calcIndicators(h4Data.prices), // Trend direction
+    //   h1: await calcIndicators(h1Data.prices), // Setup confirmation
+    // };
 
-    // We don't need separate trend analysis anymore as it's part of the H4 indicators
-    const trendAnalysis = {
-      h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
-      h4Indicators: indicators.h4,
-    };
+    // // We don't need separate trend analysis anymore as it's part of the H4 indicators
+    // const trendAnalysis = {
+    //   h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
+    //   h4Indicators: indicators.h4,
+    // };
 
-    // Use the latest real-time merged candle for bid/ask
-    const latestCandle = this.latestCandles[symbol]?.latest;
-    if (!latestCandle) {
-      logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
-      return;
-    }
-    await tradingService.processPrice(
-      {
-        ...latestCandle,
-        symbol: symbol,
-        indicators,
-        trendAnalysis,
-        d1Data: d1Data.prices,
-        h4Data: h4Data.prices,
-        h1Data: h1Data.prices,
-      },
-      MAX_POSITIONS
-    );
+    // // Use the latest real-time merged candle for bid/ask
+    // const latestCandle = this.latestCandles[symbol]?.latest;
+    // if (!latestCandle) {
+    //   logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
+    //   return;
+    // }
+    // await tradingService.processPrice(
+    //   {
+    //     ...latestCandle,
+    //     symbol: symbol,
+    //     indicators,
+    //     trendAnalysis,
+    //     d1Data: d1Data.prices,
+    //     h4Data: h4Data.prices,
+    //     h1Data: h1Data.prices,
+    //   },
+    //   MAX_POSITIONS
+    // );
   }
 
   /**
@@ -239,41 +243,39 @@ class TradingBot {
     webSocketService.disconnect();
   }
 
-  /**
-   * Monitors open trades at a regular interval and triggers trade management logic.
-   */
-  startMonitorOpenTrades() {
-    logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
-    this.monitorInterval = setInterval(async () => {
-      logger.info(`\n\n[Monitoring] Checking open trades at ${new Date().toISOString()}`);
-      try {
-        const latestIndicatorsBySymbol = {};
-        for (const symbol of TRADING.SYMBOLS) {
-          const history = this.latestCandles[symbol]?.history;
-          logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
-          if (history && history.length > 5) {
-            // Lowered from 20 to 5 for faster indicator logging
-            latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
-            logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
-          } else {
-            logger.warn(
-              `[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`
-            );
-            latestIndicatorsBySymbol[symbol] = {};
-          }
-        }
-        await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
-        // --- Log trades every hour ---
-        if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
-          await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
-          this._lastTradeLogTime = Date.now();
-        }
-        logger.info("[Monitoring] monitorOpenTrades completed");
-      } catch (error) {
-        logger.error("[Bot] Error in monitorOpenTrades:", error);
-      }
-    }, 1 * 60 * 1000); // every 1 min
-  }
+
+  // startMonitorOpenTrades() {
+  //   logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
+  //   this.monitorInterval = setInterval(async () => {
+  //     logger.info(`\n\n[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+  //     try {
+  //       const latestIndicatorsBySymbol = {};
+  //       for (const symbol of TRADING.SYMBOLS) {
+  //         const history = this.latestCandles[symbol]?.history;
+  //         logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
+  //         if (history && history.length > 5) {
+  //           // Lowered from 20 to 5 for faster indicator logging
+  //           latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
+  //           logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
+  //         } else {
+  //           logger.warn(
+  //             `[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`
+  //           );
+  //           latestIndicatorsBySymbol[symbol] = {};
+  //         }
+  //       }
+  //       await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+  //       // --- Log trades every hour ---
+  //       if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
+  //         await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
+  //         this._lastTradeLogTime = Date.now();
+  //       }
+  //       logger.info("[Monitoring] monitorOpenTrades completed");
+  //     } catch (error) {
+  //       logger.error("[Bot] Error in monitorOpenTrades:", error);
+  //     }
+  //   }, 1 * 60 * 1000); // every 1 min
+  // }
 
   /**
    * Schedules a session refresh at midnight every day.

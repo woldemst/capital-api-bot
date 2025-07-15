@@ -197,12 +197,9 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
     if (!to) to = formatIsoNoMs(new Date(nowMs));
     if (!from) {
       const resolutionToMs = {
-        MINUTE: 1 * 60 * 1000,
-        MINUTE_5: 5 * 60 * 1000,
-        MINUTE_15: 15 * 60 * 1000,
-        HOUR: 1 * 60 * 60 * 1000,
-        HOUR_4: 4 * 60 * 60 * 1000,
-        DAY: 24 * 60 * 60 * 1000,
+        h1: 1 * 60 * 60 * 1000,
+        h4: 4 * 60 * 60 * 1000,
+        d1: 24 * 60 * 60 * 1000,
       };
       const stepMs = resolutionToMs[resolution] || resolutionToMs.MINUTE;
       const fromMs = nowMs - count * stepMs;
