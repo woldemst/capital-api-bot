@@ -187,54 +187,46 @@ class TradingBot {
         };
     }
 
-    /**
-     * Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
-     */
+    // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
-
-        // Fetch and calculate all required data
         const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
-
         // console.log("d1Data", d1Data, "h4Data", h4Data, "h1Data", h1Data);
 
         const indicators = {
-          d1: await calcIndicators(d1Data.prices), // Daily trend direction
-          h4: await calcIndicators(h4Data.prices), // Trend direction
-          h1: await calcIndicators(h1Data.prices), // Setup confirmation
+            d1: await calcIndicators(d1Data.prices), // Daily trend direction
+            h4: await calcIndicators(h4Data.prices), // Trend direction
+            h1: await calcIndicators(h1Data.prices), // Setup confirmation
         };
 
+        // console.log(indicators);
 
-        
-        // // We don't need separate trend analysis anymore as it's part of the H4 indicators
-        // const trendAnalysis = {
-        //   h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
-        //   h4Indicators: indicators.h4,
-        // };
+        const trendAnalysis = {
+            d1Trend: indicators.d1.isBullishTrend ? "bullish" : "bearish",
+            h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
+        };
+        // logger.info(`Trend analysis for ${symbol}: D1 - ${trendAnalysis.d1Trend}, H4 - ${trendAnalysis.h4Trend}`);
 
-        // // Use the latest real-time merged candle for bid/ask
-        // const latestCandle = this.latestCandles[symbol]?.latest;
-        // if (!latestCandle) {
-        //   logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
-        //   return;
-        // }
-        // await tradingService.processPrice(
-        //   {
-        //     ...latestCandle,
-        //     symbol: symbol,
-        //     indicators,
-        //     trendAnalysis,
-        //     d1Data: d1Data.prices,
-        //     h4Data: h4Data.prices,
-        //     h1Data: h1Data.prices,
-        //   },
-        //   MAX_POSITIONS
-        // );
+        // Use the latest real-time merged candle for bid/ask
+        const latestCandle = this.latestCandles[symbol]?.latest;
+        // console.log("latestCandle", latestCandle);
+
+        if (!latestCandle) {
+            logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
+            return;
+        }
+        await tradingService.processPrice({
+            ...latestCandle,
+            symbol: symbol,
+            indicators,
+            trendAnalysis,
+            d1Data: d1Data.prices,
+            h4Data: h4Data.prices,
+            h1Data: h1Data.prices,
+        });
     }
 
-    /**
-     * Analyzes all symbols in the trading universe.
-     */
+    // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         for (const symbol of SYMBOLS) {
             if (!this.latestCandles[symbol]?.latest) continue;
