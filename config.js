@@ -125,11 +125,6 @@ export const DEV_MODE = true; // Set to false in production
 
 // Development overrides for faster testing
 export const DEV = {
-  TIMEFRAMES: {
-    M15: "MINUTE_15", // Trend direction (was HOUR_4)
-    M5: "MINUTE_5", // Setup (was HOUR)
-    M: "MINUTE", // Entry/Exit (was MINUTE_15)
-  },
   ANALYSIS_INTERVAL_MS: 60 * 1000, // 1 minute between analyses (was 15 min)
 };
 

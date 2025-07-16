@@ -156,23 +156,34 @@ class TradingBot {
      */
 
     async fetchHistoricalData(symbol) {
-        const timeframes = DEV_MODE ? [DEV.TIMEFRAMES.M15, DEV.TIMEFRAMES.M5, DEV.TIMEFRAMES.M] : [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
-      console.log('timeframes', timeframes);
-      
-        const count = 220; // Fetch enough candles for EMA200
+        const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
+
+        const count = 200; // Fetch enough candles for EMA200
         const delays = [1000, 1000, 1000];
         const results = [];
+
         for (let i = 0; i < timeframes.length; i++) {
             if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
-            const data = await getHistorical(symbol, timeframes[i], count);
-            results.push(data);
+            try {
+                const data = await getHistorical(symbol, timeframes[i], count);
+                if (!data || !data.prices || data.prices.length === 0) {
+                    logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
+                } else {
+                    // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
+                }
+                results.push(data);
+            } catch (err) {
+                logger.error(`[fetchHistoricalData] Error fetching ${symbol} ${timeframes[i]}:`, err);
+                results.push(null);
+            }
         }
-        console.log("result data", results);
+
+        // logger.info("Result data:", JSON.stringify(results, null, 2));
 
         return {
-            d1Data: results[0], // Daily data for trend direction
-            h4Data: results[1], // 4-hour data for trend analysis
-            h1Data: results[2], // 1-hour data for setup confirmation
+            d1Data: results[0],
+            h4Data: results[1],
+            h1Data: results[2],
         };
     }
 
@@ -185,14 +196,16 @@ class TradingBot {
         // Fetch and calculate all required data
         const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
 
-        console.log("d1Data", d1Data, "h4Data", h4Data, "h1Data", h1Data);
+        // console.log("d1Data", d1Data, "h4Data", h4Data, "h1Data", h1Data);
 
-        // const indicators = {
-        //   d1: await calcIndicators(d1Data.prices), // Daily trend direction
-        //   h4: await calcIndicators(h4Data.prices), // Trend direction
-        //   h1: await calcIndicators(h1Data.prices), // Setup confirmation
-        // };
+        const indicators = {
+          d1: await calcIndicators(d1Data.prices), // Daily trend direction
+          h4: await calcIndicators(h4Data.prices), // Trend direction
+          h1: await calcIndicators(h1Data.prices), // Setup confirmation
+        };
 
+
+        
         // // We don't need separate trend analysis anymore as it's part of the H4 indicators
         // const trendAnalysis = {
         //   h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
@@ -246,7 +259,7 @@ class TradingBot {
     // startMonitorOpenTrades() {
     //   logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
     //   this.monitorInterval = setInterval(async () => {
-    //     logger.info(`\n\n[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+    //     logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
     //     try {
     //       const latestIndicatorsBySymbol = {};
     //       for (const symbol of TRADING.SYMBOLS) {

@@ -192,33 +192,35 @@ export const getOpenPositions = async () =>
  * Returns an array of candle objects.
  */
 export async function getHistorical(symbol, resolution, count, from = null, to = null) {
-  return await withSessionRetry(async () => {
-    const nowMs = Date.now();
-    if (!to) to = formatIsoNoMs(new Date(nowMs));
-    if (!from) {
-      const resolutionToMs = {
-        h1: 1 * 60 * 60 * 1000,
-        h4: 4 * 60 * 60 * 1000,
-        d1: 24 * 60 * 60 * 1000,
-      };
-      const stepMs = resolutionToMs[resolution] || resolutionToMs.MINUTE;
-      const fromMs = nowMs - count * stepMs;
-      from = formatIsoNoMs(new Date(fromMs));
-    }
-    logger.info(`[API] Fetching historical: ${symbol} from=${from} to=${to} resolution=${resolution}`);
-    const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
-      headers: getHeaders(true),
-    });
-    return {
-      prices: response.data.prices.map((p) => ({
-        close: p.closePrice?.bid,
-        high: p.highPrice?.bid,
-        low: p.lowPrice?.bid,
-        open: p.openPrice?.bid,
-        timestamp: p.snapshotTime,
-      })),
-    };
+  // Map Capital.com timeframes to ms
+  const tfToMs = {
+    "HOUR": 1 * 60 * 60 * 1000,
+    "HOUR_4": 4 * 60 * 60 * 1000,
+    "DAY": 24 * 60 * 60 * 1000,
+    "MINUTE_15": 15 * 60 * 1000,
+    "MINUTE": 1 * 60 * 1000,
+  };
+  const stepMs = tfToMs[resolution];
+  const nowMs = Date.now();
+  if (!to) to = formatIsoNoMs(new Date(nowMs));
+  if (!from) {
+    if (!stepMs) throw new Error(`Unknown resolution: ${resolution}`);
+    const fromMs = nowMs - count * stepMs;
+    from = formatIsoNoMs(new Date(fromMs));
+  }
+  logger.info(`[API] Fetching historical: ${symbol} from=${from} to=${to} resolution=${resolution}`);
+  const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
+    headers: getHeaders(true),
   });
+  return {
+    prices: response.data.prices.map((p) => ({
+      close: p.closePrice?.bid,
+      high: p.highPrice?.bid,
+      low: p.lowPrice?.bid,
+      open: p.openPrice?.bid,
+      timestamp: p.snapshotTime,
+    })),
+  };
 }
 
 /**
