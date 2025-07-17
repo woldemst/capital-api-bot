@@ -67,7 +67,7 @@ class TradingBot {
         this.setupWebSocket(tokens);
         this.startSessionPing();
         this.startAnalysisInterval();
-        // this.startMonitorOpenTrades();
+        this.startMonitorOpenTrades();
         this.isRunning = true;
     }
 
@@ -79,13 +79,12 @@ class TradingBot {
         webSocketService.connect(tokens, SYMBOLS, (data) => {
             try {
                 const message = JSON.parse(data.toString());
-                
+
                 if (message.payload?.epic) {
                     const candle = message.payload;
                     const symbol = candle.epic;
                     // Just store the latest candle for each symbol
                     this.latestCandles[symbol] = { latest: candle };
-                    
                 }
             } catch (error) {
                 logger.error("WebSocket message processing error:", error.message, data?.toString());
@@ -249,38 +248,36 @@ class TradingBot {
         webSocketService.disconnect();
     }
 
-    // startMonitorOpenTrades() {
-    //   logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
-    //   this.monitorInterval = setInterval(async () => {
-    //     logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
-    //     try {
-    //       const latestIndicatorsBySymbol = {};
-    //       for (const symbol of TRADING.SYMBOLS) {
-    //         const history = this.latestCandles[symbol]?.history;
-    //         logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
-    //         if (history && history.length > 5) {
-    //           // Lowered from 20 to 5 for faster indicator logging
-    //           latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
-    //           logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
-    //         } else {
-    //           logger.warn(
-    //             `[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`
-    //           );
-    //           latestIndicatorsBySymbol[symbol] = {};
-    //         }
-    //       }
-    //       await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
-    //       // --- Log trades every hour ---
-    //       if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
-    //         await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
-    //         this._lastTradeLogTime = Date.now();
-    //       }
-    //       logger.info("[Monitoring] monitorOpenTrades completed");
-    //     } catch (error) {
-    //       logger.error("[Bot] Error in monitorOpenTrades:", error);
-    //     }
-    //   }, 1 * 60 * 1000); // every 1 min
-    // }
+    startMonitorOpenTrades() {
+        logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
+        this.monitorInterval = setInterval(async () => {
+            logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+            try {
+                const latestIndicatorsBySymbol = {};
+                for (const symbol of TRADING.SYMBOLS) {
+                    const history = this.latestCandles[symbol]?.history;
+                    logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
+                    if (history && history.length > 5) {
+                        // Lowered from 20 to 5 for faster indicator logging
+                        latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
+                        logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
+                    } else {
+                        logger.warn(`[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`);
+                        latestIndicatorsBySymbol[symbol] = {};
+                    }
+                }
+                await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+                // --- Log trades every hour ---
+                if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
+                    await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
+                    this._lastTradeLogTime = Date.now();
+                }
+                logger.info("[Monitoring] monitorOpenTrades completed");
+            } catch (error) {
+                logger.error("[Bot] Error in monitorOpenTrades:", error);
+            }
+        }, 1 * 60 * 1000); // every 1 min
+    }
 
     /**
      * Schedules a session refresh at midnight every day.
