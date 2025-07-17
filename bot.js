@@ -79,12 +79,12 @@ class TradingBot {
         webSocketService.connect(tokens, SYMBOLS, (data) => {
             try {
                 const message = JSON.parse(data.toString());
+                
                 if (message.payload?.epic) {
                     const candle = message.payload;
                     const symbol = candle.epic;
                     // Just store the latest candle for each symbol
                     this.latestCandles[symbol] = { latest: candle };
-                    // console.log("last candle", this.latestCandles);
                     
                 }
             } catch (error) {
