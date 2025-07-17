@@ -145,12 +145,7 @@ export async function analyzeTrend(symbol, getHistorical) {
   }
 }
 
-/**
- * Detects trend weakness based on indicator values.
- * Returns true if trend is weak (e.g., EMA cross against position, MACD/RSI reversal, or price below EMA).
- * @param {Object} indicators - Output from calcIndicators
- * @param {string} direction - 'BUY' or 'SELL'
- */
+
 export function isTrendWeak(indicators, direction) {
   if (!indicators) return false;
   // Weakness for BUY: bearish cross, MACD < 0, RSI falling
@@ -164,14 +159,6 @@ export function isTrendWeak(indicators, direction) {
   return false;
 }
 
-/**
- * Calculates the percentage of TP achieved.
- * @param {number} entry - Entry price
- * @param {number} current - Current price
- * @param {number} tp - Take profit price
- * @param {string} direction - 'BUY' or 'SELL'
- * @returns {number} - Percentage of TP achieved (0-100)
- */
 export function getTPProgress(entry, current, tp, direction) {
   if (!entry || !current || !tp) return 0;
   if (direction === "BUY") {

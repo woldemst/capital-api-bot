@@ -126,7 +126,7 @@ class TradingService {
 
     evaluateSignals(buyConditions, sellConditions) {
         // Use adaptive threshold
-        const threshold = this.dynamicSignalThreshold || 3;
+        const threshold = this.dynamicSignalThreshold;
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
         logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}, Threshold: ${threshold}`);
@@ -173,7 +173,7 @@ class TradingService {
         return true;
     }
 
-    async generateAndValidateSignal(candle, message, symbol) {
+    async generateAndValidateSignal(candle, message, symbol, bid, ask) {
         const indicators = candle.indicators || {};
         const trendAnalysis = message.trendAnalysis;
         // --- Range filter ---
@@ -183,7 +183,6 @@ class TradingService {
         //     return { signal: null, buyScore: 0, sellScore: 0 };
         // }
 
-      
         const result = this.generateSignals(symbol, message.d1Data, indicators.d1, indicators.h4, indicators.h1, trendAnalysis);
         if (!result.signal) {
             logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
@@ -360,7 +359,6 @@ class TradingService {
                         logger.info(`[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips`);
                     }
                 }
-                // --- End slippage check ---
             }
             return position;
         } catch (error) {
@@ -431,7 +429,7 @@ class TradingService {
             }
 
             const candle = message;
-            symbol = candle.symbol || candle.epic;
+            symbol = candle.epic;
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
 
             if (this.openTrades.length >= MAX_POSITIONS) {
@@ -443,14 +441,17 @@ class TradingService {
                 logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            // No cooldown logic: allow high-frequency trading
-            // console.log(`candle for bid `, JSON.stringify(candle));
 
-            const { signal } = await this.generateAndValidateSignal(candle, message, symbol);
+            let bid = null,
+                ask = null;
+            if (candle.priceType === "bid") bid = candle.c;
+            if (candle.priceType === "ask") ask = candle.c;
+
+            const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
             if (signal) {
                 console.log(`[ProcessPrice] Executing ${signal.toUpperCase()} for ${symbol}`);
 
-                // await this.executeTrade(signal, symbol);
+                await this.executeTrade(signal, symbol, bid, ask);
             }
         } catch (error) {
             logger.error(`[ProcessPrice] Error for ${symbol}:`, error);

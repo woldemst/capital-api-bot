@@ -13,7 +13,7 @@ export const API = {
 export const TRADING = {
   // Instruments and timeframes
   SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
-  TIMEFRAMES: ["MINUTE_15", "HOUR", "HOUR_4", "DAY"],
+  TIMEFRAMES: ["HOUR", "HOUR_4", "DAY"],
 
   // Position sizing and risk management
   LEVERAGE: 30,
@@ -120,7 +120,7 @@ export const SESSIONS = {
 };
 
 // Mode Configuration
-export const DEV_MODE = true; // Set to false in production
+export const DEV_MODE = false; // Set to false in production
 
 
 // Development overrides for faster testing

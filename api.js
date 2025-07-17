@@ -198,9 +198,7 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
   const tfToMs = {
     "HOUR": 1 * 60 * 60 * 1000,
     "HOUR_4": 4 * 60 * 60 * 1000,
-    "DAY": 24 * 60 * 60 * 1000,
-    "MINUTE_15": 15 * 60 * 1000,
-    "MINUTE": 1 * 60 * 1000,
+    "DAY": 24 * 60 * 60 * 1000
   };
   const stepMs = tfToMs[resolution];
   const nowMs = Date.now();
@@ -266,6 +264,7 @@ export async function updateTrailingStop(positionId, stopLevel, symbol, directio
       }
     }
   }
+  
   return await withSessionRetry(async () => {
     logger.info(`[API] Updating trailing stop for position ${positionId} to ${stopLevel}`);
     const response = await axios.put(
