@@ -85,6 +85,7 @@ class TradingBot {
                     // Just store the latest candle for each symbol
                     this.latestCandles[symbol] = { latest: candle };
                     // console.log("last candle", this.latestCandles);
+                    
                 }
             } catch (error) {
                 logger.error("WebSocket message processing error:", error.message, data?.toString());
