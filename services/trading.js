@@ -173,16 +173,18 @@ class TradingService {
         return true;
     }
 
-    async generateAndValidateSignal(candle, message, symbol, bid, ask) {
+    async generateAndValidateSignal(candle, message, symbol) {
         const indicators = candle.indicators || {};
         const trendAnalysis = message.trendAnalysis;
         // --- Range filter ---
-        const price = bid || ask || 1;
-        if (!this.passesRangeFilter(indicators.h1 || indicators, price)) {
-            logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
-            return { signal: null, buyScore: 0, sellScore: 0 };
-        }
-        const result = this.generateSignals(symbol, message.d1Data, indicators.d1, indicators.h4, indicators.h1, trendAnalysis, bid, ask);
+        // const price = bid || ask || 1;
+        // if (!this.passesRangeFilter(indicators.h1 || indicators, price)) {
+        //     logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
+        //     return { signal: null, buyScore: 0, sellScore: 0 };
+        // }
+
+      
+        const result = this.generateSignals(symbol, message.d1Data, indicators.d1, indicators.h4, indicators.h1, trendAnalysis);
         if (!result.signal) {
             logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
         } else {
@@ -190,7 +192,7 @@ class TradingService {
         }
         return result;
     }
-    generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, bid) {
+    generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
         return [
             // D1 Trend filter
             d1Indicators.emaFast > d1Indicators.emaSlow,
@@ -203,7 +205,7 @@ class TradingService {
         ];
     }
 
-    generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, ask) {
+    generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
         return [
             // D1 Trend filter
             d1Indicators.emaFast < d1Indicators.emaSlow,
@@ -427,23 +429,28 @@ class TradingService {
                 logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}% ) hit. Skip all new trades for today.`);
                 return;
             }
+
             const candle = message;
             symbol = candle.symbol || candle.epic;
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
                 return;
             }
+
             if (this.isSymbolTraded(symbol)) {
                 logger.info(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
             // No cooldown logic: allow high-frequency trading
-            console.log(`candle for bid `, JSON.stringify(candle));
+            // console.log(`candle for bid `, JSON.stringify(candle));
 
-            const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
+            const { signal } = await this.generateAndValidateSignal(candle, message, symbol);
             if (signal) {
-                await this.executeTrade(signal, symbol, bid, ask);
+                console.log(`[ProcessPrice] Executing ${signal.toUpperCase()} for ${symbol}`);
+
+                // await this.executeTrade(signal, symbol);
             }
         } catch (error) {
             logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
@@ -486,12 +493,12 @@ class TradingService {
         return symbol.includes("JPY") ? 0.01 : 0.0001;
     }
 
-    generateSignals(symbol, d1Data, d1Indicators, h4Indicators, h1Indicators, trendAnalysis, bid, ask) {
+    generateSignals(symbol, d1Data, d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
         if (!this.validateIndicatorData(d1Data, h4Indicators, h1Indicators, trendAnalysis)) {
             return { signal: null };
         }
-        const buyConditions = this.generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, bid);
-        const sellConditions = this.generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis, ask);
+        const buyConditions = this.generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis);
+        const sellConditions = this.generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis);
         const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
         return {
             signal,
@@ -682,22 +689,6 @@ class TradingService {
         // Use the same logic as in indicators.js
         const { calcIndicators } = await import("../indicators.js");
         return await calcIndicators(bars, symbol, timeframe);
-    }
-
-    /**
-     * Entry signal logic: Only trade in the direction of the higher timeframe trend.
-     * Returns 'buy', 'sell', or null.
-     */
-    async getEntrySignal(symbol, h1Indicators, trendDirection, bid, ask) {
-        // Momentum: EMA9/EMA21 cross, MACD, RSI
-        if (trendDirection === "bullish") {
-            const bullish = h1Indicators.ema9 > h1Indicators.ema21 && h1Indicators.macd?.histogram > 0 && h1Indicators.rsi > 50;
-            if (bullish) return "buy";
-        } else if (trendDirection === "bearish") {
-            const bearish = h1Indicators.ema9 < h1Indicators.ema21 && h1Indicators.macd?.histogram < 0 && h1Indicators.rsi < 50;
-            if (bearish) return "sell";
-        }
-        return null;
     }
 
     // Close position by dealId
