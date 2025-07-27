@@ -20,6 +20,7 @@ class TradingBot {
         this.maxRetries = 3;
         this.retryDelay = 30000; // 30 seconds
         this.latestCandles = {}; // Store latest candles for each symbol
+        this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
     }
@@ -92,9 +93,7 @@ class TradingBot {
         });
     }
 
-    /**
-     * Starts a periodic session ping to keep the API session alive.=
-     */
+    // Starts a periodic session ping to keep the API session alive.
     startSessionPing() {
         this.sessionPingInterval = setInterval(async () => {
             try {
@@ -123,9 +122,7 @@ class TradingBot {
         }, interval);
     }
 
-    /**
-     * Updates account balance, margin, and open trades in the trading service.
-     */
+    // Updates account balance, margin, and open trades in the trading service.
     async updateAccountInfo() {
         try {
             const accountData = await getAccountInfo();
@@ -150,11 +147,8 @@ class TradingBot {
         }
     }
 
-    /**
-     * Fetches historical data for all required timeframes for a symbol.
-     * Returns D1, H4, and H1 data objects.
-     */
-
+    // Fetches historical data for all required timeframes for a symbol.
+    // Returns D1, H4, and H1 data objects.
     async fetchHistoricalData(symbol) {
         const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
@@ -169,7 +163,7 @@ class TradingBot {
                 if (!data || !data.prices || data.prices.length === 0) {
                     logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
                 } else {
-                    // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
+                    logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
                 }
                 results.push(data);
             } catch (err) {
@@ -224,6 +218,15 @@ class TradingBot {
             h4Data: h4Data.prices,
             h1Data: h1Data.prices,
         });
+
+        // Store the latest candles for history
+        const currentHistory = this.candleHistory[symbol] || [];
+        currentHistory.push(latestCandle);
+        // Keep only the last N candles
+        if (currentHistory.length > this.maxCandleHistory) {
+            currentHistory.shift();
+        }
+        this.candleHistory[symbol] = currentHistory;
     }
 
     // Analyzes all symbols in the trading universe.
@@ -255,14 +258,14 @@ class TradingBot {
             try {
                 const latestIndicatorsBySymbol = {};
                 for (const symbol of TRADING.SYMBOLS) {
-                    const history = this.latestCandles[symbol]?.history;
-                    logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history ? history.length : 0}`);
-                    if (history && history.length > 5) {
-                        // Lowered from 20 to 5 for faster indicator logging
+                    const history = this.candleHistory[symbol] || [];
+                    logger.info(`[Monitoring] Symbol: ${symbol}, history length: ${history.length}`);
+                    if (history.length > 5) {
+                        // calculate indicators
                         latestIndicatorsBySymbol[symbol] = await calcIndicators(history, symbol);
                         logger.info(`[Monitoring] Calculated indicators for ${symbol}`);
                     } else {
-                        logger.warn(`[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history ? history.length : 0})`);
+                        logger.warn(`[Monitoring] Not enough candle history for ${symbol} to calculate indicators (have ${history.length})`);
                         latestIndicatorsBySymbol[symbol] = {};
                     }
                 }

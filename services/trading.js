@@ -177,11 +177,11 @@ class TradingService {
         const indicators = candle.indicators || {};
         const trendAnalysis = message.trendAnalysis;
         // --- Range filter ---
-        // const price = bid || ask || 1;
-        // if (!this.passesRangeFilter(indicators.h1 || indicators, price)) {
-        //     logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
-        //     return { signal: null, buyScore: 0, sellScore: 0 };
-        // }
+        const price = bid || ask;
+        if (!this.passesRangeFilter(indicators.h1 || indicators, price)) {
+            logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
+            return { signal: null, buyScore: 0, sellScore: 0 };
+        }
 
         const result = this.generateSignals(symbol, message.d1Data, indicators.d1, indicators.h4, indicators.h1, trendAnalysis);
         if (!result.signal) {
@@ -191,6 +191,7 @@ class TradingService {
         }
         return result;
     }
+
     generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
         return [
             // D1 Trend filter
@@ -299,8 +300,8 @@ class TradingService {
         // ATR-based dynamic stops/TPs (wider stop)
         const stopLossDistance = 2.5 * atr; // Increased from 1.5x to 2.5x ATR
         const takeProfitDistance = 3 * atr;
-        const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
-        const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
+const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
+const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol); // Risk is correct for new stop
         logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}, StopLossDistance: ${stopLossDistance}`);
 
