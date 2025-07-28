@@ -41,6 +41,15 @@ const logger = {
     } else {
       console.log(`[TRADE] ${timestamp} | ${action} ${symbol}: ${details}`);
     }
+  },
+
+  debug: (message) => {
+    const timestamp = new Date().toISOString();
+    if (typeof message === 'object') {
+      console.debug(`[DEBUG] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`);
+    } else {
+      console.debug(`[DEBUG] ${timestamp} | ${message}`);
+    }
   }
 };
 

@@ -9,7 +9,7 @@ import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
 import { logTradeSnapshot } from "./utils/tradeLogger.js";
 
-const { SYMBOLS, MAX_POSITIONS } = TRADING;
+const { SYMBOLS } = TRADING;
 
 class TradingBot {
     constructor() {
@@ -69,7 +69,6 @@ class TradingBot {
         this.setupWebSocket(tokens);
         this.startSessionPing();
         this.startAnalysisInterval();
-        // this.startMonitorOpenTrades();
         this.isRunning = true;
     }
 
@@ -141,6 +140,7 @@ class TradingBot {
             if (positions?.positions) {
                 tradingService.setOpenTrades(positions.positions.map((p) => p.market.epic));
                 logger.info(`Current open positions: ${positions.positions.length}`);
+                this.startMonitorOpenTrades();
             }
         } catch (error) {
             logger.error("Failed to update account info:", error);
@@ -153,7 +153,7 @@ class TradingBot {
     async fetchHistoricalData(symbol) {
         const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
-        const count = 200; // Fetch enough candles for EMA200
+        const count = 70; // Fetch enough candles for EMA70
         const delays = [1000, 1000, 1000];
         const results = [];
 
@@ -209,14 +209,14 @@ class TradingBot {
         };
 
         // Generate trading signal
-        const { signal, reason } = await tradingService.generateSignal(indicators, h1Candle);
+        const { signal, reason } = tradingService.generateSignal(indicators, h1Candle);
         
         if (signal) {
             logger.info(`[${symbol}] Generated ${signal} signal: ${reason}`);
             // Process the signal with latest real-time price
             await tradingService.processSignal(symbol, signal, latestCandle);
         } else {
-            logger.debug(`[${symbol}] No signal: ${reason}`);
+            logger.warn(`[${symbol}] No signal: ${reason}`);
         }
 
         // Store the latest candles for history
