@@ -124,19 +124,42 @@ class TradingService {
         logger.info(`[Adaptive] Risk: ${(this.dynamicRiskPerTrade * 100).toFixed(2)}%, SignalThreshold: ${this.dynamicSignalThreshold}, WinRate: ${(winRate * 100).toFixed(1)}%`);
     }
 
-    evaluateSignals(buyConditions, sellConditions) {
-        // Use adaptive threshold
-        const threshold = this.dynamicSignalThreshold;
-        const buyScore = buyConditions.filter(Boolean).length;
-        const sellScore = sellConditions.filter(Boolean).length;
-        logger.info(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}, Threshold: ${threshold}`);
-        let signal = null;
-        if (buyScore >= threshold) {
-            signal = "buy";
-        } else if (sellScore >= threshold) {
-            signal = "sell";
+    validateIndicatorData(indicators, h1Candle) {
+        if (!indicators?.h1 || !indicators?.d1Trend || !indicators?.h4Trend || !h1Candle) {
+            logger.info("[Signal] Missing required data for signal generation");
+            return false;
         }
-        return { signal, buyScore, sellScore };
+        return true;
+    }
+
+    generateSignal(indicators, h1Candle) {
+        if (!this.validateIndicatorData(indicators, h1Candle)) {
+            return { signal: null, reason: "missing_data" };
+        }
+
+        const { d1Trend, h4Trend } = indicators;
+        const h1 = indicators.h1;
+
+        // Both higher timeframe trends must align
+        if (d1Trend !== h4Trend || d1Trend === 'neutral') {
+            return { signal: null, reason: 'trends_not_aligned' };
+        }
+
+        // Long Signal
+        if (d1Trend === 'bullish' && 
+            h1.crossover === 'bullish' && 
+            h1.rsi > 50) {
+            return { signal: 'BUY', reason: 'aligned_bullish_trends_with_h1_confirmation' };
+        }
+
+        // Short Signal
+        if (d1Trend === 'bearish' && 
+            h1.crossover === 'bearish' && 
+            h1.rsi < 50) {
+            return { signal: 'SELL', reason: 'aligned_bearish_trends_with_h1_confirmation' };
+        }
+
+        return { signal: null, reason: 'no_valid_setup' };
     }
 
     // Range filter: skip signals in low volatility/ranging markets
@@ -174,51 +197,48 @@ class TradingService {
     }
 
     async generateAndValidateSignal(candle, message, symbol, bid, ask) {
-        // console.log("candle", candle);
-        // console.log("message", message);
-
         const indicators = candle.indicators || {};
-        const trendAnalysis = message.trendAnalysis;
-        // --- Range filter ---
-        const price = bid || ask;
-        if (!this.passesRangeFilter(indicators.h1 || indicators, price)) {
-            logger.info(`[Signal] Skipping ${symbol} due to range filter.`);
-            return { signal: null, buyScore: 0, sellScore: 0 };
+        const { d1Trend, h4Trend } = message.trendAnalysis;
+
+        // Check if we have all required data
+        if (!indicators.h1 || !d1Trend || !h4Trend) {
+            logger.info(`[Signal] Missing required data for ${symbol}`);
+            return { signal: null, reason: 'missing_data' };
         }
 
-        const result = this.generateSignals(symbol, message.d1Data, indicators.d1, indicators.h4, indicators.h1, trendAnalysis);
-        if (!result.signal) {
-            logger.info(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
+        // Check entry conditions
+        const result = this.checkEntryConditions(d1Trend, h4Trend, indicators.h1);
+        
+        if (result.signal) {
+            logger.info(`[Signal] ${symbol}: ${result.signal} signal found - ${result.reason}`);
         } else {
-            logger.info(`[Signal] Signal for ${symbol}: ${result.signal.toUpperCase()}`);
+            logger.info(`[Signal] ${symbol}: No signal - ${result.reason}`);
         }
+        
         return result;
     }
 
-    generateBuyConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
-        return [
-            // D1 Trend filter
-            d1Indicators.emaFast > d1Indicators.emaSlow,
-            // H4 Trend conditions
-            h4Indicators.emaFast > h4Indicators.emaSlow,
-            h4Indicators.macd?.histogram > 0,
-            // H1 Setup confirmation
-            h1Indicators.ema9 > h1Indicators.ema21,
-            h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD,
-        ];
-    }
+    checkEntryConditions(d1Trend, h4Trend, h1Indicators) {
+        // Both higher timeframe trends must align
+        if (d1Trend !== h4Trend || d1Trend === 'neutral') {
+            return { signal: null, reason: 'trends_not_aligned' };
+        }
 
-    generateSellConditions(d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
-        return [
-            // D1 Trend filter
-            d1Indicators.emaFast < d1Indicators.emaSlow,
-            // H4 Trend conditions
-            !h4Indicators.isBullishTrend,
-            h4Indicators.macd?.histogram < 0,
-            // H1 Setup confirmation
-            h1Indicators.ema9 < h1Indicators.ema21,
-            h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
-        ];
+        // Long Signal
+        if (d1Trend === 'bullish' && 
+            h1Indicators.crossover === 'bullish' && 
+            h1Indicators.rsi > 50) {
+            return { signal: 'BUY', reason: 'aligned_bullish_trends_with_h1_confirmation' };
+        }
+
+        // Short Signal
+        if (d1Trend === 'bearish' && 
+            h1Indicators.crossover === 'bearish' && 
+            h1Indicators.rsi < 50) {
+            return { signal: 'SELL', reason: 'aligned_bearish_trends_with_h1_confirmation' };
+        }
+
+        return { signal: null, reason: 'no_valid_setup' };
     }
 
     // Validate and adjust TP/SL to allowed range
@@ -296,38 +316,34 @@ class TradingService {
         }
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask) {
-        // Use ATR from the entry timeframe (M15)
+    async calculateTradeParameters(signal, symbol, bid, ask, h1Candle) {
         const price = signal === "buy" ? ask : bid;
-        const atr = await this.calculateATR(symbol); // Already uses M15 timeframe
-        // ATR-based dynamic stops/TPs (wider stop)
-        const stopLossDistance = 2.5 * atr; // Increased from 1.5x to 2.5x ATR
-        const takeProfitDistance = 3 * atr;
-        const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
-        const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
-        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol); // Risk is correct for new stop
-        logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}, StopLossDistance: ${stopLossDistance}`);
+        
+        // Calculate stop loss based on the current H1 candle
+        const buffer = TRADING.POSITION_BUFFER_PIPS * this.getPipValue(symbol);
+        const stopLossPrice = signal === "buy" ? 
+            h1Candle.low - buffer : // For longs: below the low
+            h1Candle.high + buffer; // For shorts: above the high
+            
+        // Calculate take profit based on risk:reward ratio
+        const risk = Math.abs(price - stopLossPrice);
+        const takeProfitPrice = signal === "buy" ? 
+            price + (risk * TRADING.REWARD_RISK_RATIO) : 
+            price - (risk * TRADING.REWARD_RISK_RATIO);
 
-        // Trailing stop parameters (optional, can be used for trailing logic)
-        const trailingStopParams = {
-            activationPrice:
-                signal === "buy"
-                    ? price + stopLossDistance // Activate at 1R profit
-                    : price - stopLossDistance,
-            trailingDistance: 1.5 * atr, // Trail by at least 1.5x ATR
-        };
+        // Calculate position size based on risk
+        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+        
+        logger.info(`[calculateTradeParameters] Size: ${size}, Entry: ${price}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
 
         return {
             size,
             stopLossPrice,
             takeProfitPrice,
-            stopLossPips: stopLossDistance,
-            takeProfitPips: takeProfitDistance,
-            trailingStopParams,
-            partialTakeProfit:
-                signal === "buy"
-                    ? price + stopLossDistance // Take partial at 1R
-                    : price - stopLossDistance,
+            // For partial take profit at 50% of the way to TP
+            partialTakeProfit: signal === "buy" ? 
+                price + (risk * 0.5) : 
+                price - (risk * 0.5)
         };
     }
 
@@ -797,6 +813,58 @@ class TradingService {
         // For now, just log and skip actual close.
         logger.info(`[PartialClose] Would close ${closeSize} units of dealId ${dealId}`);
         // TODO: Implement actual partial close logic if supported
+    }
+
+    // Process a trading signal and execute the trade if conditions are met
+    async processSignal(symbol, signal, candle) {
+        if (this.isSymbolTraded(symbol)) {
+            logger.info(`[Signal] ${symbol} already in open trades, skipping`);
+            return;
+        }
+
+        // Check cooldown period
+        const now = Date.now();
+        const lastTrade = this.lastTradeTimestamps[symbol];
+        if (lastTrade && now - lastTrade < TRADING.COOLDOWN_PERIOD) {
+            logger.info(`[Signal] ${symbol} in cooldown period, skipping`);
+            return;
+        }
+
+        // Check daily loss limit
+        const dailyLossLimit = -Math.abs(this.accountBalance * this.dailyLossLimitPct);
+        if (this.dailyLoss < dailyLossLimit) {
+            logger.warn(`[Risk] Daily loss limit reached: ${this.dailyLoss.toFixed(2)} €. Limit: ${dailyLossLimit.toFixed(2)} €`);
+            return;
+        }
+
+        // Calculate trade parameters
+        const { size, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, candle);
+        
+        if (!size || !stopLossPrice || !takeProfitPrice) {
+            logger.warn(`[Signal] Invalid trade parameters for ${symbol}, skipping`);
+            return;
+        }
+
+        try {
+            // Place the order
+            const response = await placePosition({
+                epic: symbol,
+                direction: signal.toUpperCase(),
+                size: size,
+                stopLevel: stopLossPrice,
+                profitLevel: takeProfitPrice,
+                limitDistance: TRADING.SLIPPAGE_POINTS
+            });
+
+            if (response?.dealReference) {
+                logger.info(`[Order] Successfully placed ${signal.toUpperCase()} order for ${symbol}`);
+                this.lastTradeTimestamps[symbol] = now;
+            } else {
+                logger.error(`[Order] Failed to place order for ${symbol}`);
+            }
+        } catch (error) {
+            logger.error(`[Order] Error placing order for ${symbol}:`, error);
+        }
     }
 }
 
