@@ -205,7 +205,8 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
   if (!to) to = formatIsoNoMs(new Date(nowMs));
   if (!from) {
     if (!stepMs) throw new Error(`Unknown resolution: ${resolution}`);
-    const fromMs = nowMs - count * stepMs;
+    // Request a larger time window to ensure we get enough bars
+    const fromMs = nowMs - (count * 2) * stepMs; // Double the time range to ensure we get enough bars
     from = formatIsoNoMs(new Date(fromMs));
   }
   logger.info(`[API] Fetching historical: ${symbol} from=${from} to=${to} resolution=${resolution}`);
