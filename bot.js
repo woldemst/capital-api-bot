@@ -151,7 +151,7 @@ class TradingBot {
     // Fetches historical data for all required timeframes for a symbol.
     // Returns D1, H4, and H1 data objects.
     async fetchHistoricalData(symbol) {
-        const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4];
+        const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
         const count = 200; // Fetch enough candles for EMA200
         const delays = [1000, 1000, 1000];
@@ -178,47 +178,46 @@ class TradingBot {
         return {
             d1Data: results[0],
             h4Data: results[1],
-            // h1Data: results[2],
+            h1Data: results[2],
         };
     }
 
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
-        const { d1Data, h4Data } = await this.fetchHistoricalData(symbol);
-        // console.log("d1Data", d1Data, "h4Data", h4Data, "h1Data", h1Data);
+        const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
 
-        const indicators = {
-            d1: await calcIndicators(d1Data.prices), // Daily trend direction
-            h4: await calcIndicators(h4Data.prices), // Trend direction
-            // h1: await calcIndicators(h1Data.prices), // Setup confirmation
-        };
+        // Get latest H1 candle for real-time price
+        const h1Candle = h1Data?.prices[h1Data.prices.length - 1];
+        if (!h1Candle) {
+            logger.warn(`[${symbol}] No H1 candle data available`);
+            return;
+        }
 
-        // console.log(indicators);
-
-        const trendAnalysis = {
-            d1Trend: indicators.d1.isBullishTrend ? "bullish" : "bearish",
-            h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
-        };
-        // logger.info(`Trend analysis for ${symbol}: D1 - ${trendAnalysis.d1Trend}, H4 - ${trendAnalysis.h4Trend}`);
-
-        // Use the latest real-time merged candle for bid/ask
+        // Get latest real-time candle
         const latestCandle = this.latestCandles[symbol]?.latest;
-        // console.log("latestCandle", latestCandle);
-
         if (!latestCandle) {
             logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
             return;
         }
-        await tradingService.processPrice({
-            ...latestCandle,
-            symbol: symbol,
-            indicators,
-            trendAnalysis,
-            d1Data: d1Data.prices,
-            h4Data: h4Data.prices,
-            // h1Data: h1Data.prices,
-        });
+
+        // Calculate indicators and trends for all timeframes
+        const indicators = {
+            d1Trend: (await calcIndicators(d1Data.prices)).trend,
+            h4Trend: (await calcIndicators(h4Data.prices)).trend,
+            h1: await calcIndicators(h1Data.prices)
+        };
+
+        // Generate trading signal
+        const { signal, reason } = await tradingService.generateSignal(indicators, h1Candle);
+        
+        if (signal) {
+            logger.info(`[${symbol}] Generated ${signal} signal: ${reason}`);
+            // Process the signal with latest real-time price
+            await tradingService.processSignal(symbol, signal, latestCandle);
+        } else {
+            logger.debug(`[${symbol}] No signal: ${reason}`);
+        }
 
         // Store the latest candles for history
         const currentHistory = this.candleHistory[symbol] || [];
