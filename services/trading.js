@@ -174,6 +174,9 @@ class TradingService {
     }
 
     async generateAndValidateSignal(candle, message, symbol, bid, ask) {
+        // console.log("candle", candle);
+        // console.log("message", message);
+
         const indicators = candle.indicators || {};
         const trendAnalysis = message.trendAnalysis;
         // --- Range filter ---
@@ -300,8 +303,8 @@ class TradingService {
         // ATR-based dynamic stops/TPs (wider stop)
         const stopLossDistance = 2.5 * atr; // Increased from 1.5x to 2.5x ATR
         const takeProfitDistance = 3 * atr;
-const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
-const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
+        const stopLossPrice = signal === "buy" ? price - stopLossDistance : price + stopLossDistance;
+        const takeProfitPrice = signal === "buy" ? price + takeProfitDistance : price - takeProfitDistance;
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol); // Risk is correct for new stop
         logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}, StopLossDistance: ${stopLossDistance}`);
 

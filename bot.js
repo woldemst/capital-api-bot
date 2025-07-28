@@ -43,7 +43,8 @@ class TradingBot {
 
                 await this.startLiveTrading(tokens);
 
-                this.scheduleMidnightSessionRefresh(); // <-- Schedule midnight refresh
+                this.scheduleMidnightSessionRefresh();
+
                 return; // Success, exit the retry loop
             } catch (error) {
                 retryCount++;
@@ -68,7 +69,7 @@ class TradingBot {
         this.setupWebSocket(tokens);
         this.startSessionPing();
         this.startAnalysisInterval();
-        this.startMonitorOpenTrades();
+        // this.startMonitorOpenTrades();
         this.isRunning = true;
     }
 
@@ -150,7 +151,7 @@ class TradingBot {
     // Fetches historical data for all required timeframes for a symbol.
     // Returns D1, H4, and H1 data objects.
     async fetchHistoricalData(symbol) {
-        const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
+        const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4];
 
         const count = 200; // Fetch enough candles for EMA200
         const delays = [1000, 1000, 1000];
@@ -177,20 +178,20 @@ class TradingBot {
         return {
             d1Data: results[0],
             h4Data: results[1],
-            h1Data: results[2],
+            // h1Data: results[2],
         };
     }
 
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
-        const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
+        const { d1Data, h4Data } = await this.fetchHistoricalData(symbol);
         // console.log("d1Data", d1Data, "h4Data", h4Data, "h1Data", h1Data);
 
         const indicators = {
             d1: await calcIndicators(d1Data.prices), // Daily trend direction
             h4: await calcIndicators(h4Data.prices), // Trend direction
-            h1: await calcIndicators(h1Data.prices), // Setup confirmation
+            // h1: await calcIndicators(h1Data.prices), // Setup confirmation
         };
 
         // console.log(indicators);
@@ -216,7 +217,7 @@ class TradingBot {
             trendAnalysis,
             d1Data: d1Data.prices,
             h4Data: h4Data.prices,
-            h1Data: h1Data.prices,
+            // h1Data: h1Data.prices,
         });
 
         // Store the latest candles for history
@@ -270,6 +271,7 @@ class TradingBot {
                     }
                 }
                 await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+
                 // --- Log trades every hour ---
                 if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
                     await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
