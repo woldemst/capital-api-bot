@@ -17,15 +17,14 @@ export const TRADING = {
 
   // Position sizing and risk management
   LEVERAGE: 30,
-  RISK_PER_TRADE: 0.02,
-  MAX_POSITIONS: 5,
-  PROFIT_THRESHOLD: 0.05,
-  POSITION_SIZE_INCREASE: 0.5,
+  RISK_PER_TRADE: 0.02,        // 2% risk per trade
+  MAX_POSITIONS: 3,            // Maximum 3 simultaneous positions
+  DAILY_LOSS_LIMIT: 0.05,      // 5% daily loss limit
+  POSITION_BUFFER_PIPS: 1,     // Buffer for SL calculation
 
   // Take profit and stop loss
-  REWARD_RISK_RATIO: 2,
-  TRAILING_STOP_ACTIVATION: 0.5,
-  TRAILING_STOP_PIPS: 10,
+  REWARD_RISK_RATIO: 2,        // 2:1 reward-to-risk ratio
+  MAX_HOLD_TIME: 240,          // Maximum hold time in minutes
 
   // Position sizing limits
   FOREX_MIN_SIZE: 100,
@@ -46,28 +45,30 @@ export const TRADING = {
   MAX_DAILY_PROFIT: 0.06, // Stop trading after 6% profit in a day
 };
 
-// Technical Analysis Configuration
+  // Technical Analysis Configuration
 export const ANALYSIS = {
   // Multi-Timeframe Strategy
   TIMEFRAMES: {
-    D1: "DAY", // Daily trend direction
+    D1: "DAY",    // Daily trend direction
     H4: "HOUR_4", // 4-hour trend direction
-    H1: "HOUR" // 1-hour trend direction
+    H1: "HOUR"    // 1-hour entry timeframe
   },
 
   // EMAs for trend and entry
   EMA: {
-    TREND: {
-      FAST: 50,
-      SLOW: 200,
+    D1: {
+      FAST: 20,
+      SLOW: 50,
     },
-    ENTRY: {
+    H4: {
+      FAST: 20,
+      SLOW: 50,
+    },
+    H1: {
       FAST: 9,
       SLOW: 21,
     },
-  },
-
-  // RSI settings
+  },  // RSI settings
   RSI: {
     PERIOD: 14,
     OVERBOUGHT: 70,
