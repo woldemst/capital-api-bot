@@ -121,7 +121,7 @@ export const SESSIONS = {
 };
 
 // Mode Configuration
-export const DEV_MODE = true; // Set to false in production
+export const DEV_MODE = true ; // Set to false in production
 
 
 // Development overrides for faster testing

@@ -1,6 +1,3 @@
-// --- TradingBot: Main orchestrator for trading logic, data flow, and scheduling ---
-// Human-readable, robust, and well-commented for maintainability.
-
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession } from "./api.js";
 import { TRADING, DEV_MODE, DEV, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
@@ -24,11 +21,10 @@ class TradingBot {
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
         this.lastH1CandleTimestamp = {};
+        this.openedPositions = {}; // Track opened positions
     }
 
-    /**
-     * Initializes the bot, handles session retries, and starts trading or backtest mode.
-     */
+    // Initializes the bot, handles session retries, and starts trading or backtest mode.
     async initialize() {
         let retryCount = 0;
 
@@ -63,20 +59,35 @@ class TradingBot {
         }
     }
 
-    /**
-     * Starts live trading mode: sets up WebSocket, session ping, analysis, and trade monitoring.
-     */
+    // Starts live trading mode: sets up WebSocket, session ping, analysis, and trade monitoring.
     async startLiveTrading(tokens) {
         this.setupWebSocket(tokens);
         this.startSessionPing();
+        this.initializeCandleHistory();
         this.startAnalysisInterval();
         this.isRunning = true;
     }
 
-    /**
-     * Sets up the WebSocket connection for real-time price data.
-     * Only stores the latest candle for each symbol (no merging, no history).
-     */
+    async initializeCandleHistory() {
+        for (const symbol of SYMBOLS) {
+            try {
+                const { h1Data, h4Data, d1Data } = await this.fetchHistoricalData(symbol);
+
+                this.candleHistory[symbol] = {
+                    H1: h1Data?.prices?.slice(-this.maxCandleHistory) || [],
+                    H4: h4Data?.prices?.slice(-this.maxCandleHistory) || [],
+                    D1: d1Data?.prices?.slice(-this.maxCandleHistory) || [],
+                };
+                logger.info(
+                    `[Bot] Initialized candle history for ${symbol}: H1: ${this.candleHistory[symbol].H1.length}, H4: ${this.candleHistory[symbol].H4.length}, D1: ${this.candleHistory[symbol].D1.length}`
+                );
+            } catch (error) {
+                logger.error(`[Bot] Error initializing candle history for ${symbol}:`, error);
+            }
+        }
+    }
+
+    // Sets up the WebSocket connection for real-time price data.
     setupWebSocket(tokens) {
         webSocketService.connect(tokens, SYMBOLS, (data) => {
             try {
@@ -106,9 +117,7 @@ class TradingBot {
         }, this.pingInterval);
     }
 
-    /**
-     * Starts the periodic analysis interval for scheduled trading logic.
-     */
+    // Starts the periodic analysis interval for scheduled trading logic.
     startAnalysisInterval() {
         const interval = DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 58 * 60 * 1000; // 58 minutes for production, 1 minute in dev mode
         logger.info(`[${DEV_MODE ? "DEV" : "PROD"}] Starting analysis interval: ${interval}s`);
@@ -117,6 +126,17 @@ class TradingBot {
                 logger.info(`[Running scheduled analysis...`);
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
+
+                // Stop previous monitor interval if running
+                if (this.monitorInterval) {
+                    clearInterval(this.monitorInterval);
+                    this.monitorInterval = null;
+                }
+
+                // Start monitoring only if there are open positions
+                if (this.openedPositions && this.openedPositions > 0) {
+                    this.startMonitorOpenTrades();
+                }
             } catch (error) {
                 logger.error("Analysis interval error:", error);
             }
@@ -140,8 +160,8 @@ class TradingBot {
             const positions = await getOpenPositions();
             if (positions?.positions) {
                 tradingService.setOpenTrades(positions.positions.map((p) => p.market.epic));
+                this.openedPositions = positions.positions.length;
                 logger.info(`Current open positions: ${positions.positions.length}`);
-                this.startMonitorOpenTrades();
             }
         } catch (error) {
             logger.error("Failed to update account info:", error);
@@ -154,7 +174,7 @@ class TradingBot {
     async fetchHistoricalData(symbol) {
         const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
-        const count = 70; // Fetch enough candles for EMA70
+        const count = 70; // Fetch enough candles for EMA50
         const delays = [1000, 1000, 1000];
         const results = [];
 
@@ -165,7 +185,7 @@ class TradingBot {
                 if (!data || !data.prices || data.prices.length === 0) {
                     logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
                 } else {
-                    logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
+                    // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
                 }
                 results.push(data);
             } catch (err) {
@@ -186,12 +206,14 @@ class TradingBot {
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
-        const { d1Data, h4Data, h1Data } = await this.fetchHistoricalData(symbol);
 
         // Get latest H1 candle for real-time price
-        const h1Candle = h1Data?.prices[h1Data.prices.length - 1];
-        if (!h1Candle) {
-            logger.warn(`[${symbol}] No H1 candle data available`);
+        const h1Candles = this.candleHistory[symbol].H1;
+        const h4Candles = this.candleHistory[symbol].H4;
+        const d1Candles = this.candleHistory[symbol].D1;
+
+        if (!h1Candles || !h4Candles || !d1Candles) {
+            logger.warn(`[${symbol}] No candle data available`);
             return;
         }
 
@@ -202,50 +224,43 @@ class TradingBot {
             return;
         }
 
-        const latestH1Candle = h1Candle;
-        if (!latestH1Candle || !latestH1Candle.timestamp) return;
-
+        // Prevent duplicate processing
         const lastTimestamp = this.lastH1CandleTimestamp[symbol];
-        if (lastTimestamp === latestH1Candle.timestamp) {
+        if (lastTimestamp === latestCandle.timestamp) {
             // Already processed this candle, skip
             return;
         }
+
         // Calculate indicators and trends for all timeframes
         const indicators = {
-            d1Trend: (await calcIndicators(d1Data.prices)).trend,
-            h4Trend: (await calcIndicators(h4Data.prices)).trend,
-            h1: await calcIndicators(h1Data.prices),
+            d1Trend: (await calcIndicators(d1Candles)).trend,
+            h4Trend: (await calcIndicators(h4Candles)).trend,
+            h1: await calcIndicators(h1Candles),
         };
 
         // Generate trading signal
-        const { signal, reason } = tradingService.generateSignal(indicators, h1Candle);
+        const { signal, reason } = tradingService.generateSignal(indicators, latestCandle);
 
         if (signal) {
             logger.info(`[${symbol}] Generated ${signal} signal: ${reason}`);
-            // Process the signal with latest real-time price
-            // await tradingService.processSignal(symbol, signal, latestCandle);
-
             await tradingService.processPrice({
                 h1Candle: latestCandle,
                 symbol: symbol,
                 indicators,
-                d1Data: d1Data.prices,
-                h4Data: h4Data.prices,
-                h1Data: h1Data.prices,
+                d1Data: d1Candles,
+                h4Data: h4Candles,
+                h1Data: h1Candles,
             });
         } else {
             logger.warn(`[${symbol}] No signal: ${reason}`);
         }
 
-        // Store the latest candles for history
-        const currentHistory = this.candleHistory[symbol] || [];
-        currentHistory.push(latestCandle);
-        // Keep only the last N candles
-        if (currentHistory.length > this.maxCandleHistory) {
-            currentHistory.shift();
+        // Store the latest H1 candle for history
+        h1Candles.push(latestCandle);
+        if (h1Candles.length > this.maxCandleHistory) {
+            h1Candles.shift();
         }
-        this.candleHistory[symbol] = currentHistory;
-        this.lastH1CandleTimestamp[symbol] = latestH1Candle.timestamp;
+        this.lastH1CandleTimestamp[symbol] = latestCandle.timestamp;
     }
 
     // Analyzes all symbols in the trading universe.
