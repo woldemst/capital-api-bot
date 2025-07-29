@@ -109,27 +109,8 @@ class TradingService {
         logger.info(`[Adaptive] Risk: ${(this.dynamicRiskPerTrade * 100).toFixed(2)}%, SignalThreshold: ${this.dynamicSignalThreshold}, WinRate: ${(winRate * 100).toFixed(1)}%`);
     }
 
-    validateIndicatorData(indicators, h1Candle) {
-        // Essential data checks
-        if (!h1Candle?.close) {
-            logger.debug("[Validation] Missing H1 candle price data");
-            return false;
-        }
-        // if (!indicators?.h1?.rsi || !indicators?.h1?.crossover) {
-        //     logger.debug("[Validation] Missing H1 indicators");
-        //     return false;
-        // }
-        // if (!indicators?.d1Trend || !indicators?.h4Trend) {
-        //     logger.debug("[Validation] Missing trend data");
-        //     return false;
-        // }
-        return true;
-    }
 
-    generateSignal(indicators, h1Candle) {
-        if (!this.validateIndicatorData(indicators, h1Candle)) {
-            return { signal: null, reason: "missing_data" };
-        }
+    generateSignal(indicators) {
 
         const { d1Trend, h4Trend } = indicators;
         const h1 = indicators.h1;
@@ -353,8 +334,13 @@ class TradingService {
     async processPrice(message) {
         try {
             if (!message) return;
-            const symbol = message.epic;
-            console.log(` Processing message ${message}`);
+            const symbol = message.symbol;
+            // Log specific fields we're interested in
+            console.log("Message details:", {
+                symbol: message.symbol,
+                indicators: message.indicators,
+                h1Candle: message.h1Candle,
+            });
 
             if (!symbol) {
                 logger.warn("[ProcessPrice] Missing symbol in message");
@@ -362,10 +348,10 @@ class TradingService {
             }
 
             // Check trading conditions
-            if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
-                logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}%) hit. Skip all new trades today.`);
-                return;
-            }
+            // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
+            //     logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}%) hit. Skip all new trades today.`);
+            //     return;
+            // }
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades (${MAX_POSITIONS}) reached. Skipping ${symbol}.`);
@@ -384,7 +370,7 @@ class TradingService {
                 logger.debug(`[Signal] ${symbol}: No signal - ${reason}`); // Changed to debug level
             }
         } catch (error) {
-            logger.error(`[ProcessPrice] Error for ${message?.epic}:`, error);
+            logger.error(`[ProcessPrice] Error for ${message.symbol}:`, error);
         }
     }
 
@@ -733,9 +719,11 @@ class TradingService {
             return;
         }
 
-        // Get bid/ask prices from h1Candle
-        const bid = h1Candle.close.bid;
-        const ask = h1Candle.close.ask;
+        // Use close price for both bid and ask with a small spread
+        const price = h1Candle.c;
+        const spread = 0.0002; // 2 pips spread assumption
+        const bid = price;
+        const ask = price + spread;
 
         try {
             await this.executeTrade(signal, symbol, bid, ask);
