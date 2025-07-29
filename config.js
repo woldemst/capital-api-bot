@@ -18,7 +18,7 @@ export const TRADING = {
   // Position sizing and risk management
   LEVERAGE: 30,
   RISK_PER_TRADE: 0.02,        // 2% risk per trade
-  MAX_POSITIONS: 3,            // Maximum 3 simultaneous positions
+  MAX_POSITIONS: 5,            // Maximum 3 simultaneous positions
   DAILY_LOSS_LIMIT: 0.05,      // 5% daily loss limit
   POSITION_BUFFER_PIPS: 1,     // Buffer for SL calculation
 
