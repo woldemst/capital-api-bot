@@ -23,6 +23,7 @@ class TradingBot {
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
+        this.lastH1CandleTimestamp = {};
     }
 
     /**
@@ -201,20 +202,37 @@ class TradingBot {
             return;
         }
 
+        const latestH1Candle = h1Candle;
+        if (!latestH1Candle || !latestH1Candle.timestamp) return;
+
+        const lastTimestamp = this.lastH1CandleTimestamp[symbol];
+        if (lastTimestamp === latestH1Candle.timestamp) {
+            // Already processed this candle, skip
+            return;
+        }
         // Calculate indicators and trends for all timeframes
         const indicators = {
             d1Trend: (await calcIndicators(d1Data.prices)).trend,
             h4Trend: (await calcIndicators(h4Data.prices)).trend,
-            h1: await calcIndicators(h1Data.prices)
+            h1: await calcIndicators(h1Data.prices),
         };
 
         // Generate trading signal
         const { signal, reason } = tradingService.generateSignal(indicators, h1Candle);
-        
+
         if (signal) {
             logger.info(`[${symbol}] Generated ${signal} signal: ${reason}`);
             // Process the signal with latest real-time price
-            await tradingService.processSignal(symbol, signal, latestCandle);
+            // await tradingService.processSignal(symbol, signal, latestCandle);
+
+            await tradingService.processPrice({
+                h1Candle: latestCandle,
+                symbol: symbol,
+                indicators,
+                d1Data: d1Data.prices,
+                h4Data: h4Data.prices,
+                h1Data: h1Data.prices,
+            });
         } else {
             logger.warn(`[${symbol}] No signal: ${reason}`);
         }
@@ -227,6 +245,7 @@ class TradingBot {
             currentHistory.shift();
         }
         this.candleHistory[symbol] = currentHistory;
+        this.lastH1CandleTimestamp[symbol] = latestH1Candle.timestamp;
     }
 
     // Analyzes all symbols in the trading universe.

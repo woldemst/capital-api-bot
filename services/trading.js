@@ -111,18 +111,18 @@ class TradingService {
 
     validateIndicatorData(indicators, h1Candle) {
         // Essential data checks
-        if (!h1Candle?.close?.bid || !h1Candle?.close?.ask) {
+        if (!h1Candle?.close) {
             logger.debug("[Validation] Missing H1 candle price data");
             return false;
         }
-        if (!indicators?.h1?.rsi || !indicators?.h1?.crossover) {
-            logger.debug("[Validation] Missing H1 indicators");
-            return false;
-        }
-        if (!indicators?.d1Trend || !indicators?.h4Trend) {
-            logger.debug("[Validation] Missing trend data");
-            return false;
-        }
+        // if (!indicators?.h1?.rsi || !indicators?.h1?.crossover) {
+        //     logger.debug("[Validation] Missing H1 indicators");
+        //     return false;
+        // }
+        // if (!indicators?.d1Trend || !indicators?.h4Trend) {
+        //     logger.debug("[Validation] Missing trend data");
+        //     return false;
+        // }
         return true;
     }
 
@@ -354,10 +354,13 @@ class TradingService {
         try {
             if (!message) return;
             const symbol = message.epic;
+            console.log(` Processing message ${message}`);
+
             if (!symbol) {
                 logger.warn("[ProcessPrice] Missing symbol in message");
                 return;
             }
+
             // Check trading conditions
             if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
                 logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}%) hit. Skip all new trades today.`);
