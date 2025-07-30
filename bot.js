@@ -310,7 +310,7 @@ class TradingBot {
                         latestIndicatorsBySymbol[symbol] = {};
                     }
                 }
-                await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
+                // await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
 
                 // --- Log trades every hour ---
                 if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
