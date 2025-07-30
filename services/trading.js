@@ -3,7 +3,7 @@ import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPo
 import logger from "../utils/logger.js";
 import { ATR } from "technicalindicators";
 import { getCurrentTradesLogPath, logTradeSnapshot, logTradeResult } from "../utils/tradeLogger.js";
-const { MAX_POSITIONS, RISK_PER_TRADE } = TRADING;
+const { MAX_POSITIONS } = TRADING;
 
 class TradingService {
     constructor() {
@@ -11,17 +11,10 @@ class TradingService {
         this.accountBalance = 0;
         this.profitThresholdReached = false;
 
-        this.virtualBalance = 10000;
-        this.virtualPositions = [];
-        this.orderAttempts = new Map();
         this.availableMargin = 0; // Initialize availableMargin
         // --- Overtrading protection: cooldown per symbol ---
         this.lastTradeTimestamps = {};
-        this.winStreak = 0;
-        this.lossStreak = 0;
-        this.recentResults = [];
-        this.dynamicRiskPerTrade = RISK_PER_TRADE;
-        this.dynamicSignalThreshold = 3; // Default, will adapt
+
         this.maxRiskPerTrade = 0.02; // 2% max
         this.minRiskPerTrade = 0.003; // 0.3% min
         this.maxSignalThreshold = 5;
@@ -47,66 +40,6 @@ class TradingService {
     }
     isSymbolTraded(symbol) {
         return this.openTrades.includes(symbol);
-    }
-
-    logMarketConditions(symbol, bid, ask, d1Indicators, h4Indicators, h1Indicators, trendAnalysis) {
-        // logger.info(`\n=== Analyzing ${symbol} ===`);
-        // logger.info("Current price:", { bid, ask });
-        // logger.info("[D1] EMA Fast:", d1Indicators.emaFast, "EMA Slow:", d1Indicators.emaSlow);
-        // logger.info("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
-        // logger.info("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
-        // logger.info("Trend:", trendAnalysis.h4Trend);
-    }
-
-    // Call this after each trade closes (profit > 0 = win, else loss)
-    updateTradeResult(profit) {
-        // -------- Daily reset ----------
-        const today = new Date().toDateString();
-        if (today !== this.lastLossReset) {
-            this.dailyLoss = 0;
-            this.lastLossReset = today;
-        }
-        // Track realised P/L
-        this.dailyLoss += profit;
-        if (this.dailyLoss < 0) logger.warn(`[Risk] Daily realised loss: ${this.dailyLoss.toFixed(2)} €`);
-
-        const isWin = profit > 0;
-        this.recentResults.push(isWin ? 1 : 0);
-        if (this.recentResults.length > 20) this.recentResults.shift();
-        if (isWin) {
-            this.winStreak++;
-            this.lossStreak = 0;
-        } else {
-            this.lossStreak++;
-            this.winStreak = 0;
-        }
-        this.updateDynamicRiskAndThreshold();
-    }
-
-    // Adjust risk and signal threshold based on streaks and win rate
-    updateDynamicRiskAndThreshold() {
-        // Win rate over last 20 trades
-        const winRate = this.recentResults.length ? this.recentResults.reduce((a, b) => a + b, 0) / this.recentResults.length : 0.5;
-        // Dynamic risk: increase after 2+ wins, decrease after 2+ losses
-        if (this.winStreak >= 2) {
-            this.dynamicRiskPerTrade = Math.min(this.dynamicRiskPerTrade * 1.2, this.maxRiskPerTrade);
-        } else if (this.lossStreak >= 2) {
-            this.dynamicRiskPerTrade = Math.max(this.dynamicRiskPerTrade * 0.7, this.minRiskPerTrade);
-        } else {
-            // Gradually revert to base risk
-            this.dynamicRiskPerTrade += (RISK_PER_TRADE - this.dynamicRiskPerTrade) * 0.1;
-        }
-        // Dynamic signal threshold: stricter if win rate < 50%, looser if > 65%
-        if (winRate > 0.65) {
-            this.dynamicSignalThreshold = Math.max(this.minSignalThreshold, this.dynamicSignalThreshold - 1);
-        } else if (winRate < 0.5) {
-            this.dynamicSignalThreshold = Math.min(this.maxSignalThreshold, this.dynamicSignalThreshold + 1);
-        } else {
-            // Gradually revert to default
-            this.dynamicSignalThreshold += (3 - this.dynamicSignalThreshold) * 0.2;
-        }
-        this.dynamicSignalThreshold = Math.round(this.dynamicSignalThreshold);
-        logger.info(`[Adaptive] Risk: ${(this.dynamicRiskPerTrade * 100).toFixed(2)}%, SignalThreshold: ${this.dynamicSignalThreshold}, WinRate: ${(winRate * 100).toFixed(1)}%`);
     }
 
     generateSignal(indicators) {
@@ -246,10 +179,6 @@ class TradingService {
         };
     }
 
-    logTradeParameters(signal, size, stopLossPrice, takeProfitPrice, stopLossPips) {
-        logger.info(`[TradeParams] Entry: ${signal.toUpperCase()} | Size: ${size} | SL: ${stopLossPrice} (${stopLossPips}) | TP: ${takeProfitPrice}`);
-    }
-
     async executePosition(signal, symbol, params, expectedPrice) {
         const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
         try {
@@ -284,25 +213,6 @@ class TradingService {
             logger.error(`[Position] Failed for ${symbol}:`, error);
             throw error;
         }
-    }
-
-    async setupTrailingStop(symbol, signal, dealId, params) {
-        if (!dealId || !params?.trailingDistance) {
-            logger.warn("[TrailingStop] Missing required parameters");
-            return;
-        }
-
-        setTimeout(async () => {
-            try {
-                const positions = await getOpenPositions();
-                const position = positions?.positions?.find((p) => p.market.epic === symbol);
-                if (position && position.profit > 0) {
-                    await updateTrailingStop(dealId, params.trailingDistance);
-                }
-            } catch (error) {
-                logger.error("[TrailingStop] Error:", error.message);
-            }
-        }, 5 * 60 * 1000);
     }
 
     async processPrice(message) {
@@ -386,7 +296,6 @@ class TradingService {
         return symbol.includes("JPY") ? 0.01 : 0.0001;
     }
 
-
     // Close position by dealId
     async closePosition(dealId, result) {
         try {
@@ -396,90 +305,6 @@ class TradingService {
         } catch (error) {
             logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
         }
-    }
-
-    async managePartialTPAndTrailing(symbol, direction, dealId, entry, size, price, stopLevel, tpLevel, indicators, tpProgress, holdMinutes) {
-        if (!dealId || !size || !indicators?.atr) return;
-        const { updateTrailingStop } = await import("../api.js");
-        const minSize = 100;
-        const partialTPThreshold = 50;
-        const trailATR = 1.5 * indicators.atr; // Always trail by at least 1.5x ATR
-        let partialClosed = false;
-        let stopMoved = false;
-
-        // --- Partial TP: close 50% at 1R (tpProgress >= 50%) ---
-        if (tpProgress >= partialTPThreshold && size > minSize * 2 && !partialClosed) {
-            const closeSize = size / 2;
-            try {
-                await this.closePartialPosition(dealId, closeSize);
-                logger.info(`[PartialTP] Closed 50% of ${symbol} at 1R (${tpProgress}%)`);
-                partialClosed = true;
-            } catch (err) {
-                logger.error(`[PartialTP] Error closing 50% of ${symbol}:`, err);
-            }
-        }
-
-        // --- Move SL to breakeven after partial TP ---
-        if (tpProgress >= partialTPThreshold && ((direction === "buy" && stopLevel < entry) || (direction === "sell" && stopLevel > entry))) {
-            try {
-                await updateTrailingStop(dealId, entry, symbol, direction, price);
-                logger.info(`[Breakeven] Stop moved to breakeven for ${symbol} at ${entry}`);
-                stopMoved = true;
-            } catch (err) {
-                logger.error(`[Breakeven] Error moving stop to breakeven for ${symbol}:`, err);
-            }
-        }
-
-        // --- Trailing stop logic per user rules ---
-        // Only activate trailing stop if:
-        // (trend is weak && >1h && >50% TP) OR (>1h && >70% TP)
-        let shouldTrail = false;
-        if ((indicators.adx !== undefined && indicators.adx < 20 && holdMinutes > 60 && tpProgress >= 50) || (holdMinutes > 60 && tpProgress >= 70)) {
-            shouldTrail = true;
-        }
-        if (shouldTrail) {
-            let newStop = stopLevel;
-            if (direction === "buy") {
-                const candidate = price - trailATR;
-                if (candidate > stopLevel && candidate < price) {
-                    newStop = candidate;
-                }
-            } else {
-                const candidate = price + trailATR;
-                if (candidate < stopLevel && candidate > price) {
-                    newStop = candidate;
-                }
-            }
-            if (newStop !== stopLevel) {
-                // --- Enforce broker minimum stop distance ---
-                const range = await getAllowedTPRange(symbol);
-
-                const decimals = range.decimals || 5;
-                const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-                if (direction === "buy" && price - newStop < minStopDistance) {
-                    logger.warn(`[TrailingStop] New stop (${newStop}) too close to price (${price}). Min distance: ${minStopDistance}`);
-                    return;
-                }
-                if (direction === "sell" && newStop - price < minStopDistance) {
-                    logger.warn(`[TrailingStop] New stop (${newStop}) too close to price (${price}). Min distance: ${minStopDistance}`);
-                    return;
-                }
-                try {
-                    await updateTrailingStop(dealId, newStop, symbol, direction, price);
-                    logger.info(`[TrailingStop] Updated trailing stop for ${symbol} to ${newStop}`);
-                } catch (err) {
-                    logger.error(`[TrailingStop] Error updating trailing stop for ${symbol}:`, err);
-                }
-            }
-        }
-    }
-
-    // Helper: Close partial position (simulate if not supported by broker)
-    async closePartialPosition(dealId, closeSize) {
-        // If your broker supports partial closes, implement here. Otherwise, simulate by closing and reopening remaining size.
-        // For now, just log and skip actual close.
-        logger.info(`[PartialClose] Would close ${closeSize} units of dealId ${dealId}`);
-        // TODO: Implement actual partial close logic if supported
     }
 
     // Process a trading signal and execute the trade if conditions are met
