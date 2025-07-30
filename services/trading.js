@@ -109,11 +109,9 @@ class TradingService {
         logger.info(`[Adaptive] Risk: ${(this.dynamicRiskPerTrade * 100).toFixed(2)}%, SignalThreshold: ${this.dynamicSignalThreshold}, WinRate: ${(winRate * 100).toFixed(1)}%`);
     }
 
-
     generateSignal(indicators) {
-
-        const { d1Trend, h4Trend } = indicators;
-        const h1 = indicators.h1;
+        const { d1Trend, h4Trend, h1 } = indicators;
+        // const h1 = indicators.h1;
 
         // Check trend alignment first
         if (d1Trend === "neutral" || h4Trend === "neutral") {
@@ -198,9 +196,9 @@ class TradingService {
         return { stopLossPrice: newSL, takeProfitPrice: newTP };
     }
 
-    async executeTrade(signal, symbol, bid, ask) {
+    async executeTrade(signal, symbol, bid, ask, h1Candle) {
         logger.trade(signal.toUpperCase(), symbol, { bid, ask });
-        const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
+        const params = await this.calculateTradeParameters(signal, symbol, bid, ask, h1Candle);
         // Validate TP/SL before placing trade
         const price = signal === "buy" ? ask : bid;
         const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
@@ -215,29 +213,40 @@ class TradingService {
         }
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask) {
+    async calculateTradeParameters(signal, symbol, bid, ask, h1Candle) {
+        // 1. Entry price
         const price = signal === "buy" ? ask : bid;
 
-        // Calculate ATR-based stop loss
-        const atr = await this.calculateATR(symbol);
-        const buffer = Math.max(atr * 1.5, TRADING.POSITION_BUFFER_PIPS * this.getPipValue(symbol));
-        const stopLossPrice = signal === "buy" ? price - buffer : price + buffer;
+        // 2. Calculate Stop Loss based on H1 candle
+        const buffer = TRADING.POSITION_BUFFER_PIPS * this.getPipValue(symbol);
+        const stopLossPrice = signal === "buy" ? 
+            h1Candle.l - buffer :  // For longs: Low of H1 candle minus buffer
+            h1Candle.h + buffer;   // For shorts: High of H1 candle plus buffer
 
-        // Calculate take profit based on risk:reward ratio
-        const risk = Math.abs(price - stopLossPrice);
-        const takeProfitPrice = signal === "buy" ? price + risk * TRADING.REWARD_RISK_RATIO : price - risk * TRADING.REWARD_RISK_RATIO;
+        // 3. Calculate Take Profit using 2:1 reward-to-risk ratio
+        const riskDistance = Math.abs(price - stopLossPrice);
+        const takeProfitPrice = signal === "buy" ? 
+            price + (riskDistance * TRADING.REWARD_RISK_RATIO) :
+            price - (riskDistance * TRADING.REWARD_RISK_RATIO);
 
-        // Calculate position size based on risk
+        // 4. Calculate position size based on risk amount
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
-        logger.info(`[calculateTradeParameters] Size: ${size}, Entry: ${price}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
+        logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
+        Entry: ${price}
+        SL: ${stopLossPrice} (${Math.abs(price - stopLossPrice) / this.getPipValue(symbol)} pips)
+        TP: ${takeProfitPrice} (${TRADING.REWARD_RISK_RATIO}:1)
+        Size: ${size}`
+    );
 
         return {
             size,
             stopLossPrice,
             takeProfitPrice,
             // For partial take profit at 50% of the way to TP
-            partialTakeProfit: signal === "buy" ? price + risk * 0.5 : price - risk * 0.5,
+            partialTakeProfit: signal === "buy" ? 
+                price + (riskDistance * 0.5) : 
+                price - (riskDistance * 0.5)
         };
     }
 
@@ -726,7 +735,7 @@ class TradingService {
         const ask = price + spread;
 
         try {
-            await this.executeTrade(signal, symbol, bid, ask);
+            await this.executeTrade(signal, symbol, bid, ask, h1Candle);
             this.lastTradeTimestamps[symbol] = now;
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
