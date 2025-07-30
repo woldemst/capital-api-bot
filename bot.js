@@ -196,24 +196,26 @@ class TradingBot {
         const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
         const count = 70; // Fetch enough candles for EMA50
-        const delays = [1000, 1000, 1000];
-        const results = [];
 
-        for (let i = 0; i < timeframes.length; i++) {
-            if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
-            try {
-                const data = await getHistorical(symbol, timeframes[i], count);
-                if (!data || !data.prices || data.prices.length === 0) {
-                    logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
-                } else {
-                    // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
-                }
-                results.push(data);
-            } catch (err) {
-                logger.error(`[fetchHistoricalData] Error fetching ${symbol} ${timeframes[i]}:`, err);
-                results.push(null);
-            }
-        }
+        const results = await Promise.all(
+            timeframes.map(tf => getHistorical(symbol, tf, count))
+        );
+
+        // for (let i = 0; i < timeframes.length; i++) {
+        //     if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
+        //     try {
+        //         const data = await getHistorical(symbol, timeframes[i], count);
+        //         if (!data || !data.prices || data.prices.length === 0) {
+        //             logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
+        //         } else {
+        //             // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
+        //         }
+        //         results.push(data);
+        //     } catch (err) {
+        //         logger.error(`[fetchHistoricalData] Error fetching ${symbol} ${timeframes[i]}:`, err);
+        //         results.push(null);
+        //     }
+        // }
 
         // logger.info("Result data:", JSON.stringify(results, null, 2));
 
@@ -313,10 +315,10 @@ class TradingBot {
                 // await tradingService.monitorOpenTrades(latestIndicatorsBySymbol);
 
                 // --- Log trades every hour ---
-                if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
-                    await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
-                    this._lastTradeLogTime = Date.now();
-                }
+                // if (!this._lastTradeLogTime || Date.now() - this._lastTradeLogTime > 59.5 * 60 * 1000) {
+                //     await logTradeSnapshot(latestIndicatorsBySymbol, getOpenPositions);
+                //     this._lastTradeLogTime = Date.now();
+                // }
                 logger.info("[Monitoring] monitorOpenTrades completed");
             } catch (error) {
                 logger.error("[Bot] Error in monitorOpenTrades:", error);
