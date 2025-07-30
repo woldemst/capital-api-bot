@@ -2,7 +2,7 @@ import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical, getOpenPositions, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
 import logger from "../utils/logger.js";
 import { ATR } from "technicalindicators";
-import { getCurrentTradesLogPath, logTradeSnapshot, logTradeResult } from "../utils/tradeLogger.js";
+import { getCurrentTradesLogPath, logTradeResult } from "../utils/tradeLogger.js";
 const { MAX_POSITIONS } = TRADING;
 
 class TradingService {
@@ -280,6 +280,7 @@ class TradingService {
         const marginRequired = (size * entryPrice) / leverage;
         const availableMargin = balance;
         const maxMarginPerTrade = availableMargin / 5;
+
         if (marginRequired > maxMarginPerTrade) {
             size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
             if (size < 100) size = 100;
