@@ -120,6 +120,12 @@ export const SESSIONS = {
   NY_END: "21:00",
 };
 
+export const HISTORY = {
+    D1_BARS: 50,  // For EMA50 calculation
+    H4_BARS: 50,  // For EMA50 calculation
+    H1_BARS: 50   // For EMA21 and RSI
+};
+
 // Mode Configuration
 export const DEV_MODE = true ; // Set to false in production
 
