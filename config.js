@@ -90,12 +90,7 @@ export const ANALYSIS = {
     STD_DEV: 2,
   },
 
-  // ATR for stop loss and trailing
-  ATR: {
-    PERIOD: 14,
-    STOP_MULTIPLIER: 1.5,
-    TRAILING_MULTIPLIER: 1.0,
-  },
+
 
   // Risk Management
   RISK: {

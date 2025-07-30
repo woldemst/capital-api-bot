@@ -309,36 +309,6 @@ class TradingService {
         }, 5 * 60 * 1000);
     }
 
-    async calculateATR(symbol) {
-        try {
-            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.H1, 30); // Request more bars for robustness
-            if (!data?.prices || data.prices.length < 21) {
-                logger.warn(`[ATR] Insufficient data for ATR calculation on ${symbol} (got ${data?.prices?.length || 0} bars). Using fallback value.`);
-                return 0.001; // Fallback ATR value
-            }
-            // Use mid price for ATR calculation for consistency
-            const highs = data.prices.map((b) => {
-                if (b.high && typeof b.high === "object" && b.high.bid != null && b.high.ask != null) return (b.high.bid + b.high.ask) / 2;
-                if (typeof b.high === "number") return b.high;
-                return b.high?.bid ?? b.high?.ask ?? 0;
-            });
-            const lows = data.prices.map((b) => {
-                if (b.low && typeof b.low === "object" && b.low.bid != null && b.low.ask != null) return (b.low.bid + b.low.ask) / 2;
-                if (typeof b.low === "number") return b.low;
-                return b.low?.bid ?? b.low?.ask ?? 0;
-            });
-            const closes = data.prices.map((b) => {
-                if (b.close && typeof b.close === "object" && b.close.bid != null && b.close.ask != null) return (b.close.bid + b.close.ask) / 2;
-                if (typeof b.close === "number") return b.close;
-                return b.close?.bid ?? b.close?.ask ?? 0;
-            });
-            const atrArr = ATR.calculate({ period: 21, high: highs, low: lows, close: closes });
-            return atrArr.length ? atrArr[atrArr.length - 1] : 0.001;
-        } catch (error) {
-            logger.error("[ATR] Error:", error);
-            return 0.001;
-        }
-    }
 
     async processPrice(message) {
         try {
