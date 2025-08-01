@@ -26,71 +26,40 @@ export async function calcIndicators(bars, symbol = "", timeframe = "", priceTyp
     const lows = bars.map((b) => getPrice(b.low));
 
     // Calculate EMAs based on timeframe
-    let emaFast, emaSlow;
+    let ema9, ema21, ema20, ema50;
 
     if (timeframe === ANALYSIS.TIMEFRAMES.D1) {
-        emaFast = EMA.calculate({
-            period: ANALYSIS.EMA.D1.FAST,
-            values: closes,
-        });
-        emaSlow = EMA.calculate({
-            period: ANALYSIS.EMA.D1.SLOW,
-            values: closes,
-        });
+        ema20 = EMA.calculate({ period: 20, values: closes });
+        ema50 = EMA.calculate({ period: 50, values: closes });
+
+        return {
+            trend: ema20[ema20.length - 1] > ema50[ema50.length - 1] ? "bullish" : ema20[ema20.length - 1] < ema50[ema50.length - 1] ? "bearish" : "neutral",
+        };
     } else if (timeframe === ANALYSIS.TIMEFRAMES.H4) {
-        emaFast = EMA.calculate({
-            period: ANALYSIS.EMA.H4.FAST,
-            values: closes,
-        });
-        emaSlow = EMA.calculate({
-            period: ANALYSIS.EMA.H4.SLOW,
-            values: closes,
-        });
+        ema20 = EMA.calculate({ period: 20, values: closes });
+        ema50 = EMA.calculate({ period: 50, values: closes });
+
+        return {
+            trend: ema20[ema20.length - 1] > ema50[ema50.length - 1] ? "bullish" : ema20[ema20.length - 1] < ema50[ema50.length - 1] ? "bearish" : "neutral",
+        };
     } else {
         // H1 timeframe
-        emaFast = EMA.calculate({
-            period: ANALYSIS.EMA.H1.FAST,
-            values: closes,
-        });
-        emaSlow = EMA.calculate({
-            period: ANALYSIS.EMA.H1.SLOW,
-            values: closes,
-        });
+        ema9 = EMA.calculate({ period: 9, values: closes });
+        ema21 = EMA.calculate({ period: 21, values: closes });
+
+        const currentEMA9 = ema9[ema9.length - 1];
+        const currentEMA21 = ema21[ema21.length - 1];
+        const prevEMA9 = ema9[ema9.length - 2];
+        const prevEMA21 = ema21[ema21.length - 2];
+
+        return {
+            ema9: currentEMA9,
+            ema21: currentEMA21,
+            rsi: RSI.calculate({ period: 14, values: closes }).pop(),
+            crossover: prevEMA9 <= prevEMA21 && currentEMA9 > currentEMA21 ? "bullish" : prevEMA9 >= prevEMA21 && currentEMA9 < currentEMA21 ? "bearish" : null,
+            close: closes[closes.length - 1],
+            high: highs[highs.length - 1],
+            low: lows[lows.length - 1],
+        };
     }
-
-    // Use library ATR for consistency
-    const atrArr = ATR.calculate({
-        period: 14,
-        high: highs,
-        low: lows,
-        close: closes,
-    });
-    const atr = atrArr.length ? atrArr[atrArr.length - 1] : null;
-
-    // Get the current and previous values
-    const currentFastEMA = emaFast[emaFast.length - 1] || 0;
-    const currentSlowEMA = emaSlow[emaSlow.length - 1] || 0;
-    const prevFastEMA = emaFast[emaFast.length - 2] || 0;
-    const prevSlowEMA = emaSlow[emaSlow.length - 2] || 0;
-    const currentPrice = closes[closes.length - 1];
-
-    const result = {
-        // Basic indicator values
-        emaFast: currentFastEMA,
-        emaSlow: currentSlowEMA,
-        rsi: RSI.calculate({ period: RSI_CONFIG.PERIOD, values: closes }).pop(),
-        atr: atr,
-
-        // Trend determination
-        trend: currentFastEMA > currentSlowEMA ? "bullish" : "bearish",
-
-        // Cross detection
-        crossover: prevFastEMA <= prevSlowEMA && currentFastEMA > currentSlowEMA ? "bullish" : prevFastEMA >= prevSlowEMA && currentFastEMA < currentSlowEMA ? "bearish" : null,
-
-        // Price position
-        priceAboveEMAs: currentPrice > currentFastEMA && currentPrice > currentSlowEMA,
-        close: currentPrice,
-    };
-    // Removed obsolete logger.indicator call (no longer needed)
-    return result;
 }
