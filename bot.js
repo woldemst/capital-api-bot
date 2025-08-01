@@ -244,20 +244,17 @@ class TradingBot {
             logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
             return;
         }
-        // Calculate indicators and trends for all timeframes
+        // Calculate trends and indicators
         const indicators = {
-            d1Trend: (await calcIndicators(d1Candles)).trend,
-            h4Trend: (await calcIndicators(h4Candles)).trend,
-            h1: await calcIndicators(h1Candles),
+            d1Trend: (await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1)).trend,
+            h4Trend: (await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4)).trend,
+            h1: await calcIndicators(h1Candles, symbol, ANALYSIS.TIMEFRAMES.H1),
         };
 
         await tradingService.processPrice({
-            h1Candle: latestCandle,
-            symbol: symbol,
+            symbol,
             indicators,
-            d1Data: d1Candles,
-            h4Data: h4Candles,
-            h1Data: h1Candles,
+            h1Candle: latestCandle,
         });
 
         // Store the latest H1 candle for history
