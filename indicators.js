@@ -2,7 +2,6 @@ import { EMA, RSI, ATR } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
 import logger from "./utils/logger.js";
 
-const { RSI: RSI_CONFIG } = ANALYSIS;
 
 export async function calcIndicators(bars, symbol = "", timeframe = "", priceType = "mid") {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
