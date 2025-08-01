@@ -70,8 +70,8 @@ class TradingBot {
 
             // // 3. Run immediate analysis
             // logger.info("[Bot] Running immediate analysis...");
-            // await this.updateAccountInfo();
-            // await this.analyzeAllSymbols();
+            await this.updateAccountInfo();
+            await this.analyzeAllSymbols();
 
             // 4. Only after immediate analysis, start the intervals
             await this.startAnalysisInterval();
@@ -196,26 +196,24 @@ class TradingBot {
         const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
 
         const count = 70; // Fetch enough candles for EMA50
+        const delays = [1000, 1000, 1000];
+        const results = [];
 
-        const results = await Promise.all(
-            timeframes.map(tf => getHistorical(symbol, tf, count))
-        );
-
-        // for (let i = 0; i < timeframes.length; i++) {
-        //     if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
-        //     try {
-        //         const data = await getHistorical(symbol, timeframes[i], count);
-        //         if (!data || !data.prices || data.prices.length === 0) {
-        //             logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
-        //         } else {
-        //             // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
-        //         }
-        //         results.push(data);
-        //     } catch (err) {
-        //         logger.error(`[fetchHistoricalData] Error fetching ${symbol} ${timeframes[i]}:`, err);
-        //         results.push(null);
-        //     }
-        // }
+        for (let i = 0; i < timeframes.length; i++) {
+            if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
+            try {
+                const data = await getHistorical(symbol, timeframes[i], count);
+                if (!data || !data.prices || data.prices.length === 0) {
+                    logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
+                } else {
+                    // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
+                }
+                results.push(data);
+            } catch (err) {
+                logger.error(`[fetchHistoricalData] Error fetching ${symbol} ${timeframes[i]}:`, err);
+                results.push(null);
+            }
+        }
 
         // logger.info("Result data:", JSON.stringify(results, null, 2));
 
@@ -246,9 +244,6 @@ class TradingBot {
             logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
             return;
         }
-
-        console.log("Check!");
-
         // Calculate indicators and trends for all timeframes
         const indicators = {
             d1Trend: (await calcIndicators(d1Candles)).trend,
