@@ -44,7 +44,7 @@ export async function logTradeSnapshot(latestIndicatorsBySymbol, getOpenPosition
       ema9: indicators.ema9,
       ema21: indicators.ema21,
       rsi: indicators.rsi,
-      macd: indicators.macd,
+
       bb: indicators.bb,
       atr: indicators.atr
     };
