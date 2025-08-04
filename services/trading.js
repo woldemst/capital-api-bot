@@ -42,31 +42,52 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal(indicators) {
+    generateSignal(indicators, h1Candle) {
         const { d1Trend, h4Trend, h1 } = indicators;
 
-        // 1. Check trend alignment
-        if (d1Trend === "neutral" || h4Trend === "neutral") {
-            return { signal: null, reason: "neutral_trend" };
-        }
-        if (d1Trend !== h4Trend) {
-            return { signal: null, reason: "trends_not_aligned" };
-        }
+        /**
+         * The previous code block was responsible for checking trend alignment
+         * and generating trading signals based on the H1 candle conditions.
+         **/
 
-        // 2. Generate signals based on H1 conditions
-        if (d1Trend === "bullish") {
-            if (h1.crossover !== "bullish") return { signal: null, reason: "waiting_bullish_cross" };
-            if (h1.rsi <= 50) return { signal: null, reason: "weak_bullish_momentum" };
-            return { signal: "BUY", reason: "aligned_bullish_trends_with_h1_confirmation" };
-        }
+        // // 1. Check trend alignment
+        // if (d1Trend === "neutral" || h4Trend === "neutral") {
+        //     return { signal: null, reason: "neutral_trend" };
+        // }
+        // if (d1Trend !== h4Trend) {
+        //     return { signal: null, reason: "trends_not_aligned" };
+        // }
 
-        if (d1Trend === "bearish") {
-            if (h1.crossover !== "bearish") return { signal: null, reason: "waiting_bearish_cross" };
-            if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
-            return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
-        }
+        // // 2. Generate signals based on H1 conditions
+        // if (d1Trend === "bullish") {
+        //     if (h1.crossover !== "bullish") return { signal: null, reason: "waiting_bullish_cross" };
+        //     if (h1.rsi <= 50) return { signal: null, reason: "weak_bullish_momentum" };
+        //     return { signal: "BUY", reason: "aligned_bullish_trends_with_h1_confirmation" };
+        // }
 
-        return { signal: null, reason: "no_valid_setup" };
+        // if (d1Trend === "bearish") {
+        //     if (h1.crossover !== "bearish") return { signal: null, reason: "waiting_bearish_cross" };
+        //     if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
+        //     return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
+        // }
+
+        // return { signal: null, reason: "no_valid_setup" };
+
+        /**
+         * A new one checking logic
+         **/
+
+        // Use only H1 candle direction and RSI for signal
+        if (!h1Candle || !indicators?.h1?.rsi) {
+            return { signal: null, reason: "missing_data" };
+        }
+        if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
+            return { signal: "BUY", reason: "bullish_candle_and_rsi" };
+        }
+        if (h1Candle.c < h1Candle.o && indicators.h1.rsi < 50) {
+            return { signal: "SELL", reason: "bearish_candle_and_rsi" };
+        }
+        return { signal: null, reason: "no_signal" };
     }
 
     // Validate and adjust TP/SL to allowed range
