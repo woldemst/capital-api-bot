@@ -78,12 +78,12 @@ class TradingService {
          **/
 
         // Use only H1 candle direction and RSI for signal
-        if (!h1Candle || !indicators?.h1?.rsi) {
-            return { signal: null, reason: "missing_data" };
-        }
-        if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
-            return { signal: "BUY", reason: "bullish_candle_and_rsi" };
-        }
+        // if (!h1Candle || !indicators?.h1?.rsi) {
+        //     return { signal: null, reason: "missing_data" };
+        // }
+        // if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
+        //     return { signal: "BUY", reason: "bullish_candle_and_rsi" };
+        // }
         if (h1Candle.c < h1Candle.o && indicators.h1.rsi < 50) {
             return { signal: "SELL", reason: "bearish_candle_and_rsi" };
         }
@@ -165,27 +165,37 @@ class TradingService {
         }
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask, h1Candle) {
-        // 1. Entry price
+    async calculateTradeParameters(signal, symbol, bid, ask, h1Candle, indicators) {
         const price = signal === "buy" ? ask : bid;
+        const pipValue = this.getPipValue(symbol);
+        const buffer = TRADING.POSITION_BUFFER_PIPS * pipValue;
 
-        // 2. Calculate Stop Loss based on H1 candle
-        const buffer = TRADING.POSITION_BUFFER_PIPS * this.getPipValue(symbol);
-        const stopLossPrice =
-            signal === "buy"
-                ? h1Candle.l - buffer // For longs: Low of H1 candle minus buffer
-                : h1Candle.h + buffer; // For shorts: High of H1 candle plus buffer
+        // --- ATR-based minimum stop distance ---
+        const atr = indicators?.h1?.atr || (symbol.includes("JPY") ? 0.10 : 0.0010); // fallback if ATR missing
 
-        // 3. Calculate Take Profit using 2:1 reward-to-risk ratio
+        let stopLossPrice;
+        if (signal === "buy") {
+            stopLossPrice = h1Candle.l - buffer;
+            if (price - stopLossPrice < atr) {
+                stopLossPrice = price - atr;
+            }
+        } else {
+            stopLossPrice = h1Candle.h + buffer;
+            if (stopLossPrice - price < atr) {
+                stopLossPrice = price + atr;
+            }
+        }
+
         const riskDistance = Math.abs(price - stopLossPrice);
-        const takeProfitPrice = signal === "buy" ? price + riskDistance * TRADING.REWARD_RISK_RATIO : price - riskDistance * TRADING.REWARD_RISK_RATIO;
+        const takeProfitPrice = signal === "buy"
+            ? price + riskDistance * TRADING.REWARD_RISK_RATIO
+            : price - riskDistance * TRADING.REWARD_RISK_RATIO;
 
-        // 4. Calculate position size based on risk amount
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
         logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
         Entry: ${price}
-        SL: ${stopLossPrice} (${Math.abs(price - stopLossPrice) / this.getPipValue(symbol)} pips)
+        SL: ${stopLossPrice} (${riskDistance / pipValue} pips)
         TP: ${takeProfitPrice} (${TRADING.REWARD_RISK_RATIO}:1)
         Size: ${size}`);
 
@@ -193,8 +203,9 @@ class TradingService {
             size,
             stopLossPrice,
             takeProfitPrice,
-            // For partial take profit at 50% of the way to TP
-            partialTakeProfit: signal === "buy" ? price + riskDistance * 0.5 : price - riskDistance * 0.5,
+            partialTakeProfit: signal === "buy"
+                ? price + riskDistance * 0.5
+                : price - riskDistance * 0.5,
         };
     }
 
