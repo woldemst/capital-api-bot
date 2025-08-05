@@ -76,14 +76,14 @@ class TradingService {
         /**
          * A new one checking logic
          **/
-
-        // Use only H1 candle direction and RSI for signal
-        // if (!h1Candle || !indicators?.h1?.rsi) {
-        //     return { signal: null, reason: "missing_data" };
-        // }
-        // if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
-        //     return { signal: "BUY", reason: "bullish_candle_and_rsi" };
-        // }
+        
+        // simple check 
+        if (!h1Candle || !indicators?.h1?.rsi) {
+            return { signal: null, reason: "missing_data" };
+        }
+        if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
+            return { signal: "BUY", reason: "bullish_candle_and_rsi" };
+        }
         if (h1Candle.c < h1Candle.o && indicators.h1.rsi < 50) {
             return { signal: "SELL", reason: "bearish_candle_and_rsi" };
         }
