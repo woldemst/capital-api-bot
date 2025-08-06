@@ -51,6 +51,11 @@ export async function calcIndicators(bars, symbol = "", timeframe = "", priceTyp
         const prevEMA9 = ema9[ema9.length - 2];
         const prevEMA21 = ema21[ema21.length - 2];
 
+        // Add trend property for H1
+        let trend = "neutral";
+        if (currentEMA9 > currentEMA21) trend = "bullish";
+        else if (currentEMA9 < currentEMA21) trend = "bearish";
+
         return {
             ema9: currentEMA9,
             ema21: currentEMA21,
@@ -59,6 +64,7 @@ export async function calcIndicators(bars, symbol = "", timeframe = "", priceTyp
             close: closes[closes.length - 1],
             high: highs[highs.length - 1],
             low: lows[lows.length - 1],
+            trend,
         };
     }
 }
