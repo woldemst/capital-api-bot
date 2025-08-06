@@ -45,11 +45,12 @@ class TradingService {
     generateSignal(indicators, h1Candle) {
         const { d1Trend, h4Trend, h1 } = indicators;
 
-        // 1. Check trend alignment
-        if (d1Trend === "neutral" || h4Trend === "neutral") {
+        // 1. Check trend alignment between H4 and H1
+        if (h4Trend === "neutral" || h1.trend === "neutral") {
             return { signal: null, reason: "neutral_trend" };
         }
-        if (d1Trend !== h4Trend) {
+        
+        if (h4Trend !== h1.trend) {
             return { signal: null, reason: "trends_not_aligned" };
         }
 
@@ -66,19 +67,6 @@ class TradingService {
             return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
         }
 
-        /**
-         * simple check for H1 candle and RSI
-         **/
-
-        // if (!h1Candle || !indicators?.h1?.rsi) {
-        //     return { signal: null, reason: "missing_data" };
-        // }
-        // if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
-        //     return { signal: "BUY", reason: "bullish_candle_and_rsi" };
-        // }
-        // if (h1Candle.c < h1Candle.o && indicators.h1.rsi < 50) {
-        //     return { signal: "SELL", reason: "bearish_candle_and_rsi" };
-        // }
         return { signal: null, reason: "no_valid_setup" };
     }
 

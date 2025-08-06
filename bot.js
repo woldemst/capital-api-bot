@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession } from "./api.js";
-import { TRADING, DEV_MODE, DEV, ANALYSIS } from "./config.js";
+import { TRADING, DEV, PROD, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
@@ -134,12 +134,8 @@ class TradingBot {
 
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
-        const now = new Date();
-        const msToNextHour = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000 - now.getMilliseconds() + 5000;
-        console.log(`[Bot] msToNextHour: ${msToNextHour}ms`);
-        
-        const interval = DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 58 * 60 * 1000;
-        logger.info(`[${DEV_MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
+        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
+        logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
         this.analysisInterval = setInterval(async () => {
             try {
@@ -158,7 +154,7 @@ class TradingBot {
             } catch (error) {
                 logger.error("Analysis interval error:", error);
             }
-        }, msToNextHour);
+        }, interval);
     }
 
     // Updates account balance, margin, and open trades in the trading service.
