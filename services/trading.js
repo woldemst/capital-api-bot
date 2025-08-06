@@ -45,49 +45,41 @@ class TradingService {
     generateSignal(indicators, h1Candle) {
         const { d1Trend, h4Trend, h1 } = indicators;
 
-        /**
-         * The previous code block was responsible for checking trend alignment
-         * and generating trading signals based on the H1 candle conditions.
-         **/
+        // 1. Check trend alignment
+        if (d1Trend === "neutral" || h4Trend === "neutral") {
+            return { signal: null, reason: "neutral_trend" };
+        }
+        if (d1Trend !== h4Trend) {
+            return { signal: null, reason: "trends_not_aligned" };
+        }
 
-        // // 1. Check trend alignment
-        // if (d1Trend === "neutral" || h4Trend === "neutral") {
-        //     return { signal: null, reason: "neutral_trend" };
-        // }
-        // if (d1Trend !== h4Trend) {
-        //     return { signal: null, reason: "trends_not_aligned" };
-        // }
+        // 2. Generate signals based on H1 conditions
+        if (h4Trend === "bullish") {
+            if (h1.crossover !== "bullish") return { signal: null, reason: "waiting_bullish_cross" };
+            if (h1.rsi <= 50) return { signal: null, reason: "weak_bullish_momentum" };
+            return { signal: "BUY", reason: "aligned_bullish_trends_with_h1_confirmation" };
+        }
 
-        // // 2. Generate signals based on H1 conditions
-        // if (d1Trend === "bullish") {
-        //     if (h1.crossover !== "bullish") return { signal: null, reason: "waiting_bullish_cross" };
-        //     if (h1.rsi <= 50) return { signal: null, reason: "weak_bullish_momentum" };
-        //     return { signal: "BUY", reason: "aligned_bullish_trends_with_h1_confirmation" };
-        // }
-
-        // if (d1Trend === "bearish") {
-        //     if (h1.crossover !== "bearish") return { signal: null, reason: "waiting_bearish_cross" };
-        //     if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
-        //     return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
-        // }
-
-        // return { signal: null, reason: "no_valid_setup" };
+        if (h4Trend === "bearish") {
+            if (h1.crossover !== "bearish") return { signal: null, reason: "waiting_bearish_cross" };
+            if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
+            return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
+        }
 
         /**
-         * A new one checking logic
+         * simple check for H1 candle and RSI
          **/
-        
-        // simple check 
-        if (!h1Candle || !indicators?.h1?.rsi) {
-            return { signal: null, reason: "missing_data" };
-        }
-        if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
-            return { signal: "BUY", reason: "bullish_candle_and_rsi" };
-        }
-        if (h1Candle.c < h1Candle.o && indicators.h1.rsi < 50) {
-            return { signal: "SELL", reason: "bearish_candle_and_rsi" };
-        }
-        return { signal: null, reason: "no_signal" };
+
+        // if (!h1Candle || !indicators?.h1?.rsi) {
+        //     return { signal: null, reason: "missing_data" };
+        // }
+        // if (h1Candle.c > h1Candle.o && indicators.h1.rsi > 50) {
+        //     return { signal: "BUY", reason: "bullish_candle_and_rsi" };
+        // }
+        // if (h1Candle.c < h1Candle.o && indicators.h1.rsi < 50) {
+        //     return { signal: "SELL", reason: "bearish_candle_and_rsi" };
+        // }
+        return { signal: null, reason: "no_valid_setup" };
     }
 
     // Validate and adjust TP/SL to allowed range
@@ -171,7 +163,7 @@ class TradingService {
         const buffer = TRADING.POSITION_BUFFER_PIPS * pipValue;
 
         // --- ATR-based minimum stop distance ---
-        const atr = indicators?.h1?.atr || (symbol.includes("JPY") ? 0.10 : 0.0010); // fallback if ATR missing
+        const atr = indicators?.h1?.atr || (symbol.includes("JPY") ? 0.1 : 0.001); // fallback if ATR missing
 
         let stopLossPrice;
         if (signal === "buy") {
@@ -187,9 +179,7 @@ class TradingService {
         }
 
         const riskDistance = Math.abs(price - stopLossPrice);
-        const takeProfitPrice = signal === "buy"
-            ? price + riskDistance * TRADING.REWARD_RISK_RATIO
-            : price - riskDistance * TRADING.REWARD_RISK_RATIO;
+        const takeProfitPrice = signal === "buy" ? price + riskDistance * TRADING.REWARD_RISK_RATIO : price - riskDistance * TRADING.REWARD_RISK_RATIO;
 
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
@@ -203,9 +193,7 @@ class TradingService {
             size,
             stopLossPrice,
             takeProfitPrice,
-            partialTakeProfit: signal === "buy"
-                ? price + riskDistance * 0.5
-                : price - riskDistance * 0.5,
+            partialTakeProfit: signal === "buy" ? price + riskDistance * 0.5 : price - riskDistance * 0.5,
         };
     }
 
