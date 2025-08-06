@@ -46,22 +46,18 @@ class TradingService {
         const { d1Trend, h4Trend, h1 } = indicators;
 
         // 1. Check trend alignment between H4 and H1
-        if (h4Trend === "neutral" || h1.trend === "neutral") {
+        if (h1.trend === "neutral") {
             return { signal: null, reason: "neutral_trend" };
-        }
-        
-        if (h4Trend !== h1.trend) {
-            return { signal: null, reason: "trends_not_aligned" };
         }
 
         // 2. Generate signals based on H1 conditions
-        if (h4Trend === "bullish") {
+        if (h1.trend === "bullish") {
             if (h1.crossover !== "bullish") return { signal: null, reason: "waiting_bullish_cross" };
             if (h1.rsi <= 50) return { signal: null, reason: "weak_bullish_momentum" };
             return { signal: "BUY", reason: "aligned_bullish_trends_with_h1_confirmation" };
         }
 
-        if (h4Trend === "bearish") {
+        if (h1.trend === "bearish") {
             if (h1.crossover !== "bearish") return { signal: null, reason: "waiting_bearish_cross" };
             if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
             return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };

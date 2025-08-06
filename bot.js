@@ -234,7 +234,7 @@ class TradingBot {
         const d1Candles = this.candleHistory[symbol].D1;
 
         if (!h1Candles || !h4Candles || !d1Candles) {
-            logger.warn(`[${symbol}] No candle data available`);
+            logger.warn(`[${symbol}] No candle data available`);    
             return;
         }
 
