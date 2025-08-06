@@ -70,8 +70,8 @@ class TradingBot {
 
             // // 3. Run immediate analysis
             // logger.info("[Bot] Running immediate analysis...");
-            await this.updateAccountInfo();
-            await this.analyzeAllSymbols();
+            // await this.updateAccountInfo();
+            // await this.analyzeAllSymbols();
 
             // 4. Only after immediate analysis, start the intervals
             await this.startAnalysisInterval();
@@ -134,6 +134,10 @@ class TradingBot {
 
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
+        const now = new Date();
+        const msToNextHour = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000 - now.getMilliseconds() + 5000;
+        console.log(`[Bot] msToNextHour: ${msToNextHour}ms`);
+        
         const interval = DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 58 * 60 * 1000;
         logger.info(`[${DEV_MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
@@ -148,13 +152,13 @@ class TradingBot {
                     this.monitorInterval = null;
                 }
 
-                if (this.openedPositions && this.openedPositions > 0) {
-                    this.startMonitorOpenTrades();
-                }
+                // if (this.openedPositions && this.openedPositions > 0) {
+                //     this.startMonitorOpenTrades();
+                // }
             } catch (error) {
                 logger.error("Analysis interval error:", error);
             }
-        }, interval);
+        }, msToNextHour);
     }
 
     // Updates account balance, margin, and open trades in the trading service.
