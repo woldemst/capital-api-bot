@@ -2,22 +2,21 @@ import { EMA, RSI, ATR } from "technicalindicators";
 import { ANALYSIS } from "./config.js";
 import logger from "./utils/logger.js";
 
+// Helper to extract price by type
+function getPrice(val) {
+    if (!val) return 0;
+    if (typeof val === "number") return val;
+    if (priceType === "bid") return val.bid ?? 0;
+    if (priceType === "ask") return val.ask ?? 0;
+    // Default: mid
+    if (val.bid != null && val.ask != null) return (val.bid + val.ask) / 2;
+    return val.bid ?? val.ask ?? 0;
+}
 
 export async function calcIndicators(bars, symbol = "", timeframe = "", priceType = "mid") {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
         logger.error(`[Indicators] No bars provided for indicator calculation for ${symbol} ${timeframe}`);
         return {};
-    }
-
-    // Helper to extract price by type
-    function getPrice(val) {
-        if (!val) return 0;
-        if (typeof val === "number") return val;
-        if (priceType === "bid") return val.bid ?? 0;
-        if (priceType === "ask") return val.ask ?? 0;
-        // Default: mid
-        if (val.bid != null && val.ask != null) return (val.bid + val.ask) / 2;
-        return val.bid ?? val.ask ?? 0;
     }
 
     const closes = bars.map((b) => getPrice(b.close));
