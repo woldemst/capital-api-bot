@@ -19,15 +19,11 @@ export const TRADING = {
     LEVERAGE: 30,
     RISK_PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum 3 simultaneous positions
-    DAILY_LOSS_LIMIT: 0.05, // 5% daily loss limit
     POSITION_BUFFER_PIPS: 1, // Buffer for SL calculation
 
     // Take profit and stop loss
     REWARD_RISK_RATIO: 2, // 2:1 reward-to-risk ratio
     MAX_HOLD_TIME: 240, // Maximum hold time in minutes
-
-    // Position sizing limits
-    FOREX_MIN_SIZE: 100,
 
     // Partial profit taking
     PARTIAL_TP_ENABLED: true,
@@ -35,10 +31,6 @@ export const TRADING = {
 
     // Slippage control (in pips)
     MAX_SLIPPAGE_PIPS: 2, // Maximum allowed slippage in pips
-
-    // Signal threshold for entry
-    MIN_BUY_CONDITIONS: 3, // Minimum buy conditions for a signal
-    MIN_SELL_CONDITIONS: 3, // Minimum sell conditions for a signal
 
     // Daily risk control
     MAX_DAILY_LOSS: 0.04, // Stop trading after 4% loss in a day
@@ -101,10 +93,10 @@ export const HISTORY = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 60 * 1000, // 1 minute between analyses (was 15 min)
-    MODE: false,
+    INTERVAL: 5 * 1000, // 5 seconds between analyses (was 1 min)
+    MODE: false ,
 };
-
+    
 export const PROD = {
     INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
 };
