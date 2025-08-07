@@ -9,20 +9,16 @@ class TradingService {
     constructor() {
         this.openTrades = [];
         this.accountBalance = 0;
-        this.profitThresholdReached = false;
 
         this.availableMargin = 0; // Initialize availableMargin
         // --- Overtrading protection: cooldown per symbol ---
         this.lastTradeTimestamps = {};
 
         this.maxRiskPerTrade = 0.02; // 2% max
-        this.minRiskPerTrade = 0.003; // 0.3% min
-        this.maxSignalThreshold = 5;
-        this.minSignalThreshold = 2;
+
         // --- Daily loss limit ---
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05; // 5 % vom Kontostand
-        this.lastLossReset = new Date().toDateString();
     }
 
     setAccountBalance(balance) {
@@ -30,9 +26,6 @@ class TradingService {
     }
     setOpenTrades(trades) {
         this.openTrades = trades;
-    }
-    setProfitThresholdReached(reached) {
-        this.profitThresholdReached = reached;
     }
 
     setAvailableMargin(margin) {
@@ -42,13 +35,39 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal(indicators, h1Candle) {
-        const { d1Trend, h4Trend, h1 } = indicators;
+    detectPattern(candles, trend) {
+        if (!candles || candles.length < 3) return false;
+
+        const prevCandle = candles[candles.length - 2];
+        const currentCandle = candles[candles.length - 1];
+
+        const isBullish = (c) => c.c > c.o;
+        const isBearish = (c) => c.c < c.o;
+
+        const trendDirection = trend.toLowerCase();
+        if (!trendDirection || trendDirection === "neutral") return false;
+        else if (trendDirection === "bullish") {
+            return isBullish(prevCandle) && isBearish(currentCandle);
+        } else if (trendDirection === "bearish") {
+            return isBearish(prevCandle) && isBullish(currentCandle);
+        }
+        return false;
+    }
+
+    generateSignal(indicators, h1Candles) {
+        const { d1Trend, h4Trend } = indicators;
 
         // 1. Check trend alignment between H4 and H1
-        if (h1.trend === "neutral") {
-            return { signal: null, reason: "neutral_trend" };
+        if (d1Trend === "neutral") {
+            return { signal: null, reason: "neutral_d1_trend" };
         }
+        const direction = d1Trend.toLowerCase();
+        const validPattern = this.detectPattern(h1Candles, direction);
+
+        if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
+
+        const signal = validPattern === "bullish" ? "BUY" : "SELL";
+        return { signal, reason: `valid_${validPattern}_pattern` };
 
         // 2. Generate signals based on H1 conditions
         if (h1.trend === "bullish") {
@@ -62,8 +81,6 @@ class TradingService {
             if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
             return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
         }
-
-        return { signal: null, reason: "no_valid_setup" };
     }
 
     // Validate and adjust TP/SL to allowed range
@@ -220,13 +237,16 @@ class TradingService {
     async processPrice(message) {
         try {
             if (!message) return;
-            const { symbol, indicators, h1Candle } = message;
-            if (!symbol || !indicators || !h1Candle) return;
+            const { symbol, indicators, h1Candles, h1Candle } = message;
+            // console.log("h1 candles length:", h1Candles.length);
+
+            if (!symbol || !indicators || !h1Candles || !h1Candle) return;
             // Log specific fields we're interested in
             console.log("Message details:", {
                 symbol: message.symbol,
                 indicators: message.indicators,
                 h1Candle: message.h1Candle,
+                h1CandlesLength: message.h1Candles.length,
             });
 
             if (!symbol) {
@@ -245,12 +265,16 @@ class TradingService {
                 logger.info(`[ProcessPrice] Max trades (${MAX_POSITIONS}) reached. Skipping ${symbol}.`);
                 return;
             }
+
             if (this.isSymbolTraded(symbol)) {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
+
             // Generate signal using our streamlined method
-            const { signal, reason } = this.generateSignal(indicators, h1Candle);
+            const { signal, reason } = this.generateSignal(indicators, h1Candles);
+            // const signal = null;
+            // const reason = "no_valid_setup";
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found - ${reason}`);
                 await this.processSignal(symbol, signal, h1Candle);

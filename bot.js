@@ -68,11 +68,6 @@ class TradingBot {
             // 2. Initialize data
             await this.initializeCandleHistory();
 
-            // // 3. Run immediate analysis
-            // logger.info("[Bot] Running immediate analysis...");
-            // await this.updateAccountInfo();
-            // await this.analyzeAllSymbols();
-
             // 4. Only after immediate analysis, start the intervals
             await this.startAnalysisInterval();
 
@@ -136,6 +131,7 @@ class TradingBot {
     async startAnalysisInterval() {
         const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
+
 
         this.analysisInterval = setInterval(async () => {
             try {
@@ -234,7 +230,7 @@ class TradingBot {
         const d1Candles = this.candleHistory[symbol].D1;
 
         if (!h1Candles || !h4Candles || !d1Candles) {
-            logger.warn(`[${symbol}] No candle data available`);    
+            logger.warn(`[${symbol}] No candle data available`);
             return;
         }
 
@@ -254,6 +250,7 @@ class TradingBot {
         await tradingService.processPrice({
             symbol,
             indicators,
+            h1Candles,
             h1Candle: latestCandle,
         });
 
