@@ -36,31 +36,39 @@ class TradingService {
     }
 
     detectPattern(candles, trend) {
-        if (!candles || candles.length < 3) return false;
+        if (!candles || candles.length < 2) return false;
 
-        const prevCandle = candles[candles.length - 2];
-        const currentCandle = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        const curr = candles[candles.length - 1];
 
         const isBullish = (c) => c.c > c.o;
         const isBearish = (c) => c.c < c.o;
 
         const trendDirection = trend.toLowerCase();
-        if (!trendDirection || trendDirection === "neutral") return false;
-        else if (trendDirection === "bullish") {
-            return isBullish(prevCandle) && isBearish(currentCandle);
-        } else if (trendDirection === "bearish") {
-            return isBearish(prevCandle) && isBullish(currentCandle);
+
+        // if (!trendDirection || trendDirection === "neutral") return false;
+
+        if (trendDirection === "bullish" && isBearish(prev) && isBullish(curr)) {
+            return "bullish"; // red -> green
+        } else if (trendDirection === "bearish" && isBullish(prev) && isBearish(curr)) {
+            return "bearish"; // green -> red
         }
+
         return false;
+
+        // if (trendDirection === "bullish") {
+        //     return isBullish(prev) && isBearish(curr);
+        // } else if (trendDirection === "bearish") {
+        //     return isBearish(prev) && isBullish(curr);
+        // }
+        // return false;
     }
 
     generateSignal(indicators, h1Candles) {
         const { d1Trend, h4Trend } = indicators;
 
-        // 1. Check trend alignment between H4 and H1
-        if (d1Trend === "neutral") {
-            return { signal: null, reason: "neutral_d1_trend" };
-        }
+        if (d1Trend === "neutral") return { signal: null, reason: "neutral_d1_trend" };
+
         const direction = d1Trend.toLowerCase();
         const validPattern = this.detectPattern(h1Candles, direction);
 
