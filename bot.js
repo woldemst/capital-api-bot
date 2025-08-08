@@ -81,12 +81,16 @@ class TradingBot {
     async initializeCandleHistory() {
         for (const symbol of SYMBOLS) {
             try {
-                const { h1Data, h4Data, d1Data } = await this.fetchHistoricalData(symbol);
+                const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
+                const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
+                const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
+
+                if (!d1Data || !h4Data || !h1Data) return console.error(`[Bot] Failed to fetch historical data for ${symbol}`);
 
                 this.candleHistory[symbol] = {
-                    H1: h1Data?.prices?.slice(-this.maxCandleHistory) || [],
-                    H4: h4Data?.prices?.slice(-this.maxCandleHistory) || [],
                     D1: d1Data?.prices?.slice(-this.maxCandleHistory) || [],
+                    H4: h4Data?.prices?.slice(-this.maxCandleHistory) || [],
+                    H1: h1Data?.prices?.slice(-this.maxCandleHistory) || [],
                 };
                 logger.info(
                     `[Bot] Initialized candle history for ${symbol}: H1: ${this.candleHistory[symbol].H1.length}, H4: ${this.candleHistory[symbol].H4.length}, D1: ${this.candleHistory[symbol].D1.length}`
@@ -131,7 +135,6 @@ class TradingBot {
     async startAnalysisInterval() {
         const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
-
 
         this.analysisInterval = setInterval(async () => {
             try {
@@ -186,40 +189,6 @@ class TradingBot {
         }
     }
 
-    // Fetches historical data for all required timeframes for a symbol.
-    // Returns D1, H4, and H1 data objects.
-    async fetchHistoricalData(symbol) {
-        const timeframes = [ANALYSIS.TIMEFRAMES.D1, ANALYSIS.TIMEFRAMES.H4, ANALYSIS.TIMEFRAMES.H1];
-
-        const count = 70; // Fetch enough candles for EMA50
-        const delays = [1000, 1000, 1000];
-        const results = [];
-
-        for (let i = 0; i < timeframes.length; i++) {
-            if (i > 0) await new Promise((resolve) => setTimeout(resolve, delays[i - 1]));
-            try {
-                const data = await getHistorical(symbol, timeframes[i], count);
-                if (!data || !data.prices || data.prices.length === 0) {
-                    logger.warn(`[fetchHistoricalData] No data for ${symbol} ${timeframes[i]}`);
-                } else {
-                    // logger.info(`[fetchHistoricalData] Fetched ${data.prices.length} bars for ${symbol} ${timeframes[i]}`);
-                }
-                results.push(data);
-            } catch (err) {
-                logger.error(`[fetchHistoricalData] Error fetching ${symbol} ${timeframes[i]}:`, err);
-                results.push(null);
-            }
-        }
-
-        // logger.info("Result data:", JSON.stringify(results, null, 2));
-
-        return {
-            d1Data: results[0],
-            h4Data: results[1],
-            h1Data: results[2],
-        };
-    }
-
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
@@ -228,6 +197,9 @@ class TradingBot {
         const h1Candles = this.candleHistory[symbol].H1;
         const h4Candles = this.candleHistory[symbol].H4;
         const d1Candles = this.candleHistory[symbol].D1;
+
+        const prev = h1Candles[h1Candles.length - 2];
+        const curr = h1Candles[h1Candles.length - 1];
 
         if (!h1Candles || !h4Candles || !d1Candles) {
             logger.warn(`[${symbol}] No candle data available`);
@@ -251,14 +223,15 @@ class TradingBot {
             symbol,
             indicators,
             h1Candles,
-            h1Candle: latestCandle,
+            prev,
+            curr,
         });
 
         // Store the latest H1 candle for history
-        h1Candles.push(latestCandle);
-        if (h1Candles.length > this.maxCandleHistory) {
-            h1Candles.shift();
-        }
+        // h1Candles.push(latestCandle);
+        // if (h1Candles.length > this.maxCandleHistory) {
+        //     h1Candles.shift();
+        // }
     }
 
     // Analyzes all symbols in the trading universe.

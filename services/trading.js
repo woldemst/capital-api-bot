@@ -130,9 +130,9 @@ class TradingService {
         return { stopLossPrice: newSL, takeProfitPrice: newTP };
     }
 
-    async executeTrade(signal, symbol, bid, ask, h1Candle) {
+    async executeTrade(signal, symbol, bid, ask, prev, curr) {
         logger.trade(signal.toUpperCase(), symbol, { bid, ask });
-        const params = await this.calculateTradeParameters(signal, symbol, bid, ask, h1Candle);
+        const params = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, curr);
         // Validate TP/SL before placing trade
         const price = signal === "buy" ? ask : bid;
         const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
@@ -147,8 +147,8 @@ class TradingService {
         }
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask, h1Candle, indicators) {
-        const price = signal === "buy" ? ask : bid;
+    async calculateTradeParameters(signal, symbol, bid, ask, prev, curr, indicators) {
+        const price = signal === "BUY" ? ask : bid;
         const pipValue = this.getPipValue(symbol);
         const buffer = TRADING.POSITION_BUFFER_PIPS * pipValue;
 
@@ -156,20 +156,20 @@ class TradingService {
         const atr = indicators?.h1?.atr || (symbol.includes("JPY") ? 0.1 : 0.001); // fallback if ATR missing
 
         let stopLossPrice;
-        if (signal === "buy") {
-            stopLossPrice = h1Candle.l - buffer;
+        if (signal === "BUY") {
+            stopLossPrice = prev.l - buffer;
             if (price - stopLossPrice < atr) {
                 stopLossPrice = price - atr;
             }
         } else {
-            stopLossPrice = h1Candle.h + buffer;
+            stopLossPrice = prev.h + buffer;
             if (stopLossPrice - price < atr) {
                 stopLossPrice = price + atr;
             }
         }
 
         const riskDistance = Math.abs(price - stopLossPrice);
-        const takeProfitPrice = signal === "buy" ? price + riskDistance * TRADING.REWARD_RISK_RATIO : price - riskDistance * TRADING.REWARD_RISK_RATIO;
+        const takeProfitPrice = signal === "BUY" ? price + riskDistance * TRADING.REWARD_RISK_RATIO : price - riskDistance * TRADING.REWARD_RISK_RATIO;
 
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
@@ -183,7 +183,7 @@ class TradingService {
             size,
             stopLossPrice,
             takeProfitPrice,
-            partialTakeProfit: signal === "buy" ? price + riskDistance * 0.5 : price - riskDistance * 0.5,
+            partialTakeProfit: signal === "BUY" ? price + riskDistance * 0.5 : price - riskDistance * 0.5,
         };
     }
 
@@ -226,16 +226,18 @@ class TradingService {
     async processPrice(message) {
         try {
             if (!message) return;
-            const { symbol, indicators, h1Candles, h1Candle } = message;
+            const { symbol, indicators, h1Candles, prev, curr } = message;
             // console.log("h1 candles length:", h1Candles.length);
 
-            if (!symbol || !indicators || !h1Candles || !h1Candle) return;
+            if (!symbol || !indicators || !h1Candles || !prev || !curr) return;
             // Log specific fields we're interested in
             console.log("Message details:", {
                 symbol: message.symbol,
                 indicators: message.indicators,
-                h1Candle: message.h1Candle,
                 h1CandlesLength: message.h1Candles.length,
+                h1Candle: message.h1Candle,
+                prev: message.prev,
+                curr: message.curr,
             });
 
             if (!symbol) {
@@ -266,7 +268,7 @@ class TradingService {
             // const reason = "no_valid_setup";
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found - ${reason}`);
-                await this.processSignal(symbol, signal, h1Candle);
+                await this.processSignal(symbol, signal, prev, curr);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal - ${reason}`); // Changed to debug level
             }
@@ -324,35 +326,35 @@ class TradingService {
     }
 
     // Process a trading signal and execute the trade if conditions are met
-    async processSignal(symbol, signal, h1Candle) {
+    async processSignal(symbol, signal, prev, curr) {
         if (this.isSymbolTraded(symbol)) {
             logger.info(`[Signal] ${symbol} already in open trades, skipping`);
             return;
         }
 
         // Check cooldown period
-        const now = Date.now();
-        const lastTrade = this.lastTradeTimestamps[symbol];
-        if (lastTrade && now - lastTrade < TRADING.COOLDOWN_PERIOD) {
-            logger.info(`[Signal] ${symbol} in cooldown period, skipping`);
-            return;
-        }
+        // const now = Date.now();
+        // const lastTrade = this.lastTradeTimestamps[symbol];
+        // if (lastTrade && now - lastTrade < TRADING.COOLDOWN_PERIOD) {
+        //     logger.info(`[Signal] ${symbol} in cooldown period, skipping`);
+        //     return;
+        // }
 
         // Check daily loss limit
-        const dailyLossLimit = -Math.abs(this.accountBalance * this.dailyLossLimitPct);
-        if (this.dailyLoss < dailyLossLimit) {
-            logger.warn(`[Risk] Daily loss limit reached: ${this.dailyLoss.toFixed(2)} €. Limit: ${dailyLossLimit.toFixed(2)} €`);
-            return;
-        }
+        // const dailyLossLimit = -Math.abs(this.accountBalance * this.dailyLossLimitPct);
+        // if (this.dailyLoss < dailyLossLimit) {
+        //     logger.warn(`[Risk] Daily loss limit reached: ${this.dailyLoss.toFixed(2)} €. Limit: ${dailyLossLimit.toFixed(2)} €`);
+        //     return;
+        // }
 
         // Use close price for both bid and ask with a small spread
-        const price = h1Candle.c;
+        const price = curr.c;
         const spread = 0.0002; // 2 pips spread assumption
         const bid = price;
         const ask = price + spread;
 
         try {
-            await this.executeTrade(signal, symbol, bid, ask, h1Candle);
+            await this.executeTrade(signal, symbol, bid, ask, curr);
             this.lastTradeTimestamps[symbol] = now;
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
