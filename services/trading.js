@@ -55,40 +55,21 @@ class TradingService {
         }
 
         return false;
-
-        // if (trendDirection === "bullish") {
-        //     return isBullish(prev) && isBearish(curr);
-        // } else if (trendDirection === "bearish") {
-        //     return isBearish(prev) && isBullish(curr);
-        // }
-        // return false;
     }
 
     generateSignal(indicators, h1Candles) {
-        const { d1Trend, h4Trend } = indicators;
+        const { h4Trend, h1 } = indicators;
 
-        if (d1Trend === "neutral") return { signal: null, reason: "neutral_d1_trend" };
+        if (h4Trend === "neutral" && h1.trend === "neutral") return { signal: null, reason: "neutral_h4_trend" };
 
-        const direction = d1Trend.toLowerCase();
+        const direction = h1.trend.toLowerCase();
         const validPattern = this.detectPattern(h1Candles, direction);
 
         if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
 
         const signal = validPattern === "bullish" ? "BUY" : "SELL";
+        console.log(`Generated ${signal} signal based on ${validPattern} pattern.`);
         return { signal, reason: `valid_${validPattern}_pattern` };
-
-        // 2. Generate signals based on H1 conditions
-        if (h1.trend === "bullish") {
-            if (h1.crossover !== "bullish") return { signal: null, reason: "waiting_bullish_cross" };
-            if (h1.rsi <= 50) return { signal: null, reason: "weak_bullish_momentum" };
-            return { signal: "BUY", reason: "aligned_bullish_trends_with_h1_confirmation" };
-        }
-
-        if (h1.trend === "bearish") {
-            if (h1.crossover !== "bearish") return { signal: null, reason: "waiting_bearish_cross" };
-            if (h1.rsi >= 50) return { signal: null, reason: "weak_bearish_momentum" };
-            return { signal: "SELL", reason: "aligned_bearish_trends_with_h1_confirmation" };
-        }
     }
 
     // Validate and adjust TP/SL to allowed range
