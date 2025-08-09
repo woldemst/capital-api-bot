@@ -4,7 +4,7 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
-import { logTradeSnapshot } from "./utils/tradeLogger.js";
+import backtest from "./backtest.js";
 
 const { SYMBOLS } = TRADING;
 
@@ -21,6 +21,7 @@ class TradingBot {
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
+        this.tradingHours = { start: 2, end: 22 };
     }
 
     // Initializes the bot, handles session retries, and starts trading or backtest mode.
@@ -38,7 +39,6 @@ class TradingBot {
                 }
 
                 await this.startLiveTrading(tokens);
-
                 this.scheduleMidnightSessionRefresh();
 
                 return; // Success, exit the retry loop
@@ -138,18 +138,27 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                logger.info(`[Running scheduled analysis...]`);
-                await this.updateAccountInfo();
-                await this.analyzeAllSymbols();
+                if (ANALYSIS.BACKTESTING.ENABLED) {
+                    // Always run backtest, regardless of trading hours
+                    await this.analyzeAllSymbols();
+                } else {
+                    if (!this.isTradingAllowed()) {
+                        logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                        return;
+                    }
+                    logger.info(`[Running scheduled analysis...]`);
+                    await this.updateAccountInfo();
+                    await this.analyzeAllSymbols();
 
-                if (this.monitorInterval) {
-                    clearInterval(this.monitorInterval);
-                    this.monitorInterval = null;
+                    // if (this.monitorInterval) {
+                    //     clearInterval(this.monitorInterval);
+                    //     this.monitorInterval = null;
+                    // }
+
+                    // if (this.openedPositions && this.openedPositions > 0) {
+                    //     this.startMonitorOpenTrades();
+                    // }
                 }
-
-                // if (this.openedPositions && this.openedPositions > 0) {
-                //     this.startMonitorOpenTrades();
-                // }
             } catch (error) {
                 logger.error("Analysis interval error:", error);
             }
@@ -185,6 +194,22 @@ class TradingBot {
                 }
                 logger.warn(`Account info update failed, retrying... (${retries} attempts left)`);
                 await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+            }
+        }
+    }
+
+    // Analyzes all symbols in the trading universe.
+    async analyzeAllSymbols() {
+        for (const symbol of SYMBOLS) {
+            if (!this.latestCandles[symbol]?.latest) continue;
+            try {
+                if (ANALYSIS.BACKTESTING.ENABLED) {
+                    await backtest(symbol, "HOUR", 100);
+                } else {
+                    await this.analyzeSymbol(symbol);
+                }
+            } catch (error) {
+                logger.error(`Error analyzing ${symbol}:`, error.message);
             }
         }
     }
@@ -232,18 +257,6 @@ class TradingBot {
         // if (h1Candles.length > this.maxCandleHistory) {
         //     h1Candles.shift();
         // }
-    }
-
-    // Analyzes all symbols in the trading universe.
-    async analyzeAllSymbols() {
-        for (const symbol of SYMBOLS) {
-            if (!this.latestCandles[symbol]?.latest) continue;
-            try {
-                await this.analyzeSymbol(symbol);
-            } catch (error) {
-                logger.error(`Error analyzing ${symbol}:`, error.message);
-            }
-        }
     }
 
     /**
@@ -312,6 +325,25 @@ class TradingBot {
         } catch (error) {
             logger.error("[Bot] Midnight session refresh failed:", error);
         }
+    }
+
+    // Checks if trading is allowed (not weekend, and within trading hours)
+    isTradingAllowed() {
+        const now = new Date();
+        const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+        const hour = now.getHours();
+
+        // Block weekends
+        if (day === 0 || day === 6) {
+            logger.info("[Bot] Trading blocked: Weekend.");
+            return false;
+        }
+        // Block outside trading hours (22:00 - 02:00)
+        if (hour < this.tradingHours.start || hour >= this.tradingHours.end) {
+            logger.info(`[Bot] Trading blocked: Outside trading hours (${this.tradingHours.start}:00-${this.tradingHours.end}:00).`);
+            return false;
+        }
+        return true;
     }
 }
 
