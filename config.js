@@ -74,6 +74,13 @@ export const ANALYSIS = {
         REWARD_RATIO: 2.0, // Target 2:1 reward/risk
         PARTIAL_TAKE_PROFIT: 0.5, // Take 50% profit at 1:1
     },
+
+
+    BACKTESTING: {
+        ENABLED: true,
+        START_DATE: "2023-01-01",
+        END_DATE: "2023-12-31",
+    },
 };
 
 // Trading Sessions (UTC times)
