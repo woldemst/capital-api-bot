@@ -77,7 +77,7 @@ export const ANALYSIS = {
 
 
     BACKTESTING: {
-        ENABLED: true,
+        ENABLED: false,
         START_DATE: "2023-01-01",
         END_DATE: "2023-12-31",
     },
@@ -100,7 +100,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 5 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: true,
+    MODE: false,
 };
 
 export const PROD = {

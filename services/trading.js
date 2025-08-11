@@ -35,11 +35,8 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    detectPattern(candles, trend) {
-        if (!candles || candles.length < 2) return false;
-
-        const prev = candles[candles.length - 2];
-        const curr = candles[candles.length - 1];
+    detectPattern(trend, prev, last) {
+        if (!prev || !last) return false;
 
         const isBullish = (c) => c.c > c.o;
         const isBearish = (c) => c.c < c.o;
@@ -48,22 +45,22 @@ class TradingService {
 
         // if (!trendDirection || trendDirection === "neutral") return false;
 
-        if (trendDirection === "bullish" && isBearish(prev) && isBullish(curr)) {
+        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
             return "bullish"; // red -> green
-        } else if (trendDirection === "bearish" && isBullish(prev) && isBearish(curr)) {
+        } else if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) {
             return "bearish"; // green -> red
         }
 
         return false;
     }
 
-    generateSignal(indicators, h1Candles) {
+    generateSignal(indicators, prev, last) {
         const { h4Trend, h1 } = indicators;
 
-        if (h4Trend === "neutral" && h1.trend === "neutral") return { signal: null, reason: "neutral_h4_trend" };
+        // if (h4Trend === "neutral" && h1.trend === "neutral") return { signal: null, reason: "neutral_h4_trend" };
 
         const direction = h1.trend.toLowerCase();
-        const validPattern = this.detectPattern(h1Candles, direction);
+        const validPattern = this.detectPattern(direction, prev, last);
 
         if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
 
@@ -130,9 +127,9 @@ class TradingService {
         return { stopLossPrice: newSL, takeProfitPrice: newTP };
     }
 
-    async executeTrade(signal, symbol, bid, ask, prev, curr) {
+    async executeTrade(signal, symbol, bid, ask, prev, last) {
         logger.trade(signal.toUpperCase(), symbol, { bid, ask });
-        const params = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, curr);
+        const params = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, last);
         // Validate TP/SL before placing trade
         const price = signal === "buy" ? ask : bid;
         const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
@@ -147,7 +144,7 @@ class TradingService {
         }
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask, prev, curr, indicators) {
+    async calculateTradeParameters(signal, symbol, bid, ask, prev, last, indicators) {
         const price = signal === "BUY" ? ask : bid;
         const pipValue = this.getPipValue(symbol);
         const buffer = TRADING.POSITION_BUFFER_PIPS * pipValue;
@@ -226,18 +223,16 @@ class TradingService {
     async processPrice(message) {
         try {
             if (!message) return;
-            const { symbol, indicators, h1Candles, prev, curr } = message;
-            // console.log("h1 candles length:", h1Candles.length);
+            const { symbol, indicators, h1Candles, prev, last } = message;
 
-            if (!symbol || !indicators || !h1Candles || !prev || !curr) return;
-            // Log specific fields we're interested in
+            if (!symbol || !indicators || !h1Candles || !prev || !last) return;
+
             console.log("Message details:", {
                 symbol: message.symbol,
                 indicators: message.indicators,
                 h1CandlesLength: message.h1Candles.length,
-                h1Candle: message.h1Candle,
                 prev: message.prev,
-                curr: message.curr,
+                last: message.last,
             });
 
             if (!symbol) {
@@ -263,12 +258,11 @@ class TradingService {
             }
 
             // Generate signal using our streamlined method
-            const { signal, reason } = this.generateSignal(indicators, h1Candles);
-            // const signal = null;
-            // const reason = "no_valid_setup";
+            const { signal, reason } = this.generateSignal(indicators, prev, last);
+
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found - ${reason}`);
-                await this.processSignal(symbol, signal, prev, curr);
+                await this.processSignal(symbol, signal, prev, last);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal - ${reason}`); // Changed to debug level
             }
@@ -326,7 +320,7 @@ class TradingService {
     }
 
     // Process a trading signal and execute the trade if conditions are met
-    async processSignal(symbol, signal, prev, curr) {
+    async processSignal(symbol, signal, prev, last) {
         if (this.isSymbolTraded(symbol)) {
             logger.info(`[Signal] ${symbol} already in open trades, skipping`);
             return;
@@ -348,13 +342,13 @@ class TradingService {
         // }
 
         // Use close price for both bid and ask with a small spread
-        const price = curr.c;
+        const price = last.c;
         const spread = 0.0002; // 2 pips spread assumption
         const bid = price;
         const ask = price + spread;
 
         try {
-            await this.executeTrade(signal, symbol, bid, ask, curr);
+            await this.executeTrade(signal, symbol, bid, ask, last);
             this.lastTradeTimestamps[symbol] = now;
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {

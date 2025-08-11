@@ -62,7 +62,7 @@ class TradingBot {
     async startLiveTrading(tokens) {
         try {
             // 1. Setup basic services
-            this.setupWebSocket(tokens);
+            // this.setupWebSocket(tokens); // just for 15, 5, 1 minute candles
             this.startSessionPing();
 
             // 2. Initialize data
@@ -101,23 +101,23 @@ class TradingBot {
         }
     }
 
-    // Sets up the WebSocket connection for real-time price data.
-    setupWebSocket(tokens) {
-        webSocketService.connect(tokens, SYMBOLS, (data) => {
-            try {
-                const message = JSON.parse(data.toString());
+    // WebSocket connection is just for 15, 5, 1 minute candles
+    // setupWebSocket(tokens) {
+    //     webSocketService.connect(tokens, SYMBOLS, (data) => {
+    //         try {
+    //             const message = JSON.parse(data.toString());
 
-                if (message.payload?.epic) {
-                    const candle = message.payload;
-                    const symbol = candle.epic;
-                    // Just store the latest candle for each symbol
-                    this.latestCandles[symbol] = { latest: candle };
-                }
-            } catch (error) {
-                logger.error("WebSocket message processing error:", error.message, data?.toString());
-            }
-        });
-    }
+    //             if (message.payload?.epic) {
+    //                 const candle = message.payload;
+    //                 const symbol = candle.epic;
+    //                 // Just store the latest candle for each symbol
+    //                 this.latestCandles[symbol] = { latest: candle };
+    //             }
+    //         } catch (error) {
+    //             logger.error("WebSocket message processing error:", error.message, data?.toString());
+    //         }
+    //     });
+    // }
 
     // Starts a periodic session ping to keep the API session alive.
     startSessionPing() {
@@ -147,6 +147,7 @@ class TradingBot {
                         return;
                     }
                     logger.info(`[Running scheduled analysis...]`);
+
                     await this.updateAccountInfo();
                     await this.analyzeAllSymbols();
 
@@ -201,13 +202,8 @@ class TradingBot {
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         for (const symbol of SYMBOLS) {
-            if (!this.latestCandles[symbol]?.latest) continue;
             try {
-                if (ANALYSIS.BACKTESTING.ENABLED) {
-                    await backtest(symbol, "HOUR", 100);
-                } else {
-                    await this.analyzeSymbol(symbol);
-                }
+                await this.analyzeSymbol(symbol);
             } catch (error) {
                 logger.error(`Error analyzing ${symbol}:`, error.message);
             }
@@ -224,7 +220,7 @@ class TradingBot {
         const d1Candles = this.candleHistory[symbol].D1;
 
         const prev = h1Candles[h1Candles.length - 2];
-        const curr = h1Candles[h1Candles.length - 1];
+        const last = h1Candles[h1Candles.length - 1];
 
         if (!h1Candles || !h4Candles || !d1Candles) {
             logger.warn(`[${symbol}] No candle data available`);
@@ -232,11 +228,11 @@ class TradingBot {
         }
 
         // Get latest real-time candle
-        const latestCandle = this.latestCandles[symbol]?.latest;
-        if (!latestCandle) {
-            logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
-            return;
-        }
+        // const latestCandle = this.latestCandles[symbol]?.latest;
+        // if (!latestCandle) {
+        //     logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
+        //     return;
+        // }
         // Calculate trends and indicators
         const indicators = {
             d1Trend: (await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1)).trend,
@@ -249,7 +245,7 @@ class TradingBot {
             indicators,
             h1Candles,
             prev,
-            curr,
+            last,
         });
 
         // Store the latest H1 candle for history
