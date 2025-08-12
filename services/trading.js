@@ -76,6 +76,9 @@ class TradingService {
 
     // Validate and adjust TP/SL to allowed range
     async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
+        logger.info(`[TP/SL Validation] Symbol: ${symbol}, Direction: ${direction}`);
+        logger.info(`[TP/SL Validation] Entry: ${entryPrice}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
+
         const range = await getAllowedTPRange(symbol);
 
         let newTP = takeProfitPrice;
@@ -83,7 +86,7 @@ class TradingService {
         const decimals = range.decimals || 5;
         // For forex, TP/SL must be at least minTPDistance away from entry, and not violate maxTPDistance
         // For SELL: TP < entry, SL > entry. For BUY: TP > entry, SL < entry
-        if (direction === "buy") {
+        if (direction === "BUY") {
             const minTP = entryPrice + range.minTPDistance * Math.pow(10, -decimals);
             const maxTP = entryPrice + range.maxTPDistance * Math.pow(10, -decimals);
             if (newTP < minTP) {
@@ -129,14 +132,30 @@ class TradingService {
                 newSL = maxSL;
             }
         }
+        // After adjusting newTP and newSL
+        if (newTP === entryPrice) {
+            newTP += direction === "BUY" ? range.minTPDistance * Math.pow(10, -decimals) : -range.minTPDistance * Math.pow(10, -decimals);
+        }
+        if (newSL === entryPrice) {
+            newSL += direction === "BUY" ? -range.minSLDistance * Math.pow(10, -decimals) : range.minSLDistance * Math.pow(10, -decimals);
+        }
+        logger.info(`[TP/SL Validation] Final SL: ${newSL}, Final TP: ${newTP}`);
         return { stopLossPrice: newSL, takeProfitPrice: newTP };
     }
 
-    async executeTrade(signal, symbol, bid, ask, prev, last) {
+    // Minimal TP/SL validation
+    // async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
+    //     const buffer = 0.0005; // 5 pips for most FX pairs
+    //     let newTP = direction === "BUY" ? entryPrice + buffer : entryPrice - buffer;
+    //     let newSL = direction === "BUY" ? entryPrice - buffer : entryPrice + buffer;
+    //     return { stopLossPrice: newSL, takeProfitPrice: newTP };
+    // }
+
+    async executeTrade(signal, symbol, bid, ask) {
         logger.trade(signal.toUpperCase(), symbol, { bid, ask });
-        const params = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, last);
+        const params = await this.calculateTradeParameters(signal, symbol, bid, ask);
         // Validate TP/SL before placing trade
-        const price = signal === "buy" ? ask : bid;
+        const price = signal === "BUY" ? ask : bid;
         const validated = await this.validateTPandSL(symbol, signal, price, params.stopLossPrice, params.takeProfitPrice);
         params.stopLossPrice = validated.stopLossPrice;
         params.takeProfitPrice = validated.takeProfitPrice;
@@ -149,49 +168,38 @@ class TradingService {
         }
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask, prev, last, indicators) {
+    async calculateTradeParameters(signal, symbol, bid, ask) {
         const price = signal === "BUY" ? ask : bid;
-        const pipValue = this.getPipValue(symbol);
-        const buffer = TRADING.POSITION_BUFFER_PIPS * pipValue;
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const buffer = 10 * pip;
 
-        // --- ATR-based minimum stop distance ---
-        const atr = indicators?.h1?.atr || (symbol.includes("JPY") ? 0.1 : 0.001); // fallback if ATR missing
-
-        let stopLossPrice;
+        let stopLossPrice, takeProfitPrice;
         if (signal === "BUY") {
-            stopLossPrice = prev.low - buffer;
-            if (price - stopLossPrice < atr) {
-                stopLossPrice = price - atr;
-            }
+            stopLossPrice = price - buffer;
+            takeProfitPrice = price + buffer * 2; // 2:1 RR
         } else {
-            stopLossPrice = prev.high + buffer;
-            if (stopLossPrice - price < atr) {
-                stopLossPrice = price + atr;
-            }
+            stopLossPrice = price + buffer;
+            takeProfitPrice = price - buffer * 2;
         }
 
-        const riskDistance = Math.abs(price - stopLossPrice);
-        const takeProfitPrice = signal === "BUY" ? price + riskDistance * TRADING.REWARD_RISK_RATIO : price - riskDistance * TRADING.REWARD_RISK_RATIO;
-
-        // console.log("Account Balance:", this.accountBalance, "Price:", price, "Stop Loss Price:", stopLossPrice, "Symbol:", symbol);
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
         logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
-        Entry: ${price}
-        SL: ${stopLossPrice} (${riskDistance / pipValue} pips)
-        TP: ${takeProfitPrice} (${TRADING.REWARD_RISK_RATIO}:1)
-        Size: ${size}`);
+            Entry: ${price}
+            SL: ${stopLossPrice}
+            TP: ${takeProfitPrice}
+            Size: ${size}`);
 
         return {
             size,
             stopLossPrice,
             takeProfitPrice,
-            partialTakeProfit: signal === "BUY" ? price + riskDistance * 0.5 : price - riskDistance * 0.5,
+            partialTakeProfit: signal === "BUY" ? price + buffer : price - buffer,
         };
     }
 
     async executePosition(signal, symbol, params, expectedPrice) {
-        const { size, stopLossPrice, takeProfitPrice, trailingStopParams } = params;
+        const { size, stopLossPrice, takeProfitPrice } = params;
         try {
             // Pass symbol, direction, and price to placePosition for min stop enforcement
             const position = await placePosition(symbol, signal, size, null, stopLossPrice, takeProfitPrice, expectedPrice);
@@ -201,22 +209,6 @@ class TradingService {
                 const confirmation = await getDealConfirmation(position.dealReference);
                 if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                     logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
-                }
-                // --- Slippage check ---
-                if (confirmation.level && expectedPrice) {
-                    const { TRADING } = await import("../config.js");
-                    // Calculate slippage in pips
-                    const decimals = 5; // Most FX pairs
-                    const pip = Math.pow(10, -decimals);
-                    const slippage = Math.abs(confirmation.level - expectedPrice) / pip;
-                    if (slippage > TRADING.MAX_SLIPPAGE_PIPS) {
-                        logger.warn(
-                            `[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips (max allowed: ${TRADING.MAX_SLIPPAGE_PIPS})`
-                        );
-                        // Optionally: take action (e.g., close trade, alert, etc.)
-                    } else {
-                        logger.info(`[Slippage] ${symbol}: Intended ${expectedPrice}, Executed ${confirmation.level}, Slippage: ${slippage.toFixed(1)} pips`);
-                    }
                 }
             }
             return position;
@@ -363,6 +355,11 @@ class TradingService {
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);
+            if (error.response?.status === 429) {
+                logger.warn("Rate limit hit, waiting 10 seconds before retry...");
+                await new Promise((resolve) => setTimeout(resolve, 10000));
+                // Optionally, retry the request here
+            }
         }
     }
 }

@@ -152,10 +152,10 @@ class TradingBot {
                     // Always run backtest, regardless of trading hours
                     await this.analyzeAllSymbols();
                 } else {
-                    if (!this.isTradingAllowed()) {
-                        logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                        return;
-                    }
+                    // if (!this.isTradingAllowed()) {
+                    //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                    //     return;
+                    // }
 
                     await this.updateAccountInfo();
                     await this.analyzeAllSymbols();
