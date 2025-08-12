@@ -38,14 +38,16 @@ class TradingService {
     detectPattern(trend, prev, last) {
         if (!prev || !last) return false;
 
-        // console.log('prev:', prev);
-        // console.log('last:', last);
-        
         const isBullish = (c) => c.close > c.open;
         const isBearish = (c) => c.close < c.open;
-      
+
         const trendDirection = trend.toLowerCase();
-        console.log('trendDirection:', trendDirection);
+        // console.log("prev:", prev);
+        // console.log("last:", last);
+
+        // console.log("trendDirection:", trendDirection, "isBullish(last):", isBullish(last), "isBearish(last):", isBearish(last));
+        // console.log("trendDirection:", trendDirection, "isBullish(prev):", isBearish(prev), "isBearish(prev):", isBullish(prev));
+
         // if (!trendDirection || trendDirection === "neutral") return false;
 
         if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
@@ -58,18 +60,13 @@ class TradingService {
     }
 
     generateSignal(indicators, prev, last) {
-        const { h4Trend, h1 } = indicators;
+        const { d1Trend, h1 } = indicators;
 
         // if (h4Trend === "neutral" && h1.trend === "neutral") return { signal: null, reason: "neutral_h4_trend" };
 
-        // console.log('For direction:', h4Trend);
-        
-        const direction = h4Trend.toLowerCase();
-        console.log('direction:', direction);
-        
-        const validPattern = this.detectPattern(direction, prev, last);
-        console.log('Valid pattern:', validPattern);
-        
+        const validPattern = this.detectPattern(d1Trend, prev, last);
+
+        // console.log("Valid pattern:", validPattern);
         if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
 
         const signal = validPattern === "bullish" ? "BUY" : "SELL";
@@ -162,12 +159,12 @@ class TradingService {
 
         let stopLossPrice;
         if (signal === "BUY") {
-            stopLossPrice = prev.l - buffer;
+            stopLossPrice = prev.low - buffer;
             if (price - stopLossPrice < atr) {
                 stopLossPrice = price - atr;
             }
         } else {
-            stopLossPrice = prev.h + buffer;
+            stopLossPrice = prev.high + buffer;
             if (stopLossPrice - price < atr) {
                 stopLossPrice = price + atr;
             }
@@ -176,6 +173,7 @@ class TradingService {
         const riskDistance = Math.abs(price - stopLossPrice);
         const takeProfitPrice = signal === "BUY" ? price + riskDistance * TRADING.REWARD_RISK_RATIO : price - riskDistance * TRADING.REWARD_RISK_RATIO;
 
+        // console.log("Account Balance:", this.accountBalance, "Price:", price, "Stop Loss Price:", stopLossPrice, "Symbol:", symbol);
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
         logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
@@ -308,6 +306,10 @@ class TradingService {
         logger.info(
             `[PositionSize] Strict 2%% rule: Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`
         );
+        if (!size || isNaN(size) || size < 100) {
+            logger.error(`[Trade] Invalid position size for ${symbol}: ${size}`);
+            return;
+        }
         return size;
     }
 
@@ -350,13 +352,13 @@ class TradingService {
         // }
 
         // Use close price for both bid and ask with a small spread
-        const price = last.c;
+        const price = last.close;
         const spread = 0.0002; // 2 pips spread assumption
         const bid = price;
         const ask = price + spread;
 
         try {
-            await this.executeTrade(signal, symbol, bid, ask, last);
+            await this.executeTrade(signal, symbol, bid, ask, prev, last);
             this.lastTradeTimestamps[symbol] = now;
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {

@@ -84,6 +84,7 @@ class TradingBot {
                 const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
                 const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
                 const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
+                // await new Promise((resolve) => setTimeout(resolve, 500)); // 0.5s delay
 
                 if (!d1Data || !h4Data || !h1Data) {
                     logger.error(`[bot.js][initializeCandleHistory] Failed to fetch historical data for ${symbol}`);
@@ -101,11 +102,7 @@ class TradingBot {
                 );
 
                 // Immediate check for missing data
-                if (
-                    !this.candleHistory[symbol].H1.length ||
-                    !this.candleHistory[symbol].H4.length ||
-                    !this.candleHistory[symbol].D1.length
-                ) {
+                if (!this.candleHistory[symbol].H1.length || !this.candleHistory[symbol].H4.length || !this.candleHistory[symbol].D1.length) {
                     logger.error(`[bot.js][initializeCandleHistory] Incomplete candle data for ${symbol} after download.`);
                 }
             } catch (error) {
@@ -159,7 +156,6 @@ class TradingBot {
                         logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
                         return;
                     }
-                    logger.info(`[Running scheduled analysis...]`);
 
                     await this.updateAccountInfo();
                     await this.analyzeAllSymbols();
@@ -215,6 +211,7 @@ class TradingBot {
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         for (const symbol of SYMBOLS) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
             try {
                 await this.analyzeSymbol(symbol);
             } catch (error) {
