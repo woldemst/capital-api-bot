@@ -34,7 +34,7 @@ class TradingBot {
                 const tokens = getSessionTokens();
 
                 if (!tokens.cst || !tokens.xsecurity) {
-                    logger.error(`[Bot] Invalid session tokens, attempt ${retryCount + 1}/${this.maxRetries}`);
+                    logger.error(`[bot.js] [Bot] Invalid session tokens, attempt ${retryCount + 1}/${this.maxRetries}`);
                     throw new Error("Invalid session tokens");
                 }
 
@@ -44,14 +44,14 @@ class TradingBot {
                 return; // Success, exit the retry loop
             } catch (error) {
                 retryCount++;
-                logger.error(`[Bot] Initialization attempt ${retryCount} failed:`, error);
+                logger.error(`[bot.js][Bot] Initialization attempt ${retryCount} failed:`, error);
 
                 if (retryCount < this.maxRetries) {
                     logger.info(`[Bot] Refreshing session and retrying in ${this.retryDelay / 1000}s...`);
                     await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
                     await refreshSession();
                 } else {
-                    logger.error("[Bot] Max retry attempts reached. Shutting down.");
+                    logger.error("[bot.js] [Bot] Max retry attempts reached. Shutting down.");
                     throw error;
                 }
             }
@@ -73,7 +73,7 @@ class TradingBot {
 
             this.isRunning = true;
         } catch (error) {
-            logger.error("[Bot] Error starting live trading:", error);
+            logger.error("[bot.js][Bot] Error starting live trading:", error);
             throw error;
         }
     }
@@ -85,18 +85,31 @@ class TradingBot {
                 const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
                 const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
 
-                if (!d1Data || !h4Data || !h1Data) return console.error(`[Bot] Failed to fetch historical data for ${symbol}`);
+                if (!d1Data || !h4Data || !h1Data) {
+                    logger.error(`[bot.js][initializeCandleHistory] Failed to fetch historical data for ${symbol}`);
+                    continue;
+                }
 
                 this.candleHistory[symbol] = {
                     D1: d1Data?.prices?.slice(-this.maxCandleHistory) || [],
                     H4: h4Data?.prices?.slice(-this.maxCandleHistory) || [],
                     H1: h1Data?.prices?.slice(-this.maxCandleHistory) || [],
                 };
+
                 logger.info(
                     `[Bot] Initialized candle history for ${symbol}: H1: ${this.candleHistory[symbol].H1.length}, H4: ${this.candleHistory[symbol].H4.length}, D1: ${this.candleHistory[symbol].D1.length}`
                 );
+
+                // Immediate check for missing data
+                if (
+                    !this.candleHistory[symbol].H1.length ||
+                    !this.candleHistory[symbol].H4.length ||
+                    !this.candleHistory[symbol].D1.length
+                ) {
+                    logger.error(`[bot.js][initializeCandleHistory] Incomplete candle data for ${symbol} after download.`);
+                }
             } catch (error) {
-                logger.error(`[Bot] Error initializing candle history for ${symbol}:`, error);
+                logger.error(`[bot.js][initializeCandleHistory] Error initializing candle history for ${symbol}:`, error);
             }
         }
     }
@@ -114,7 +127,7 @@ class TradingBot {
     //                 this.latestCandles[symbol] = { latest: candle };
     //             }
     //         } catch (error) {
-    //             logger.error("WebSocket message processing error:", error.message, data?.toString());
+    //             logger.error("[bot.js] WebSocket message processing error:", error.message, data?.toString());
     //         }
     //     });
     // }
@@ -126,7 +139,7 @@ class TradingBot {
                 await pingSession();
                 logger.info("Session pinged successfully");
             } catch (error) {
-                logger.error("Session ping failed:", error.message);
+                logger.error("[bot.js] Session ping failed:", error.message);
             }
         }, this.pingInterval);
     }
@@ -161,7 +174,7 @@ class TradingBot {
                     // }
                 }
             } catch (error) {
-                logger.error("Analysis interval error:", error);
+                logger.error("[bot.js] Analysis interval error:", error);
             }
         }, interval);
     }
@@ -189,7 +202,7 @@ class TradingBot {
             } catch (error) {
                 retries--;
                 if (retries === 0) {
-                    logger.error("Failed to update account info after all retries:", error);
+                    logger.error("[bot.js] Failed to update account info after all retries:", error);
                     // Don't throw - just continue with old values
                     return;
                 }
@@ -205,7 +218,7 @@ class TradingBot {
             try {
                 await this.analyzeSymbol(symbol);
             } catch (error) {
-                logger.error(`Error analyzing ${symbol}:`, error.message);
+                logger.error(`[bot.js] Error analyzing ${symbol}:`, error.message);
             }
         }
     }
@@ -214,7 +227,12 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        // Get latest H1 candle for real-time price
+        // Guard: Check if candle history exists for this symbol
+        if (!this.candleHistory[symbol]) {
+            logger.error(`[bot.js][analyzeSymbol] No candle history for ${symbol}, skipping analysis.`);
+            return;
+        }
+
         const h1Candles = this.candleHistory[symbol].H1;
         const h4Candles = this.candleHistory[symbol].H4;
         const d1Candles = this.candleHistory[symbol].D1;
@@ -223,16 +241,10 @@ class TradingBot {
         const last = h1Candles[h1Candles.length - 1];
 
         if (!h1Candles || !h4Candles || !d1Candles) {
-            logger.warn(`[${symbol}] No candle data available`);
+            logger.error(`[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, H4: ${!!h4Candles}, D1: ${!!d1Candles}), skipping analysis.`);
             return;
         }
 
-        // Get latest real-time candle
-        // const latestCandle = this.latestCandles[symbol]?.latest;
-        // if (!latestCandle) {
-        //     logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
-        //     return;
-        // }
         // Calculate trends and indicators
         const indicators = {
             d1Trend: (await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1)).trend,
@@ -292,7 +304,7 @@ class TradingBot {
                 // }
                 logger.info("[Monitoring] monitorOpenTrades completed");
             } catch (error) {
-                logger.error("[Bot] Error in monitorOpenTrades:", error);
+                logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
             }
         }, 1 * 60 * 1000); // every 1 min
     }
@@ -319,7 +331,7 @@ class TradingBot {
             await refreshSession();
             logger.info("[Bot] Session refreshed at midnight.");
         } catch (error) {
-            logger.error("[Bot] Midnight session refresh failed:", error);
+            logger.error("[bot.js][Bot] Midnight session refresh failed:", error);
         }
     }
 
@@ -346,6 +358,6 @@ class TradingBot {
 // Create and start the bot
 const bot = new TradingBot();
 bot.initialize().catch((error) => {
-    logger.error("Bot initialization failed:", error);
+    logger.error("[bot.js] Bot initialization failed:", error);
     process.exit(1);
 });

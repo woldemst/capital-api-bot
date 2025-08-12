@@ -38,11 +38,14 @@ class TradingService {
     detectPattern(trend, prev, last) {
         if (!prev || !last) return false;
 
-        const isBullish = (c) => c.c > c.o;
-        const isBearish = (c) => c.c < c.o;
-
+        // console.log('prev:', prev);
+        // console.log('last:', last);
+        
+        const isBullish = (c) => c.close > c.open;
+        const isBearish = (c) => c.close < c.open;
+      
         const trendDirection = trend.toLowerCase();
-
+        console.log('trendDirection:', trendDirection);
         // if (!trendDirection || trendDirection === "neutral") return false;
 
         if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
@@ -59,9 +62,14 @@ class TradingService {
 
         // if (h4Trend === "neutral" && h1.trend === "neutral") return { signal: null, reason: "neutral_h4_trend" };
 
-        const direction = h1.trend.toLowerCase();
+        // console.log('For direction:', h4Trend);
+        
+        const direction = h4Trend.toLowerCase();
+        console.log('direction:', direction);
+        
         const validPattern = this.detectPattern(direction, prev, last);
-
+        console.log('Valid pattern:', validPattern);
+        
         if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
 
         const signal = validPattern === "bullish" ? "BUY" : "SELL";
@@ -139,7 +147,7 @@ class TradingService {
             // Pass expected entry price for slippage check
             await this.executePosition(signal, symbol, params, price);
         } catch (error) {
-            logger.error(`[TradeExecution] Failed for ${symbol}:`, error);
+            logger.error(`[trading.js][TradeExecution] Failed for ${symbol}:`, error);
             throw error;
         }
     }
@@ -194,7 +202,7 @@ class TradingService {
                 const { getDealConfirmation } = await import("../api.js");
                 const confirmation = await getDealConfirmation(position.dealReference);
                 if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
-                    logger.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+                    logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
                 }
                 // --- Slippage check ---
                 if (confirmation.level && expectedPrice) {
@@ -215,7 +223,7 @@ class TradingService {
             }
             return position;
         } catch (error) {
-            logger.error(`[Position] Failed for ${symbol}:`, error);
+            logger.error(`[trading.js][Position] Failed for ${symbol}:`, error);
             throw error;
         }
     }
@@ -267,7 +275,7 @@ class TradingService {
                 logger.debug(`[Signal] ${symbol}: No signal - ${reason}`); // Changed to debug level
             }
         } catch (error) {
-            logger.error(`[ProcessPrice] Error for ${symbol}:`, error);
+            logger.error(`[trading.js][ProcessPrice] Error for ${symbol}:`, error);
         }
     }
 
@@ -276,7 +284,7 @@ class TradingService {
         const riskAmount = balance * 0.02; // 2% rule
         const pipValue = this.getPipValue(symbol);
         if (!pipValue || pipValue <= 0) {
-            logger.error("Invalid pip value calculation");
+            logger.error("[trading.js] Invalid pip value calculation");
             return 100; // Fallback with warning
         }
         const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
@@ -315,7 +323,7 @@ class TradingService {
             logger.info(`[API] Closed position for dealId: ${dealId}`);
             if (result) logTradeResult(dealId, result);
         } catch (error) {
-            logger.error(`[API] Failed to close position for dealId: ${dealId}`, error);
+            logger.error(`[trading.js][API] Failed to close position for dealId: ${dealId}`, error);
         }
     }
 
@@ -352,7 +360,7 @@ class TradingService {
             this.lastTradeTimestamps[symbol] = now;
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
-            logger.error(`[Signal] Failed to process ${signal} signal for ${symbol}:`, error);
+            logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);
         }
     }
 }
