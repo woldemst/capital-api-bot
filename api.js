@@ -67,10 +67,10 @@ export const startSession = async () => {
 
         return response.data;
     } catch (error) {
-        logger.error("Failed to start session:", error.response ? error.response.data : error.message);
+        logger.error("[api.js] Failed to start session:", error.response ? error.response.data : error.message);
         if (error.response) {
-            logger.error("Response status:", error.response.status);
-            logger.error("Response headers:", error.response.headers);
+            logger.error("[api.js] Response status:", error.response.status);
+            logger.error("[api.js] Response headers:", error.response.headers);
         }
         throw error;
     }
@@ -87,7 +87,7 @@ export const pingSession = async () => {
         logger.info(`[API] securityToken: ${xsecurity}`);
         logger.info(`[API] CST: ${cst}`);
     } catch (error) {
-        logger.error(`[API] Error pinging session: ${error.message}`);
+        logger.error(`[api.js][API] Error pinging session: ${error.message}`);
         throw error;
     }
 };
@@ -105,7 +105,7 @@ export const refreshSession = async () => {
         sessionStartTime = Date.now();
         logger.info("[API] Session tokens refreshed");
     } catch (error) {
-        logger.error(`[API] Error refreshing session: ${error.message}`);
+        logger.error(`[api.js][API] Error refreshing session: ${error.message}`);
         throw error;
     }
 };
@@ -119,7 +119,7 @@ export const getSessionDetails = async () => {
         const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
         logger.info(`[API] Session details: ${JSON.stringify(response.data)}`);
     } catch (error) {
-        logger.error("[API] Session details error:", error.response?.data || error.message);
+        logger.error("[api.js][API] Session details error:", error.response?.data || error.message);
     }
 };
 
@@ -323,7 +323,7 @@ export async function closePosition(dealId) {
         logger.info(`[API] Position closed:`, response.data);
         return response.data;
     } catch (error) {
-        logger.error(`[API] Failed to close position for dealId: ${dealId}`, error.response?.data || error.message);
+        logger.error(`[api.js][API] Failed to close position for dealId: ${dealId}`, error.response?.data || error.message);
         throw error;
     }
 }
@@ -352,7 +352,7 @@ export async function getAllowedTPRange(symbol) {
             market: details.snapshot,
         };
     } catch (error) {
-        logger.error(`[API] getAllowedTPRange error for ${symbol}:`, error.message);
+        logger.error(`[api.js][API] getAllowedTPRange error for ${symbol}:`, error.message);
         return {
             minTPDistance: 0,
             maxTPDistance: Number.POSITIVE_INFINITY,

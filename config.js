@@ -75,9 +75,8 @@ export const ANALYSIS = {
         PARTIAL_TAKE_PROFIT: 0.5, // Take 50% profit at 1:1
     },
 
-
     BACKTESTING: {
-        ENABLED: true,
+        ENABLED: false,
         START_DATE: "2023-01-01",
         END_DATE: "2023-12-31",
     },
