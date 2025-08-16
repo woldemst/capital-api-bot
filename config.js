@@ -43,6 +43,7 @@ export const ANALYSIS = {
         D1: "DAY", // Daily trend direction
         H4: "HOUR_4", // 4-hour trend direction
         H1: "HOUR", // 1-hour entry timeframe
+        M15: "MINUTE_15", // 15-minute entry timeframe
     },
 
     // EMAs for trend and entry
@@ -75,7 +76,6 @@ export const ANALYSIS = {
         PARTIAL_TAKE_PROFIT: 0.5, // Take 50% profit at 1:1
     },
 
-
     BACKTESTING: {
         ENABLED: false,
         START_DATE: "2023-01-01",
@@ -100,11 +100,12 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 5 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: false,
+    MODE: true,
 };
 
 export const PROD = {
-    INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
+    // INTERVAL: (15 - (new Date().getMinutes() % 15)) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
+    INTERVAL: (60 - (new Date().getMinutes() % 15)) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
 };
 // For convenience in error messages and logging
 export const VERSION = "1.0.0";
