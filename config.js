@@ -14,6 +14,10 @@ export const TRADING = {
     // Instruments and timeframes
     SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
 
+    crypto: ["BTC/USD", "ETH/USD"],
+    stocks: ["AAPL", "TSLA"],
+    etfs: ["SPY", "QQQ"],
+
     // Position sizing and risk management
     LEVERAGE: 30,
     RISK_PER_TRADE: 0.02, // 2% risk per trade
@@ -77,7 +81,7 @@ export const ANALYSIS = {
     },
 
     BACKTESTING: {
-        ENABLED: false,
+        ENABLED: true,
         START_DATE: "2023-01-01",
         END_DATE: "2023-12-31",
     },

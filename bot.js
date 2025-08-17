@@ -271,7 +271,7 @@ class TradingBot {
                 const positions = await getOpenPositions();
                 for (const pos of positions.positions) {
                     console.log("pos", pos);
-                    
+
                     const positionData = {
                         dealId: pos.dealId,
                         direction: pos.position.direction,
