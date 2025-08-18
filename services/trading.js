@@ -38,12 +38,12 @@ class TradingService {
     detectPattern(trend, prev, last) {
         if (!trend || !prev || !last) return false;
 
+        // console.log("prev:", prev);
+        // console.log("last:", last);
         const isBullish = (c) => c.close > c.open;
         const isBearish = (c) => c.close < c.open;
 
         const trendDirection = trend.toLowerCase();
-        // console.log("prev:", prev);
-        // console.log("last:", last);
 
         if (!trendDirection || trendDirection === "neutral") return false;
 
@@ -145,9 +145,9 @@ class TradingService {
         // logger.trade(signal.toUpperCase(), symbol, { bid, ask });
         const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, last);
 
-        const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
+        // const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
 
-        const position = await placePosition(symbol, signal, size, price, SL, TP);
+        const position = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
         if (position?.dealReference) {
             const confirmation = await getDealConfirmation(position.dealReference);
@@ -165,24 +165,21 @@ class TradingService {
 
         // 1. SL below/above prev candle
         let stopLossPrice;
-        if (signal === "BUY") {
-            stopLossPrice = prev.low - buffer;
-        } else {
-            stopLossPrice = prev.high + buffer;
-        }
+        let takeProfitPrice;
 
-        // 2. Calculate SL distance and last candle body
-        const slDistance = Math.abs(entry - stopLossPrice);
         const lastBody = Math.abs(last.close - last.open);
 
-        // 3. TP: max(2×SL, 1.5×body)
+        const slDistance = Math.abs(entry - stopLossPrice);
         let tpDistance = Math.max(2 * slDistance, 1.5 * lastBody);
-        let takeProfitPrice;
+
         if (signal === "BUY") {
+            stopLossPrice = prev.low - buffer;
             takeProfitPrice = entry + tpDistance;
         } else {
+            stopLossPrice = prev.high + buffer;
             takeProfitPrice = entry - tpDistance;
         }
+
 
         // 4. Position size based on risk
         const riskAmount = this.accountBalance * this.maxRiskPerTrade;
