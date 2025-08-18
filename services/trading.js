@@ -38,12 +38,12 @@ class TradingService {
     detectPattern(trend, prev, last) {
         if (!trend || !prev || !last) return false;
 
-        // console.log("prev:", prev);
-        // console.log("last:", last);
         const isBullish = (c) => c.close > c.open;
         const isBearish = (c) => c.close < c.open;
 
         const trendDirection = trend.toLowerCase();
+
+        console.log("trendDirection", trendDirection);
 
         if (!trendDirection || trendDirection === "neutral") return false;
 
@@ -57,11 +57,11 @@ class TradingService {
     }
 
     generateSignal(indicators, prev, last) {
-        const { h4Trend, h1Trend, h1, m15 } = indicators;
+        const { d1Trend, h1Trend, m15 } = indicators;
 
-        if (h4Trend === "neutral" && h1Trend === "neutral") return { signal: null, reason: "neutral_trend" };
+        // if (d1Trend === "neutral") return { signal: null, reason: "neutral_trend" };
 
-        const validPattern = this.detectPattern(h1Trend, prev, last);
+        const validPattern = this.detectPattern(d1Trend, prev, last);
 
         // console.log("Valid pattern:", validPattern);
         if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
@@ -143,6 +143,7 @@ class TradingService {
 
     async executeTrade(symbol, signal, bid, ask, prev, last) {
         // logger.trade(signal.toUpperCase(), symbol, { bid, ask });
+        
         const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, last);
 
         // const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
@@ -157,35 +158,48 @@ class TradingService {
         }
     }
 
+    // Helper to round price to 5 or 3 digits
+    roundPrice(price, symbol) {
+        const decimals = symbol.includes("JPY") ? 3 : 5;
+        return Number(price).toFixed(decimals) * 1;
+    }
+
     async calculateTradeParameters(signal, symbol, bid, ask, prev, last) {
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-        const buffer = pip; // 1 pip buffer
-
         const entry = signal === "BUY" ? ask : bid;
 
-        // 1. SL below/above prev candle
-        let stopLossPrice;
-        let takeProfitPrice;
+        // 1. SL: fixed pip distance
+        const slPips = symbol.includes("JPY") ? 20 : 15;
+        let stopLossPrice = signal === "BUY"
+            ? entry - slPips * pip
+            : entry + slPips * pip;
 
-        const lastBody = Math.abs(last.close - last.open);
+        // 2. TP: 1.8x SL
+        const tpPips = slPips * 1.8;
+        let takeProfitPrice = signal === "BUY"
+            ? entry + tpPips * pip
+            : entry - tpPips * pip;
 
-        const slDistance = Math.abs(entry - stopLossPrice);
-        let tpDistance = Math.max(2 * slDistance, 1.5 * lastBody);
+        // 3. Round prices
+        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        if (signal === "BUY") {
-            stopLossPrice = prev.low - buffer;
-            takeProfitPrice = entry + tpDistance;
-        } else {
-            stopLossPrice = prev.high + buffer;
-            takeProfitPrice = entry - tpDistance;
-        }
-
-
-        // 4. Position size based on risk
+        // 4. Calculate risk and size
         const riskAmount = this.accountBalance * this.maxRiskPerTrade;
+        const slDistance = Math.abs(entry - stopLossPrice);
         let size = riskAmount / slDistance;
         size = Math.floor(size / 100) * 100;
         if (size < 100) size = 100;
+
+        // 5. Margin check: divide available margin by allowed trades
+        const leverage = 30; // or from config
+        const marginRequired = (size * entry) / leverage;
+        const maxMarginPerTrade = this.accountBalance / TRADING.MAX_POSITIONS;
+        if (marginRequired > maxMarginPerTrade) {
+            size = Math.floor((maxMarginPerTrade * leverage) / entry / 100) * 100;
+            if (size < 100) size = 100;
+            logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
+        }
 
         logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
             Entry: ${entry}
@@ -198,7 +212,9 @@ class TradingService {
             price: entry,
             stopLossPrice,
             takeProfitPrice,
-            partialTakeProfit: signal === "BUY" ? entry + slDistance : entry - slDistance,
+            partialTakeProfit: signal === "BUY"
+                ? this.roundPrice(entry + slPips * pip, symbol)
+                : this.roundPrice(entry - slPips * pip, symbol),
         };
     }
 
@@ -243,6 +259,9 @@ class TradingService {
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found - ${reason}`);
+
+                console.log(symbol, signal, prev, last, bid, ask);
+                
                 await this.processSignal(symbol, signal, prev, last, bid, ask);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal - ${reason}`); // Changed to debug level

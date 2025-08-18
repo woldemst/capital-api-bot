@@ -141,7 +141,7 @@ class TradingBot {
                     //     this.monitorInterval = null;
                     // }
 
-                    this.startMonitorOpenTrades();
+                    // this.startMonitorOpenTrades();
                 }
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
