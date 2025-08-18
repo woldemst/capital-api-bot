@@ -104,12 +104,12 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 5 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: true,
+    MODE: false,
 };
 
 export const PROD = {
     // INTERVAL: (15 - (new Date().getMinutes() % 15)) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
-    INTERVAL: (60 - (new Date().getMinutes() % 15)) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
+    INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
 };
 // For convenience in error messages and logging
 export const VERSION = "1.0.0";
