@@ -52,25 +52,77 @@ class TradingService {
         }
     }
 
-    // --- Signal Generation (pattern-based, can be extended to scoring) ---
-    detectPattern(trend, prev, last) {
-        if (!trend || !prev || !last) return false;
-        const isBullish = (c) => c.close > c.open;
-        const isBearish = (c) => c.close < c.open;
-        const trendDirection = trend.toLowerCase();
-        if (!trendDirection || trendDirection === "neutral") return false;
-        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) return "bullish";
-        if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) return "bearish";
-        return false;
-    }
+    generateSignal(message) {
+        const { symbol, indicators, trendAnalysis, bid, ask } = message;
+        const { d1, h4, h1, m15, m5, m1 } = indicators;
+        console.log(`Generating signals for ${symbol}:`, m1, m5, m15, trendAnalysis, bid, ask);
 
-    generateSignal(indicators, prev, last) {
-        const { d1Trend } = indicators;
-        const validPattern = this.detectPattern(d1Trend, prev, last);
-        if (!validPattern) return { signal: null, reason: "no_valid_pattern" };
-        const signal = validPattern === "bullish" ? "BUY" : "SELL";
-        logger.info(`Generated ${signal} signal based on ${validPattern} pattern.`);
-        return { signal, reason: `valid_${validPattern}_pattern` };
+        // Buy signal conditions
+        const buyConditions = [
+            // MA crossover (5 MA crosses above 20 MA)
+            m1.maFast > m1.maSlow && m1[m1.length - 2].close < m1.maSlow,
+
+            // RSI below 30 (oversold)
+            m1.rsi < 30,
+
+            // Price at lower Bollinger Band
+            bid <= m1.bb.lower,
+
+            // Higher timeframe trend confirmation
+            trendAnalysis.overallTrend === "bullish",
+
+            // M15 confirmation
+            m15.rsi > 50,
+        ];
+
+        // Sell signal conditions
+        const sellConditions = [
+            // MA crossover (5 MA crosses below 20 MA)
+            m1.maFast < m1.maSlow && m1[m1.length - 2].close > m1.maSlow,
+
+            // RSI above 70 (overbought)
+            m1.rsi > 70,
+
+            // Price at upper Bollinger Band
+            ask >= m1.bb.upper,
+
+            // Higher timeframe trend confirmation
+            trendAnalysis.overallTrend === "bearish",
+
+            // M15 confirmation
+            m15.rsi < 50,
+        ];
+
+        // Calculate signal scores
+        const buyScore = buyConditions.filter(Boolean).length;
+        const sellScore = sellConditions.filter(Boolean).length;
+
+        console.log(`${symbol} Signal Analysis:
+            - MA Crossover: ${buyConditions[0] ? "Bullish" : sellConditions[0] ? "Bearish" : "Neutral"}
+            - RSI: ${m1.rsi.toFixed(2)}
+            - BB Position: ${(bid - m1.bb.lower).toFixed(5)} from lower, ${(m1.bb.upper - ask).toFixed(5)} from upper
+            - Higher Timeframe Trend: ${trendAnalysis.overallTrend}
+            - M15 RSI: ${m15.rsi.toFixed(2)}
+            - Buy Score: ${buyScore}/5
+            - Sell Score: ${sellScore}/5
+        `);
+
+        let signal = null;
+        if (buyScore >= 3) signal = "BUY";
+        if (sellScore >= 3) signal = "SELL";
+
+        return {
+            signal,
+            buyScore,
+            sellScore,
+            metrics: {
+                rsi: m1.rsi,
+                maFast: m1.maFast,
+                maSlow: m1.maSlow,
+                bbUpper: m1.bb.upper,
+                bbLower: m1.bb.lower,
+            },
+        };
     }
 
     // --- Price rounding ---
@@ -80,7 +132,7 @@ class TradingService {
     }
 
     // --- Position size calculation (ATR-based, margin/risk checked) ---
-    async calculateTradeParameters(signal, symbol, bid, ask, prev, last) {
+    async calculateTradeParameters(signal, symbol, bid, ask) {
         const price = signal === "BUY" ? ask : bid;
         const atr = await this.calculateATR(symbol);
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
@@ -158,8 +210,8 @@ class TradingService {
     }
 
     // --- Trade execution ---
-    async executeTrade(symbol, signal, bid, ask, prev, last) {
-        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, prev, last);
+    async executeTrade(symbol, signal, bid, ask) {
+        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask);
         // Optionally validate TP/SL here
         const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
         const position = await placePosition(symbol, signal, size, price, SL, TP);
@@ -174,18 +226,15 @@ class TradingService {
     // --- Main price processing ---
     async processPrice(message) {
         try {
-            const { symbol, indicators, d1Candles, h4Candles, h1Candles, m15Candles, prev, last, bid, ask } = message;
-            if (!symbol || !indicators || !h1Candles || !m15Candles || !prev || !last) return;
+            const { symbol, indicators, m15Candles, m5Candles, m1Candles, bid, ask } = message;
+            if (!symbol || !indicators || !m15Candles || !m5Candles || !m1Candles) return;
 
             console.log("Message details:", {
-                d1CandlesLength: d1Candles.length,
-                h4CandlesLength: h4Candles.length,
-                h1CandlesLength: h1Candles.length,
                 m15CandlesLength: m15Candles.length,
+                m5CandlesLength: m5Candles.length,
+                m1CandlesLength: m1Candles.length,
                 indicators,
                 symbol,
-                prev,
-                last,
                 bid,
                 ask,
             });
@@ -205,12 +254,13 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, reason } = this.generateSignal(indicators, prev, last);
+            const { signal } = this.generateSignal(message);
+
             if (signal) {
-                logger.info(`[Signal] ${symbol}: ${signal} signal found - ${reason}`);
-                await this.processSignal(symbol, signal, prev, last, bid, ask);
+                logger.info(`[Signal] ${symbol}: ${signal} signal found`);
+                await this.processSignal(symbol, signal, bid, ask);
             } else {
-                logger.debug(`[Signal] ${symbol}: No signal - ${reason}`);
+                logger.debug(`[Signal] ${symbol}: No signal found`);
             }
         } catch (error) {
             logger.error(`[trading.js][ProcessPrice] Error for ${symbol}:`, error);
@@ -218,12 +268,7 @@ class TradingService {
     }
 
     // --- Signal processing ---
-    async processSignal(symbol, signal, prev, last, bid, ask) {
-        if (this.isSymbolTraded(symbol)) {
-            logger.info(`[Signal] ${symbol} already in open trades, skipping`);
-            return;
-        }
-
+    async processSignal(symbol, signal, bid, ask) {
         // Check cooldown period
         // const now = Date.now();
         // const lastTrade = this.lastTradeTimestamps[symbol];
@@ -240,7 +285,7 @@ class TradingService {
         // }
 
         try {
-            await this.executeTrade(symbol, signal, bid, ask, prev, last);
+            await this.executeTrade(symbol, signal, bid, ask);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);

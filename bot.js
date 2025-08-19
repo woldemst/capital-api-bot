@@ -2,7 +2,7 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositi
 import { TRADING, DEV, PROD, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import { calcIndicators } from "./indicators.js";
+import { calcIndicators, analyzeTrend } from "./indicators.js";
 import logger from "./utils/logger.js";
 
 const { SYMBOLS } = TRADING;
@@ -51,41 +51,12 @@ class TradingBot {
             // this.setupWebSocket(tokens); // just for 15, 5, 1 minute candles
             this.startSessionPing();
 
-            await this.initializeCandleHistory();
-
             this.startAnalysisInterval();
 
             this.isRunning = true;
         } catch (error) {
             logger.error("[bot.js][Bot] Error starting live trading:", error);
             throw error;
-        }
-    }
-
-    async initializeCandleHistory() {
-        for (const symbol of SYMBOLS) {
-            await this.delay(500);
-            const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
-            // await this.delay(500);
-            const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
-            // await this.delay(500);
-            const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
-            // await this.delay(500);
-            const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
-
-            if (!d1Data || !h4Data || !h1Data || !m15Data) {
-                logger.error(`[bot.js][initializeCandleHistory] Failed to fetch historical data for ${symbol}`);
-                continue;
-            }
-
-            this.candleHistory[symbol] = {
-                D1: d1Data.prices.slice(-this.maxCandleHistory),
-                H4: h4Data.prices.slice(-this.maxCandleHistory),
-                H1: h1Data.prices.slice(-this.maxCandleHistory),
-                M15: m15Data.prices.slice(-this.maxCandleHistory),
-            };
-
-            logger.info(`[Bot] Initialized candle history for ${symbol}: H1: ${this.candleHistory[symbol].H1.length}, H4: ${this.candleHistory[symbol].H4.length}`);
         }
     }
 
@@ -185,12 +156,10 @@ class TradingBot {
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         for (const symbol of SYMBOLS) {
-            await this.delay(2000);
-            try {
-                await this.analyzeSymbol(symbol);
-            } catch (error) {
-                logger.error(`[bot.js] Error analyzing ${symbol}:`, error.message);
-            }
+            console.log(`\n\n=== Analyzing ${symbol} ===`);
+
+            await this.analyzeSymbol(symbol);
+            await this.delay(1000); // Add at least 1 second delay between symbols
         }
     }
 
@@ -200,9 +169,13 @@ class TradingBot {
 
         // Fetch latest historical data for each timeframe
         const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
+        // await this.delay(500);
+
         const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
         const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
         const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
+        const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
+        const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
@@ -210,30 +183,37 @@ class TradingBot {
             H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
             H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
             M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
+            M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
+            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
         };
 
         const d1Candles = this.candleHistory[symbol].D1;
         const h4Candles = this.candleHistory[symbol].H4;
         const h1Candles = this.candleHistory[symbol].H1;
         const m15Candles = this.candleHistory[symbol].M15;
+        const m5Candles = this.candleHistory[symbol].M5;
+        const m1Candles = this.candleHistory[symbol].M1;
 
-        const prev = h1Candles[h1Candles.length - 2];
-        const last = h1Candles[h1Candles.length - 1];
+        // const prev = h1Candles[h1Candles.length - 2];
+        // const last = h1Candles[h1Candles.length - 1];
 
-        // const prev = m15Candles[m15Candles.length - 2];
-        // const last = m15Candles[m15Candles.length - 1];
-
-        if (!h1Candles || !h4Candles || !m15Candles) {
-            logger.error(`[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, H4: ${!!h4Candles}, M15: ${!!m15Candles}), skipping analysis.`);
+        if (!h1Candles || !h4Candles || !m15Candles || !m5Candles || !m1Candles) {
+            logger.error(
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, H4: ${!!h4Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
+            );
             return;
         }
 
         const indicators = {
-            d1Trend: (await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1)).trend,
-            h4Trend: (await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4)).trend,
+            d1: await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1),
+            h4: await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, ANALYSIS.TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, ANALYSIS.TIMEFRAMES.M15),
+            m5: await calcIndicators(m5Candles, symbol, ANALYSIS.TIMEFRAMES.M5),
+            m1: await calcIndicators(m1Candles, symbol, ANALYSIS.TIMEFRAMES.M1),
         };
+
+        const trendAnalysis = await analyzeTrend(symbol, getHistorical);
 
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
@@ -244,12 +224,10 @@ class TradingBot {
         await tradingService.processPrice({
             symbol,
             indicators,
-            d1Candles,
-            h4Candles,
-            h1Candles,
+            trendAnalysis,
             m15Candles,
-            prev,
-            last,
+            m5Candles,
+            m1Candles,
             bid,
             ask,
         });

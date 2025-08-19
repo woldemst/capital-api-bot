@@ -48,6 +48,8 @@ export const ANALYSIS = {
         H4: "HOUR_4", // 4-hour trend direction
         H1: "HOUR", // 1-hour entry timeframe
         M15: "MINUTE_15", // 15-minute entry timeframe
+        M5: "MINUTE_5", // 5-minute entry timeframe
+        M1: "MINUTE", // 1-minute entry timeframe
     },
 
     // EMAs for trend and entry
@@ -104,7 +106,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 5 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: false,
+    MODE: true ,
 };
 
 export const PROD = {

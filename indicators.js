@@ -1,69 +1,80 @@
-import { EMA, RSI, ATR } from "technicalindicators";
-import { ANALYSIS } from "./config.js";
-import logger from "./utils/logger.js";
+import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
 
-// Helper to extract price by type
-function getPrice(val) {
-    if (!val) return 0;
-    if (typeof val === "number") return val;
-    if (priceType === "bid") return val.bid ?? 0;
-    if (priceType === "ask") return val.ask ?? 0;
-    // Default: mid
-    if (val.bid != null && val.ask != null) return (val.bid + val.ask) / 2;
-    return val.bid ?? val.ask ?? 0;
-}
-
-export async function calcIndicators(bars, symbol = "", timeframe = "", priceType = "mid") {
+export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
-        logger.error(`[Indicators] No bars provided for indicator calculation for ${symbol} ${timeframe}`);
+        // console.error('Invalid or empty bars array:', bars);
         return {};
     }
 
-    const closes = bars.map((b) => getPrice(b.close));
-    const highs = bars.map((b) => getPrice(b.high));
-    const lows = bars.map((b) => getPrice(b.low));
+    const closes = bars.map((b) => {
+        // Handle different price formats
+        return b.close || b.Close || b.closePrice?.bid || 0;
+    });
 
-    // Calculate EMAs based on timeframe
-    let ema9, ema21, ema20, ema50;
+    // Ensure we have enough data points
+    const minLength = Math.max(20, bars.length);
 
-    if (timeframe === ANALYSIS.TIMEFRAMES.D1) {
-        ema20 = EMA.calculate({ period: 20, values: closes });
-        ema50 = EMA.calculate({ period: 50, values: closes });
+    return {
+        maFast: SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop(),
+        maSlow: SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop(),
+        ema5: EMA.calculate({ period: 5, values: closes }).pop(),
+        ema20: EMA.calculate({ period: 20, values: closes }).pop(),
+        rsi: RSI.calculate({ period: 14, values: closes }).pop(),
+        bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
+        macd: MACD.calculate({
+            fastPeriod: 12,
+            slowPeriod: 26,
+            signalPeriod: 9,
+            values: closes,
+            SimpleMAOscillator: false,
+            SimpleMASignal: false,
+        }).pop(),
+    };
+}
 
+// Analyze trend on higher timeframes
+export async function analyzeTrend(symbol, getHistorical) {
+    if (!symbol || typeof getHistorical !== "function") {
+        console.error("Invalid parameters for analyzeTrend");
+        return { overallTrend: "unknown" };
+    }
+
+    try {
+        const [h4Data, d1Data] = await Promise.all([getHistorical(symbol, "HOUR_4", 50), getHistorical(symbol, "DAY", 30)]);
+
+        // console.log(`h4Data from analyzeTrend:`, h4Data);
+
+        // Add validation for historical data
+        if (!h4Data?.prices || !d1Data?.prices) {
+            console.error("Missing prices in historical data");
+            return { overallTrend: "unknown" };
+        }
+
+        console.log(`Analyzing trend for ${symbol} on higher timeframes`);
+
+        // Calculate indicators for H4 timeframe
+        const h4Indicators = await calcIndicators(h4Data);
+
+        // Calculate indicators for D1 timeframe
+        const d1Indicators = await calcIndicators(d1Data);
+
+        // Determine trend direction
+        const h4Trend = h4Indicators.maFast > h4Indicators.maSlow ? "bullish" : "bearish";
+        const d1Trend = d1Indicators.maFast > d1Indicators.maSlow ? "bullish" : "bearish";
+
+        console.log(`${symbol} H4 Trend: ${h4Trend}, D1 Trend: ${d1Trend}`);
+
+        // Return trend analysis
         return {
-            trend: ema20[ema20.length - 1] > ema50[ema50.length - 1] ? "bullish" : ema20[ema20.length - 1] < ema50[ema50.length - 1] ? "bearish" : "neutral",
+            h4Trend,
+            d1Trend,
+            h4Indicators,
+            d1Indicators,
+            // Overall trend is bullish if both timeframes are bullish
+            overallTrend: h4Trend === "bullish" && d1Trend === "bullish" ? "bullish" : h4Trend === "bearish" && d1Trend === "bearish" ? "bearish" : "mixed",
         };
-    } else if (timeframe === ANALYSIS.TIMEFRAMES.H4) {
-        ema20 = EMA.calculate({ period: 20, values: closes });
-        ema50 = EMA.calculate({ period: 50, values: closes });
-
-        return {
-            trend: ema20[ema20.length - 1] > ema50[ema50.length - 1] ? "bullish" : ema20[ema20.length - 1] < ema50[ema50.length - 1] ? "bearish" : "neutral",
-        };
-    } else {
-        // H1 timeframe
-        ema9 = EMA.calculate({ period: 9, values: closes });
-        ema21 = EMA.calculate({ period: 21, values: closes });
-
-        const currentEMA9 = ema9[ema9.length - 1];
-        const currentEMA21 = ema21[ema21.length - 1];
-        const prevEMA9 = ema9[ema9.length - 2];
-        const prevEMA21 = ema21[ema21.length - 2];
-
-        // Add trend property for H1
-        let trend = "neutral";
-        if (currentEMA9 > currentEMA21) trend = "bullish";
-        else if (currentEMA9 < currentEMA21) trend = "bearish";
-
-        return {
-            ema9: currentEMA9,
-            ema21: currentEMA21,
-            rsi: RSI.calculate({ period: 14, values: closes }).pop(),
-            crossover: prevEMA9 <= prevEMA21 && currentEMA9 > currentEMA21 ? "bullish" : prevEMA9 >= prevEMA21 && currentEMA9 < currentEMA21 ? "bearish" : null,
-            close: closes[closes.length - 1],
-            high: highs[highs.length - 1],
-            low: lows[lows.length - 1],
-            trend,
-        };
+    } catch (error) {
+        console.error(`Error analyzing trend for ${symbol}:`, error);
+        return { overallTrend: "unknown" };
     }
 }
