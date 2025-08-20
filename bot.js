@@ -156,10 +156,8 @@ class TradingBot {
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         for (const symbol of SYMBOLS) {
-            console.log(`\n\n=== Analyzing ${symbol} ===`);
-
             await this.analyzeSymbol(symbol);
-            await this.delay(1000); // Add at least 1 second delay between symbols
+            await this.delay(2000); // Add at least 1 second delay between symbols
         }
     }
 

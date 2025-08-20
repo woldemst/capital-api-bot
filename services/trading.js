@@ -52,15 +52,21 @@ class TradingService {
         }
     }
 
-    generateSignal(message) {
-        const { symbol, indicators, trendAnalysis, bid, ask } = message;
-        const { d1, h4, h1, m15, m5, m1 } = indicators;
-        console.log(`Generating signals for ${symbol}:`, m1, m5, m15, trendAnalysis, bid, ask);
+    generateSignal({ symbol, indicators, trendAnalysis, m1Candles, m5Candles, m15Candles, bid, ask }) {
+        // Defensive: ensure indicators and candles are present
+        const { m1, m5, m15 } = indicators;
 
+        if (!m1 || !m5 || !m15 || !m1Candles || !m5Candles || !m15Candles) {
+            logger.warn(`[Signal] Missing indicators or candles for ${symbol}`);
+            return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
+        }
+
+        // Use the last candle for close price checks
+        const m1Prev = m1Candles[m1Candles.length - 2] || {};
         // Buy signal conditions
         const buyConditions = [
             // MA crossover (5 MA crosses above 20 MA)
-            m1.maFast > m1.maSlow && m1[m1.length - 2].close < m1.maSlow,
+            m1.maFast > m1.maSlow && m1Prev.close < m1.maSlow,
 
             // RSI below 30 (oversold)
             m1.rsi < 30,
@@ -69,7 +75,7 @@ class TradingService {
             bid <= m1.bb.lower,
 
             // Higher timeframe trend confirmation
-            trendAnalysis.overallTrend === "bullish",
+            trendAnalysis?.overallTrend === "bullish",
 
             // M15 confirmation
             m15.rsi > 50,
@@ -78,7 +84,7 @@ class TradingService {
         // Sell signal conditions
         const sellConditions = [
             // MA crossover (5 MA crosses below 20 MA)
-            m1.maFast < m1.maSlow && m1[m1.length - 2].close > m1.maSlow,
+            m1.maFast < m1.maSlow && m1Prev.close > m1.maSlow,
 
             // RSI above 70 (overbought)
             m1.rsi > 70,
@@ -87,7 +93,7 @@ class TradingService {
             ask >= m1.bb.upper,
 
             // Higher timeframe trend confirmation
-            trendAnalysis.overallTrend === "bearish",
+            trendAnalysis?.overallTrend === "bearish",
 
             // M15 confirmation
             m15.rsi < 50,
@@ -97,12 +103,12 @@ class TradingService {
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
-        console.log(`${symbol} Signal Analysis:
+        logger.info(`${symbol} Signal Analysis:
             - MA Crossover: ${buyConditions[0] ? "Bullish" : sellConditions[0] ? "Bearish" : "Neutral"}
-            - RSI: ${m1.rsi.toFixed(2)}
+            - RSI: ${m1.rsi?.toFixed(2)}
             - BB Position: ${(bid - m1.bb.lower).toFixed(5)} from lower, ${(m1.bb.upper - ask).toFixed(5)} from upper
-            - Higher Timeframe Trend: ${trendAnalysis.overallTrend}
-            - M15 RSI: ${m15.rsi.toFixed(2)}
+            - Higher Timeframe Trend: ${trendAnalysis?.overallTrend}
+            - M15 RSI: ${m15.rsi?.toFixed(2)}
             - Buy Score: ${buyScore}/5
             - Sell Score: ${sellScore}/5
         `);
@@ -226,7 +232,7 @@ class TradingService {
     // --- Main price processing ---
     async processPrice(message) {
         try {
-            const { symbol, indicators, m15Candles, m5Candles, m1Candles, bid, ask } = message;
+            const { symbol, indicators, m15Candles, m5Candles, m1Candles, bid, ask, trendAnalysis } = message;
             if (!symbol || !indicators || !m15Candles || !m5Candles || !m1Candles) return;
 
             console.log("Message details:", {
