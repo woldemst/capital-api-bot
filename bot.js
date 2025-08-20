@@ -96,24 +96,20 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                if (ANALYSIS.BACKTESTING.ENABLED) {
-                    await this.analyzeAllSymbols();
-                } else {
-                    // if (!this.isTradingAllowed()) {
-                    //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                    //     return;
-                    // }
-
-                    await this.updateAccountInfo();
-                    await this.analyzeAllSymbols();
-
-                    // if (this.monitorInterval) {
-                    //     clearInterval(this.monitorInterval);
-                    //     this.monitorInterval = null;
-                    // }
-
-                    // this.startMonitorOpenTrades();
+                if (!this.isTradingAllowed()) {
+                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                    return;
                 }
+
+                await this.updateAccountInfo();
+                await this.analyzeAllSymbols();
+
+                if (this.monitorInterval) {
+                    clearInterval(this.monitorInterval);
+                    this.monitorInterval = null;
+                }
+
+                this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -223,6 +219,9 @@ class TradingBot {
             symbol,
             indicators,
             trendAnalysis,
+            d1Candles,
+            h4Candles,
+            h1Candles,
             m15Candles,
             m5Candles,
             m1Candles,
@@ -239,8 +238,8 @@ class TradingBot {
     }
 
     startMonitorOpenTrades() {
-        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
-        logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 1 minute)");
+        const interval = 30 * 1000;
+        logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 30 seconds)");
         this.monitorInterval = setInterval(async () => {
             logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
             try {
@@ -254,7 +253,7 @@ class TradingBot {
                         entryPrice: pos.position.level,
                         takeProfit: pos.position.profitLevel,
                         stopLoss: pos.position.stopLevel,
-                        currentPrice: pos.market.snapshot.bid, // or offer, depending on direction
+                        currentPrice: pos.market.bid, // or offer, depending on direction
                     };
                     await tradingService.updateTrailingStopIfNeeded(positionData);
                 }
