@@ -163,13 +163,12 @@ class TradingBot {
 
         // Fetch latest historical data for each timeframe
         const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
-        // await this.delay(500);
-
         const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
         const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
         const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
         const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
         const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
+
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
@@ -219,12 +218,10 @@ class TradingBot {
             symbol,
             indicators,
             trendAnalysis,
-            d1Candles,
-            h4Candles,
-            h1Candles,
-            m15Candles,
-            m5Candles,
-            m1Candles,
+            m15Candles: m15Data?.prices || m15Data,
+            m5Candles: m5Data?.prices || m5Data,
+            m1Candles: m1Data?.prices || m1Data,
+            h1Candles: h1Data?.prices || h1Data,
             bid,
             ask,
         });

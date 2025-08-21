@@ -58,39 +58,35 @@ class TradingService {
         const { m1, m5, m15, h1 } = indicators;
 
         if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles) {
-            logger.warn(`[Signal] Missing indicators or candles for ${symbol}`);
+            logger.warn(`[Signal] Missing indicators/candles for ${symbol}`);
             return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
         }
 
-        // Use the last candle for close price checks
         const m1Prev = m1Candles[m1Candles.length - 2] || {};
-        const h1Prev = h1Candles[h1Candles.length - 2] || {};
         const h1Last = h1Candles[h1Candles.length - 1] || {};
 
-        // H1 trend and last candle direction
         const h1TrendBull = h1.maFast > h1.maSlow;
         const h1TrendBear = h1.maFast < h1.maSlow;
-        const h1LastBull = h1Last.close > h1Last.open;
-        const h1LastBear = h1Last.close < h1Last.open;
+        const h1LastBull = typeof h1Last.close === 'number' && h1Last.close > h1Last.open;
+        const h1LastBear = typeof h1Last.close === 'number' && h1Last.close < h1Last.open;
 
-        // Buy signal conditions
+        // buy / sell conditions (6 checks, last one = H1 trend + last candle)
         const buyConditions = [
             m1.maFast > m1.maSlow && m1Prev.close < m1.maSlow,
-            m1.rsi < 30,
+            m1.rsi < 35,                     // slightly looser than 30 to reduce misses; tweak as needed
             bid <= m1.bb.lower,
             trendAnalysis?.overallTrend === "bullish",
             m15.rsi > 50,
-            h1TrendBull && h1LastBull, // NEW: H1 trend and last candle bullish
+            h1TrendBull && h1LastBull,       // MANDATORY confirmation (H1 direction + last H1 candle)
         ];
 
-        // Sell signal conditions
         const sellConditions = [
             m1.maFast < m1.maSlow && m1Prev.close > m1.maSlow,
-            m1.rsi > 70,
+            m1.rsi > 65,                     // symmetric to buy side (tweak to 70 if preferred)
             ask >= m1.bb.upper,
             trendAnalysis?.overallTrend === "bearish",
             m15.rsi < 50,
-            h1TrendBear && h1LastBear, // NEW: H1 trend and last candle bearish
+            h1TrendBear && h1LastBear,       // MANDATORY confirmation
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
@@ -109,8 +105,18 @@ class TradingService {
         `);
 
         let signal = null;
-        if (buyScore >= 4 && h1TrendBull && h1LastBull) signal = "BUY";
-        if (sellScore >= 4 && h1TrendBear && h1LastBear) signal = "SELL";
+        if (buyScore >= requiredScore && h1TrendBull && h1LastBull && trendAnalysis?.overallTrend === "bullish") {
+            signal = "BUY";
+        } else if (sellScore >= requiredScore && h1TrendBear && h1LastBear && trendAnalysis?.overallTrend === "bearish") {
+            signal = "SELL";
+        }
+
+        // per-symbol cooldown to avoid re-entries while market is choppy
+        const cooldownMs = TRADING.SIGNAL_COOLDOWN_MS || 60_000;
+        if (signal && this.lastTradeTimestamps[symbol] && (Date.now() - this.lastTradeTimestamps[symbol]) < cooldownMs) {
+            logger.info(`[Signal] Cooldown active for ${symbol}, skipping signal`);
+            signal = null;
+        }
 
         return {
             signal,
@@ -120,8 +126,8 @@ class TradingService {
                 rsi: m1.rsi,
                 maFast: m1.maFast,
                 maSlow: m1.maSlow,
-                bbUpper: m1.bb.upper,
-                bbLower: m1.bb.lower,
+                bbUpper: m1.bb?.upper,
+                bbLower: m1.bb?.lower,
             },
         };
     }
