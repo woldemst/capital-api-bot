@@ -162,44 +162,43 @@ class TradingBot {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
         // Fetch latest historical data for each timeframe
-        const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
-        const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
+        // const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
+        // await this.delay(500);
+        // const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
+        // await this.delay(500);
         const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
+        await this.delay(500);
         const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
+        await this.delay(500);
         const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
+        await this.delay(500);
         const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
-
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
-            D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
-            H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
+            // D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
+            // H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
             H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
             M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
             M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
             M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
         };
 
-        const d1Candles = this.candleHistory[symbol].D1;
-        const h4Candles = this.candleHistory[symbol].H4;
+        // const d1Candles = this.candleHistory[symbol].D1;
+        // const h4Candles = this.candleHistory[symbol].H4;
         const h1Candles = this.candleHistory[symbol].H1;
         const m15Candles = this.candleHistory[symbol].M15;
         const m5Candles = this.candleHistory[symbol].M5;
         const m1Candles = this.candleHistory[symbol].M1;
 
-        // const prev = h1Candles[h1Candles.length - 2];
-        // const last = h1Candles[h1Candles.length - 1];
-
-        if (!h1Candles || !h4Candles || !m15Candles || !m5Candles || !m1Candles) {
-            logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, H4: ${!!h4Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
-            );
+        if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
+            logger.error(`[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`);
             return;
         }
 
         const indicators = {
-            d1: await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1),
-            h4: await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4),
+            // d1: await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1),
+            // h4: await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, ANALYSIS.TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, ANALYSIS.TIMEFRAMES.M15),
             m5: await calcIndicators(m5Candles, symbol, ANALYSIS.TIMEFRAMES.M5),
@@ -218,10 +217,10 @@ class TradingBot {
             symbol,
             indicators,
             trendAnalysis,
-            m15Candles: m15Data?.prices || m15Data,
-            m5Candles: m5Data?.prices || m5Data,
-            m1Candles: m1Data?.prices || m1Data,
-            h1Candles: h1Data?.prices || h1Data,
+            h1Data: h1Candles.prices,
+            m15Data: m15Candles.prices,
+            m5Data: m5Candles.prices,
+            m1Data: m1Candles.prices,
             bid,
             ask,
         });

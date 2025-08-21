@@ -67,26 +67,26 @@ class TradingService {
 
         const h1TrendBull = h1.maFast > h1.maSlow;
         const h1TrendBear = h1.maFast < h1.maSlow;
-        const h1LastBull = typeof h1Last.close === 'number' && h1Last.close > h1Last.open;
-        const h1LastBear = typeof h1Last.close === 'number' && h1Last.close < h1Last.open;
+        const h1LastBull = typeof h1Last.close === "number" && h1Last.close > h1Last.open;
+        const h1LastBear = typeof h1Last.close === "number" && h1Last.close < h1Last.open;
 
         // buy / sell conditions (6 checks, last one = H1 trend + last candle)
         const buyConditions = [
             m1.maFast > m1.maSlow && m1Prev.close < m1.maSlow,
-            m1.rsi < 35,                     // slightly looser than 30 to reduce misses; tweak as needed
+            m1.rsi < 35, // slightly looser than 30 to reduce misses; tweak as needed
             bid <= m1.bb.lower,
             trendAnalysis?.overallTrend === "bullish",
             m15.rsi > 50,
-            h1TrendBull && h1LastBull,       // MANDATORY confirmation (H1 direction + last H1 candle)
+            h1TrendBull && h1LastBull, // MANDATORY confirmation (H1 direction + last H1 candle)
         ];
 
         const sellConditions = [
             m1.maFast < m1.maSlow && m1Prev.close > m1.maSlow,
-            m1.rsi > 65,                     // symmetric to buy side (tweak to 70 if preferred)
+            m1.rsi > 65, // symmetric to buy side (tweak to 70 if preferred)
             ask >= m1.bb.upper,
             trendAnalysis?.overallTrend === "bearish",
             m15.rsi < 50,
-            h1TrendBear && h1LastBear,       // MANDATORY confirmation
+            h1TrendBear && h1LastBear, // MANDATORY confirmation
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
@@ -111,9 +111,8 @@ class TradingService {
             signal = "SELL";
         }
 
-        // per-symbol cooldown to avoid re-entries while market is choppy
-        const cooldownMs = TRADING.SIGNAL_COOLDOWN_MS || 60_000;
-        if (signal && this.lastTradeTimestamps[symbol] && (Date.now() - this.lastTradeTimestamps[symbol]) < cooldownMs) {
+        const cooldownMs = 6000;
+        if (signal && this.lastTradeTimestamps[symbol] && Date.now() - this.lastTradeTimestamps[symbol] < cooldownMs) {
             logger.info(`[Signal] Cooldown active for ${symbol}, skipping signal`);
             signal = null;
         }
@@ -252,18 +251,9 @@ class TradingService {
     // --- Main price processing ---
     async processPrice(message) {
         try {
-            const { symbol, indicators, m15Candles, m5Candles, m1Candles, bid, ask, trendAnalysis } = message;
-            if (!symbol || !indicators || !m15Candles || !m5Candles || !m1Candles) return;
+            const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask } = message;
 
-            console.log("Message details:", {
-                m15CandlesLength: m15Candles.length,
-                m5CandlesLength: m5Candles.length,
-                m1CandlesLength: m1Candles.length,
-                trend: trendAnalysis,
-                symbol,
-                bid,
-                ask,
-            });
+            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !trendAnalysis) return;
 
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
@@ -295,14 +285,6 @@ class TradingService {
 
     // --- Signal processing ---
     async processSignal(symbol, signal, bid, ask) {
-        // Check cooldown period
-        // const now = Date.now();
-        // const lastTrade = this.lastTradeTimestamps[symbol];
-        // if (lastTrade && now - lastTrade < TRADING.COOLDOWN_PERIOD) {
-        //     logger.info(`[Signal] ${symbol} in cooldown period, skipping`);
-        //     return;
-        // }
-
         // Check daily loss limit
         // const dailyLossLimit = -Math.abs(this.accountBalance * this.dailyLossLimitPct);
         // if (this.dailyLoss < dailyLossLimit) {
