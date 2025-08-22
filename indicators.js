@@ -53,10 +53,10 @@ export async function analyzeTrend(symbol, getHistorical) {
         console.log(`Analyzing trend for ${symbol} on higher timeframes`);
 
         // Calculate indicators for H4 timeframe
-        const h4Indicators = await calcIndicators(h4Data);
+        const h4Indicators = await calcIndicators(h4Data.prices);
 
         // Calculate indicators for D1 timeframe
-        const d1Indicators = await calcIndicators(d1Data);
+        const d1Indicators = await calcIndicators(d1Data.prices);
 
         // Determine trend direction
         const h4Trend = h4Indicators.maFast > h4Indicators.maSlow ? "bullish" : "bearish";

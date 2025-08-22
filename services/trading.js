@@ -4,6 +4,9 @@ import logger from "../utils/logger.js";
 import { logTradeResult } from "../utils/tradeLogger.js";
 const { MAX_POSITIONS, RISK_PER_TRADE } = TRADING;
 
+// Add a default required score for signals
+const REQUIRED_SCORE = TRADING.REQUIRED_SCORE || 4;
+
 class TradingService {
     constructor() {
         this.openTrades = [];
@@ -105,9 +108,9 @@ class TradingService {
         `);
 
         let signal = null;
-        if (buyScore >= requiredScore && h1TrendBull && h1LastBull && trendAnalysis?.overallTrend === "bullish") {
+        if (buyScore >= REQUIRED_SCORE && h1TrendBull && h1LastBull && trendAnalysis?.overallTrend === "bullish") {
             signal = "BUY";
-        } else if (sellScore >= requiredScore && h1TrendBear && h1LastBear && trendAnalysis?.overallTrend === "bearish") {
+        } else if (sellScore >= REQUIRED_SCORE && h1TrendBear && h1LastBear && trendAnalysis?.overallTrend === "bearish") {
             signal = "SELL";
         }
 
