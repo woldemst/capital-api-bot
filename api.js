@@ -21,17 +21,6 @@ export const getHeaders = (includeContentType = false) => {
     return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
-/**
- * Formats a Date object as ISO string without milliseconds or timezone.
- * Example: 2025-06-30T19:16:33
- */
-function formatIsoNoMs(date) {
-    if (!(date instanceof Date) || isNaN(date)) {
-        throw new Error("Invalid date object passed to formatIsoNoMs");
-    }
-    return date.toISOString().split(".")[0];
-}
-
 // Start a new session with the API
 export const startSession = async () => {
     /**
@@ -187,7 +176,7 @@ export const getOpenPositions = async () =>
  * Returns an array of candle objects.
  */
 export async function getHistorical(symbol, resolution, count) {
-    logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
+    // logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
 
     // console.log(response.data);

@@ -253,7 +253,7 @@ class TradingService {
         try {
             const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask } = message;
 
-            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !trendAnalysis) return;
+            // if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !trendAnalysis) return;
 
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
