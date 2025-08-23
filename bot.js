@@ -96,10 +96,10 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                if (!this.isTradingAllowed()) {
-                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                    return;
-                }
+                // if (!this.isTradingAllowed()) {
+                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                //     return;
+                // }
 
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();

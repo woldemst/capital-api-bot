@@ -31,29 +31,27 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    // --- ATR Calculation for dynamic SL/TP (timeframe-aware, bid-only) ---
-    async calculateATR(symbol, resolution = "MINUTE", lookback = 50, period = 14) {
+    // --- ATR Calculation for dynamic SL/TP ---
+    async calculateATR(symbol) {
         try {
-            const data = await getHistorical(symbol, resolution, lookback);
-            const prices = data?.prices || [];
-            if (prices.length < period + 1) throw new Error("Insufficient data for ATR");
-
-            const tr = [];
+            const data = await getHistorical(symbol, "MINUTE_15", 15);
+            if (!data?.prices || data.prices.length < 14) throw new Error("Insufficient data for ATR calculation");
+            let tr = [];
+            const prices = data.prices;
             for (let i = 1; i < prices.length; i++) {
-                const high = prices[i].high; // bid-only (matches api.getHistorical mapping)
-                const low = prices[i].low; // bid-only
-                const prevClose = prices[i - 1].close; // bid-only
+                const high = prices[i].highPrice?.ask || prices[i].high;
+                const low = prices[i].lowPrice?.bid || prices[i].low;
+                const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
                 const tr1 = high - low;
                 const tr2 = Math.abs(high - prevClose);
                 const tr3 = Math.abs(low - prevClose);
                 tr.push(Math.max(tr1, tr2, tr3));
             }
-            const atr = tr.slice(-period).reduce((s, v) => s + v, 0) / period;
+            const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
             return atr;
-        } catch (err) {
-            logger.error("[ATR] Error:", err?.message || err);
-            // conservative tiny fallback
-            return 0.0008; // ~8 pips on 5-digit majors
+        } catch (error) {
+            logger.error("[ATR] Error:", error);
+            return 0.001;
         }
     }
 
