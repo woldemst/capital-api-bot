@@ -5,7 +5,7 @@ import { logTradeResult } from "../utils/tradeLogger.js";
 const { MAX_POSITIONS, RISK_PER_TRADE } = TRADING;
 
 // Add a default required score for signals
-const REQUIRED_SCORE = TRADING.REQUIRED_SCORE || 4;
+const REQUIRED_SCORE = TRADING.REQUIRED_SCORE;
 
 class TradingService {
     constructor() {
@@ -13,7 +13,7 @@ class TradingService {
         this.accountBalance = 0;
         this.availableMargin = 0;
         this.lastTradeTimestamps = {};
-        this.maxRiskPerTrade = RISK_PER_TRADE || 0.02;
+        this.maxRiskPerTrade = RISK_PER_TRADE;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
     }
@@ -24,35 +24,13 @@ class TradingService {
     setOpenTrades(trades) {
         this.openTrades = trades;
     }
+
     setAvailableMargin(margin) {
         this.availableMargin = margin;
     }
+
     isSymbolTraded(symbol) {
         return this.openTrades.includes(symbol);
-    }
-
-    // --- ATR Calculation for dynamic SL/TP ---
-    async calculateATR(symbol) {
-        try {
-            const data = await getHistorical(symbol, "MINUTE_15", 15);
-            if (!data?.prices || data.prices.length < 14) throw new Error("Insufficient data for ATR calculation");
-            let tr = [];
-            const prices = data.prices;
-            for (let i = 1; i < prices.length; i++) {
-                const high = prices[i].highPrice?.ask || prices[i].high;
-                const low = prices[i].lowPrice?.bid || prices[i].low;
-                const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
-                const tr1 = high - low;
-                const tr2 = Math.abs(high - prevClose);
-                const tr3 = Math.abs(low - prevClose);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-            const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-            return atr;
-        } catch (error) {
-            logger.error("[ATR] Error:", error);
-            return 0.001;
-        }
     }
 
     generateSignal({ symbol, indicators, trendAnalysis, m1Candles, m5Candles, m15Candles, bid, ask, h1Candles }) {
@@ -141,33 +119,45 @@ class TradingService {
     // --- Position size + achievable SL/TP for M1 ---
     async calculateTradeParameters(signal, symbol, bid, ask, m1Candles) {
         const price = signal === "BUY" ? ask : bid;
+
         // Use previous M1 candle for SL
         const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
         if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
+        // Add small buffer (0.5-1 pip) to avoid close hits
+        const buffer = symbol.includes("JPY") ? 0.05 : 0.0005;
+
         let stopLossPrice, slDistance, takeProfitPrice;
+
         if (signal === "BUY") {
-            stopLossPrice = prevCandle.low;
+            // For BUY: SL below previous candle low
+            stopLossPrice = prevCandle.low - buffer;
             slDistance = price - stopLossPrice;
+            // TP = entry + (1.5 × SL distance)
             takeProfitPrice = price + slDistance * 1.5;
         } else {
-            stopLossPrice = prevCandle.high;
+            // For SELL: SL above previous candle high
+            stopLossPrice = prevCandle.high + buffer;
             slDistance = stopLossPrice - price;
+            // TP = entry - (1.5 × SL distance)
             takeProfitPrice = price - slDistance * 1.5;
         }
 
+        // Round prices to appropriate decimals
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // Risk-based size
-        const riskAmount = this.accountBalance * this.maxRiskPerTrade;
+        // Calculate position size based on risk
+        const maxSimultaneousTrades = MAX_POSITIONS || 5;
+        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
         let size = riskAmount / Math.abs(slDistance);
-        size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
+        size = Math.floor(size / 100) * 100; // Round to nearest 100
+        if (size < 100) size = 100; // Minimum size
 
-        logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
+
+        logger.info(`[Trade Parameters] ${symbol} ${signal}:
             Entry: ${price}
-            SL: ${stopLossPrice}
+            SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
             TP: ${takeProfitPrice}
             Size: ${size}`);
 
@@ -184,7 +174,6 @@ class TradingService {
         logger.info(`[TP/SL Validation] Symbol: ${symbol}, Direction: ${direction}`);
         logger.info(`[TP/SL Validation] Entry: ${entryPrice}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
 
-        const range = await getAllowedTPRange(symbol);
         const allowed = await getAllowedTPRange(symbol);
 
         let newTP = takeProfitPrice;
@@ -194,16 +183,12 @@ class TradingService {
         const slDistance = Math.abs(entryPrice - stopLossPrice);
         const minSLDistance = allowed?.minStopDistance || 0;
 
-        const decimals = range.decimals || 5;
-
         // Wenn SL zu nah, passe ihn an
         if (slDistance < minSLDistance) {
             if (direction === "BUY") {
                 newSL = entryPrice - minSLDistance;
-                newTP = entryPrice + minSLDistance * 1.5;
             } else {
                 newSL = entryPrice + minSLDistance;
-                newTP = entryPrice - minSLDistance * 1.5;
             }
         }
 
@@ -233,7 +218,7 @@ class TradingService {
         try {
             const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask } = message;
 
-            // if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !trendAnalysis) return;
+            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !trendAnalysis) return;
 
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {

@@ -38,6 +38,8 @@ export const TRADING = {
     // Daily risk control
     MAX_DAILY_LOSS: 0.04, // Stop trading after 4% loss in a day
     MAX_DAILY_PROFIT: 0.06, // Stop trading after 6% profit in a day
+
+    REQUIRED_SCORE: 3,
 };
 
 // Technical Analysis Configuration
@@ -106,7 +108,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 10 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: true,
+    MODE: false,
 };
 
 export const PROD = {

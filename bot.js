@@ -104,12 +104,14 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                if (this.monitorInterval) {
-                    clearInterval(this.monitorInterval);
-                    this.monitorInterval = null;
-                }
+                if (this.openedPositions.length < 0) {
+                    if (this.monitorInterval) {
+                        clearInterval(this.monitorInterval);
+                        this.monitorInterval = null;
+                    }
 
-                this.startMonitorOpenTrades();
+                    this.startMonitorOpenTrades();
+                }
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
