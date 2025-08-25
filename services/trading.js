@@ -139,57 +139,36 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask) {
+    async calculateTradeParameters(signal, symbol, bid, ask, m1Candles) {
         const price = signal === "BUY" ? ask : bid;
+        // Use previous M1 candle for SL
+        const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
+        if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-        // 1) ATR from M1
-        const atr = await this.calculateATR(symbol, "MINUTE", 80, 14);
-
-        // 2) Pip size
-        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-
-        // 3) Tighter SL using ATR with floors/ceilings suited for M1
-        //    Typical M1 target band: 6–12 pips on majors, 8–16 on JPY
-        const minPips = symbol.includes("JPY") ? 8 : 6;
-        const maxPips = symbol.includes("JPY") ? 16 : 12;
-
-        // Vol-adaptive: ~0.8 ATR (M1) converted to pips, then clamped
-        let slPips = Math.round((atr / pip) * 0.8);
-        if (slPips < minPips) slPips = minPips;
-        if (slPips > maxPips) slPips = maxPips;
-
-        // 4) TP slightly > 1R to close quicker (1.2R–1.5R instead of 2R)
-        const rr = 1.3; // tweakable: 1.2–1.5 works well for faster closes
-
-        let stopLossPrice = signal === "BUY" ? price - slPips * pip : price + slPips * pip;
-        let takeProfitPrice = signal === "BUY" ? price + slPips * pip * rr : price - slPips * pip * rr;
+        let stopLossPrice, slDistance, takeProfitPrice;
+        if (signal === "BUY") {
+            stopLossPrice = prevCandle.low;
+            slDistance = price - stopLossPrice;
+            takeProfitPrice = price + slDistance * 1.5;
+        } else {
+            stopLossPrice = prevCandle.high;
+            slDistance = stopLossPrice - price;
+            takeProfitPrice = price - slDistance * 1.5;
+        }
 
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // 5) Risk-based size
+        // Risk-based size
         const riskAmount = this.accountBalance * this.maxRiskPerTrade;
-        const slDistance = Math.abs(price - stopLossPrice);
-        let size = riskAmount / slDistance;
-
-        // Your broker lot step is 100 units; round down
+        let size = riskAmount / Math.abs(slDistance);
         size = Math.floor(size / 100) * 100;
         if (size < 100) size = 100;
 
-        // 6) Margin check (unchanged)
-        const leverage = 30;
-        const marginRequired = (size * price) / leverage;
-        const maxMarginPerTrade = this.accountBalance / MAX_POSITIONS;
-        if (marginRequired > maxMarginPerTrade) {
-            size = Math.floor((maxMarginPerTrade * leverage) / price / 100) * 100;
-            if (size < 100) size = 100;
-            logger.info(`[PositionSize] Adjusted for margin: New size: ${size}`);
-        }
-
         logger.info(`[Trade Parameters] ${symbol} ${signal.toUpperCase()}:
             Entry: ${price}
-            SL (${slPips} pips): ${stopLossPrice}
-            TP (${(slPips * rr).toFixed(1)} pips): ${takeProfitPrice}
+            SL: ${stopLossPrice}
+            TP: ${takeProfitPrice}
             Size: ${size}`);
 
         return {
@@ -197,8 +176,6 @@ class TradingService {
             price,
             stopLossPrice,
             takeProfitPrice,
-            // Optional partial at 1R for faster banking
-            partialTakeProfit: signal === "BUY" ? this.roundPrice(price + slPips * pip, symbol) : this.roundPrice(price - slPips * pip, symbol),
         };
     }
 
@@ -236,9 +213,8 @@ class TradingService {
     }
 
     // --- Trade execution ---
-    async executeTrade(symbol, signal, bid, ask) {
-        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask);
-        // Optionally validate TP/SL here
+    async executeTrade(symbol, signal, bid, ask, m1Candles) {
+        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
         const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
         const position = await placePosition(symbol, signal, size, price, SL, TP);
         if (position?.dealReference) {
@@ -249,7 +225,7 @@ class TradingService {
         }
     }
 
-    // --- Main price processing ---
+    //  Main price processing ---
     async processPrice(message) {
         try {
             const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask } = message;
@@ -275,7 +251,7 @@ class TradingService {
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
-                await this.processSignal(symbol, signal, bid, ask);
+                await this.processSignal(symbol, signal, bid, ask, m1Candles);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal found`);
             }
@@ -285,7 +261,7 @@ class TradingService {
     }
 
     // --- Signal processing ---
-    async processSignal(symbol, signal, bid, ask) {
+    async processSignal(symbol, signal, bid, ask, m1Candles) {
         // Check daily loss limit
         // const dailyLossLimit = -Math.abs(this.accountBalance * this.dailyLossLimitPct);
         // if (this.dailyLoss < dailyLossLimit) {
@@ -294,7 +270,7 @@ class TradingService {
         // }
 
         try {
-            await this.executeTrade(symbol, signal, bid, ask);
+            await this.executeTrade(symbol, signal, bid, ask, m1Candles);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);
