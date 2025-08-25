@@ -254,8 +254,7 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
     // Fetch allowed stop range and enforce min distance
     if (symbol && direction && typeof price === "number" && SL) {
         const range = await getAllowedTPRange(symbol);
-        const decimals = range.decimals || 5;
-        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+        const minStopDistance = range.minSLDistance; // <-- already price distance!
         if (direction === "BUY") {
             if (price - SL < minStopDistance) {
                 SL = price - minStopDistance;
@@ -266,8 +265,7 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
             }
         }
     }
-    
-    
+
     return await withSessionRetry(async () => {
         logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${SL}, TP: ${TP}`);
         const position = {
@@ -278,7 +276,6 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
             guaranteedStop: false,
             stopLevel: SL ? parseFloat(SL).toFixed(5) : undefined,
             profitLevel: TP ? parseFloat(TP).toFixed(5) : undefined,
-            // forceOpen: true, // Removed as it's deprecated in newer API versions
         };
         logger.info("[API] Sending position request:", position);
         const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
@@ -330,12 +327,22 @@ export async function getAllowedTPRange(symbol) {
     try {
         const details = await getMarketDetails(symbol);
         const instr = details.instrument;
+        const decimals = instr.scalingFactor || instr.lotSizeScale || 5;
+        const minSLDistance = instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0;
+        const minTPDistance = instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0;
+
+        // Umrechnung in Preisabstand
+        const minSLDistancePrice = minSLDistance * Math.pow(10, -decimals);
+        const minTPDistancePrice = minTPDistance * Math.pow(10, -decimals);
+
         return {
-            minTPDistance: instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0,
+            minTPDistance,
             maxTPDistance: instr.limits?.limitDistance?.max || instr.limits?.limitLevel?.max || Number.POSITIVE_INFINITY,
-            minSLDistance: instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0,
+            minSLDistance,
             maxSLDistance: instr.limits?.stopDistance?.max || instr.limits?.stopLevel?.max || Number.POSITIVE_INFINITY,
-            decimals: instr.lotSizeScale || instr.scalingFactor || 5,
+            decimals,
+            minSLDistancePrice,
+            minTPDistancePrice,
             market: details.snapshot,
         };
     } catch (error) {
@@ -346,6 +353,8 @@ export async function getAllowedTPRange(symbol) {
             minSLDistance: 0,
             maxSLDistance: Number.POSITIVE_INFINITY,
             decimals: 5,
+            minSLDistancePrice: 0,
+            minTPDistancePrice: 0,
             market: {},
         };
     }

@@ -183,31 +183,34 @@ class TradingService {
     async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
         logger.info(`[TP/SL Validation] Symbol: ${symbol}, Direction: ${direction}`);
         logger.info(`[TP/SL Validation] Entry: ${entryPrice}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
+
         const range = await getAllowedTPRange(symbol);
+        const allowed = await getAllowedTPRange(symbol);
+
         let newTP = takeProfitPrice;
         let newSL = stopLossPrice;
+
+        // Berechne tatsächlichen Abstand
+        const slDistance = Math.abs(entryPrice - stopLossPrice);
+        const minSLDistance = allowed?.minStopDistance || 0;
+
         const decimals = range.decimals || 5;
-        if (direction === "BUY") {
-            const minTP = entryPrice + range.minTPDistance * Math.pow(10, -decimals);
-            const maxTP = entryPrice + range.maxTPDistance * Math.pow(10, -decimals);
-            if (newTP < minTP) newTP = minTP;
-            if (newTP > maxTP) newTP = maxTP;
-            const minSL = entryPrice - range.maxSLDistance * Math.pow(10, -decimals);
-            const maxSL = entryPrice - range.minSLDistance * Math.pow(10, -decimals);
-            if (newSL < minSL) newSL = minSL;
-            if (newSL > maxSL) newSL = maxSL;
-        } else {
-            const minTP = entryPrice - range.maxTPDistance * Math.pow(10, -decimals);
-            const maxTP = entryPrice - range.minTPDistance * Math.pow(10, -decimals);
-            if (newTP > maxTP) newTP = maxTP;
-            if (newTP < minTP) newTP = minTP;
-            const minSL = entryPrice + range.minSLDistance * Math.pow(10, -decimals);
-            const maxSL = entryPrice + range.maxSLDistance * Math.pow(10, -decimals);
-            if (newSL < minSL) newSL = minSL;
-            if (newSL > maxSL) newSL = maxSL;
+
+        // Wenn SL zu nah, passe ihn an
+        if (slDistance < minSLDistance) {
+            if (direction === "BUY") {
+                newSL = entryPrice - minSLDistance;
+                newTP = entryPrice + minSLDistance * 1.5;
+            } else {
+                newSL = entryPrice + minSLDistance;
+                newTP = entryPrice - minSLDistance * 1.5;
+            }
         }
-        if (newTP === entryPrice) newTP += direction === "BUY" ? range.minTPDistance * Math.pow(10, -decimals) : -range.minTPDistance * Math.pow(10, -decimals);
-        if (newSL === entryPrice) newSL += direction === "BUY" ? -range.minSLDistance * Math.pow(10, -decimals) : range.minSLDistance * Math.pow(10, -decimals);
+
+        // Runde Preise ggf. auf die erlaubte Tickgröße
+        newSL = this.roundPrice(newSL, symbol);
+        newTP = this.roundPrice(newTP, symbol);
+
         logger.info(`[TP/SL Validation] Final SL: ${newSL}, Final TP: ${newTP}`);
         return { SL: newSL, TP: newTP };
     }

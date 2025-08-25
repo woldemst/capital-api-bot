@@ -40,38 +40,28 @@ export async function analyzeTrend(symbol, getHistorical) {
     }
 
     try {
-        const [h4Data, d1Data] = await Promise.all([getHistorical(symbol, "HOUR_4", 50), getHistorical(symbol, "DAY", 30)]);
+        const h4Data = await getHistorical(symbol, "HOUR_4", 50);
 
-        // console.log(`h4Data from analyzeTrend:`, h4Data);
-
-        // Add validation for historical data
-        if (!h4Data?.prices || !d1Data?.prices) {
+        if (!h4Data?.prices) {
             console.error("Missing prices in historical data");
             return { overallTrend: "unknown" };
         }
 
-        console.log(`Analyzing trend for ${symbol} on higher timeframes`);
+        console.log(`Analyzing trend for ${symbol} on H4 only`);
 
         // Calculate indicators for H4 timeframe
         const h4Indicators = await calcIndicators(h4Data.prices);
 
-        // Calculate indicators for D1 timeframe
-        const d1Indicators = await calcIndicators(d1Data.prices);
-
-        // Determine trend direction
+        // Determine trend direction only by H4
         const h4Trend = h4Indicators.maFast > h4Indicators.maSlow ? "bullish" : "bearish";
-        const d1Trend = d1Indicators.maFast > d1Indicators.maSlow ? "bullish" : "bearish";
 
-        console.log(`${symbol} H4 Trend: ${h4Trend}, D1 Trend: ${d1Trend}`);
+        console.log(`${symbol} H4 Trend: ${h4Trend}`);
 
-        // Return trend analysis
+        // Return trend analysis (overallTrend = h4Trend)
         return {
             h4Trend,
-            d1Trend,
             h4Indicators,
-            d1Indicators,
-            // Overall trend is bullish if both timeframes are bullish
-            overallTrend: h4Trend === "bullish" && d1Trend === "bullish" ? "bullish" : h4Trend === "bearish" && d1Trend === "bearish" ? "bearish" : "mixed",
+            overallTrend: h4Trend,
         };
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);
