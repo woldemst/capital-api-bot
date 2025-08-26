@@ -40,28 +40,28 @@ export async function analyzeTrend(symbol, getHistorical) {
     }
 
     try {
-        const h4Data = await getHistorical(symbol, "HOUR_4", 50);
+        const h1Data = await getHistorical(symbol, "HOUR", 50);
 
-        if (!h4Data?.prices) {
+        if (!h1Data?.prices) {
             console.error("Missing prices in historical data");
             return { overallTrend: "unknown" };
         }
 
-        console.log(`Analyzing trend for ${symbol} on H4 only`);
+        console.log(`Analyzing trend for ${symbol} on H1 only`);
 
-        // Calculate indicators for H4 timeframe
-        const h4Indicators = await calcIndicators(h4Data.prices);
+        // Calculate indicators for h1 timeframe
+        const h1Indicators = await calcIndicators(h1Data.prices);
 
         // Determine trend direction only by H4
-        const h4Trend = h4Indicators.maFast > h4Indicators.maSlow ? "bullish" : "bearish";
+        const h1Trend = h1Indicators.maFast > h1Indicators.maSlow ? "bullish" : "bearish";
 
-        console.log(`${symbol} H4 Trend: ${h4Trend}`);
+        console.log(`${symbol} H1 Trend: ${h1Trend}`);
 
-        // Return trend analysis (overallTrend = h4Trend)
+        // Return trend analysis (overallTrend = h1Trend)
         return {
-            h4Trend,
-            h4Indicators,
-            overallTrend: h4Trend,
+            h1Trend,
+            h1Indicators,
+            overallTrend: h1Trend,
         };
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);

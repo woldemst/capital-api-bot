@@ -39,7 +39,7 @@ export const TRADING = {
     MAX_DAILY_LOSS: 0.04, // Stop trading after 4% loss in a day
     MAX_DAILY_PROFIT: 0.06, // Stop trading after 6% profit in a day
 
-    REQUIRED_SCORE: 3,
+    REQUIRED_SCORE: 2,
 };
 
 // Technical Analysis Configuration
@@ -112,8 +112,8 @@ export const DEV = {
 };
 
 export const PROD = {
-    INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
-    INTERVAL: 60 * 1000, // 60 seconds between analyses
+    // INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
+    INTERVAL: 5 * 60 * 1000, // 60 seconds between analyses
 };
 // For convenience in error messages and logging
 export const VERSION = "1.0.0";

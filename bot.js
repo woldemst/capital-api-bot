@@ -104,14 +104,12 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                if (this.openedPositions.length < 0) {
-                    if (this.monitorInterval) {
-                        clearInterval(this.monitorInterval);
-                        this.monitorInterval = null;
-                    }
-
-                    this.startMonitorOpenTrades();
+                if (this.monitorInterval) {
+                    clearInterval(this.monitorInterval);
+                    this.monitorInterval = null;
                 }
+
+                this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -193,13 +191,16 @@ class TradingBot {
         const m5Candles = this.candleHistory[symbol].M5;
         const m1Candles = this.candleHistory[symbol].M1;
 
+        const prev = m15Candles[m15Candles.length - 2];
+        const last = m15Candles[m15Candles.length - 1];
+
         if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(`[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`);
             return;
         }
 
         const indicators = {
-            // d1: await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1),
+            // d1: await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1),j
             // h4: await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, ANALYSIS.TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, ANALYSIS.TIMEFRAMES.M15),
@@ -225,6 +226,8 @@ class TradingBot {
             m1Candles: m1Candles,
             bid,
             ask,
+            prev,
+            last,
         });
     }
 

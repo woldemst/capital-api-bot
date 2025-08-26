@@ -33,73 +33,69 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal({ symbol, indicators, trendAnalysis, m1Candles, m5Candles, m15Candles, bid, ask, h1Candles }) {
-        const { m1, m5, m15, h1 } = indicators;
+    detectPattern(trend, prev, last) {
+        if (!prev || !last) return false;
 
-        if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles) {
+        const isBullish = (c) => c.c > c.o;
+        const isBearish = (c) => c.c < c.o;
+
+        const trendDirection = trend.toLowerCase();
+
+        // if (!trendDirection || trendDirection === "neutral") return false;
+
+        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
+            return "bullish"; // red -> green
+        } else if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) {
+            return "bearish"; // green -> red
+        }
+
+        return false;
+    }
+
+    generateSignal({ symbol, indicators, trendAnalysis, m1Candles, m5Candles, m15Candles, bid, ask, h1Candles, prev, last }) {
+        const { m1, m5, m15, h1 } = indicators;
+        if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles || !prev || !last) {
             logger.warn(`[Signal] Missing indicators/candles for ${symbol}`);
             return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
         }
 
-        const m1Prev = m1Candles[m1Candles.length - 2] || {};
-        const h1Last = h1Candles[h1Candles.length - 1] || {};
+        // 1. Pattern check (green-red candle logic)
+        const direction = trendAnalysis.h1Trend; // Use H1 trend only
+        console.log("Generating signal with direction:", direction, "Prev:", prev, "Last:", last);
+        
+        const validPattern = this.detectPattern(direction, prev, last);
 
-        const h1TrendBull = h1.maFast > h1.maSlow;
-        const h1TrendBear = h1.maFast < h1.maSlow;
-        const h1LastBull = typeof h1Last.close === "number" && h1Last.close > h1Last.open;
-        const h1LastBear = typeof h1Last.close === "number" && h1Last.close < h1Last.open;
-
-        // buy / sell conditions (6 checks, last one = H1 trend + last candle)
-        const buyConditions = [
-            m1.maFast > m1.maSlow && m1Prev.close < m1.maSlow,
-            m1.rsi < 35, // slightly looser than 30 to reduce misses; tweak as needed
-            bid <= m1.bb.lower,
-            trendAnalysis?.overallTrend === "bullish",
-            m15.rsi > 50,
-            h1TrendBull && h1LastBull, // MANDATORY confirmation (H1 direction + last H1 candle)
-        ];
-
-        const sellConditions = [
-            m1.maFast < m1.maSlow && m1Prev.close > m1.maSlow,
-            m1.rsi > 65, // symmetric to buy side (tweak to 70 if preferred)
-            ask >= m1.bb.upper,
-            trendAnalysis?.overallTrend === "bearish",
-            m15.rsi < 50,
-            h1TrendBear && h1LastBear, // MANDATORY confirmation
-        ];
+        if (!validPattern) {
+            logger.info(`[Signal Analysis] ${symbol}: No valid H1 pattern found.`);
+            return { signal: null, reason: "no_valid_pattern" };
+        }
 
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
-        logger.info(`${symbol} Signal Analysis:
-            - MA Crossover: ${buyConditions[0] ? "Bullish" : sellConditions[0] ? "Bearish" : "Neutral"}
-            - RSI: ${m1.rsi?.toFixed(2)}
-            - BB Position: ${(bid - m1.bb.lower).toFixed(5)} from lower, ${(m1.bb.upper - ask).toFixed(5)} from upper
-            - Higher Timeframe Trend: ${trendAnalysis?.overallTrend}
-            - M15 RSI: ${m15.rsi?.toFixed(2)}
-            - H1 Trend: ${h1TrendBull ? "Bullish" : h1TrendBear ? "Bearish" : "Neutral"}
-            - H1 Last Candle: ${h1LastBull ? "Bullish" : h1LastBear ? "Bearish" : "Neutral"}
-            - Buy Score: ${buyScore}/6
-            - Sell Score: ${sellScore}/6
-        `);
+        logger.info(`[Signal Analysis] ${symbol}:
+            Pattern: ${validPattern}
+            Buy Score: ${buyScore}/${buyConditions.length}
+            Sell Score: ${sellScore}/${sellConditions.length}
+            m1 RSI: ${m1.rsi}
+            Trend: ${trendAnalysis?.overallTrend}
+            M15 RSI: ${m15.rsi}
+            `);
 
+        /* 2c. Apply the required score threshold */
         let signal = null;
-        if (buyScore >= REQUIRED_SCORE && h1TrendBull && h1LastBull && trendAnalysis?.overallTrend === "bullish") {
-            signal = "BUY";
-        } else if (sellScore >= REQUIRED_SCORE && h1TrendBear && h1LastBear && trendAnalysis?.overallTrend === "bearish") {
-            signal = "SELL";
-        }
+        if (validPattern === "bullish") signal = "BUY";
+        if (validPattern === "bearish") signal = "SELL";
 
-        const cooldownMs = 6000;
-        if (signal && this.lastTradeTimestamps[symbol] && Date.now() - this.lastTradeTimestamps[symbol] < cooldownMs) {
-            logger.info(`[Signal] Cooldown active for ${symbol}, skipping signal`);
-            signal = null;
+        if (!signal) {
+            return { signal: null, reason: "score_too_low" };
         }
 
         return {
             signal,
             buyScore,
             sellScore,
+            reason: signal ? "pattern_and_score_passed" : "pattern_passed_but_score_too_low",
             metrics: {
                 rsi: m1.rsi,
                 maFast: m1.maFast,
@@ -153,7 +149,6 @@ class TradingService {
         let size = riskAmount / Math.abs(slDistance);
         size = Math.floor(size / 100) * 100; // Round to nearest 100
         if (size < 100) size = 100; // Minimum size
-
 
         logger.info(`[Trade Parameters] ${symbol} ${signal}:
             Entry: ${price}
@@ -216,9 +211,9 @@ class TradingService {
     //  Main price processing ---
     async processPrice(message) {
         try {
-            const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask } = message;
+            const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
 
-            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !trendAnalysis) return;
+            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask || !prev || !last || !trendAnalysis) return;
 
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
