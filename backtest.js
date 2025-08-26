@@ -46,9 +46,10 @@ async function backtest(symbol, start = ANALYSIS.BACKTESTING.START_DATE, end = A
     }
 
     let trades = [];
-    for (let i = 50; i < h1Candles.length; i++) { // Start after enough candles for indicators
-        const d1Slice = d1Candles.filter(c => c.timestamp <= h1Candles[i].timestamp).slice(-50);
-        const h4Slice = h4Candles.filter(c => c.timestamp <= h1Candles[i].timestamp).slice(-50);
+    for (let i = 50; i < h1Candles.length; i++) {
+        // Start after enough candles for indicators
+        const d1Slice = d1Candles.filter((c) => c.timestamp <= h1Candles[i].timestamp).slice(-50);
+        const h4Slice = h4Candles.filter((c) => c.timestamp <= h1Candles[i].timestamp).slice(-50);
         const h1Slice = h1Candles.slice(i - 50, i + 1);
 
         // Calculate indicators for each timeframe

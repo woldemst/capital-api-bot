@@ -104,12 +104,12 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                if (this.monitorInterval) {
-                    clearInterval(this.monitorInterval);
-                    this.monitorInterval = null;
-                }
+                // if (this.monitorInterval) {
+                //     clearInterval(this.monitorInterval);
+                //     this.monitorInterval = null;
+                // }
 
-                this.startMonitorOpenTrades();
+                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -238,31 +238,26 @@ class TradingBot {
         webSocketService.disconnect();
     }
 
-    startMonitorOpenTrades() {
-        const interval = 30 * 1000;
-        logger.info("\n\n[Monitoring] Starting open trade monitor interval (every 30 seconds)");
-        this.monitorInterval = setInterval(async () => {
-            logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
-            try {
-                const positions = await getOpenPositions();
-                for (const pos of positions.positions) {
-                    console.log("pos", pos);
+    async startMonitorOpenTrades() {
+        logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+        try {
+            const positions = await getOpenPositions();
+            for (const pos of positions.positions) {
+                console.log("pos", pos);
 
-                    const positionData = {
-                        dealId: pos.dealId,
-                        direction: pos.position.direction,
-                        entryPrice: pos.position.level,
-                        takeProfit: pos.position.profitLevel,
-                        stopLoss: pos.position.stopLevel,
-                        currentPrice: pos.market.bid, // or offer, depending on direction
-                    };
-                    await tradingService.updateTrailingStopIfNeeded(positionData);
-                }
-                // logger.info("[Monitoring] monitorOpenTrades completed");
-            } catch (error) {
-                logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
+                const positionData = {
+                    dealId: pos.dealId,
+                    direction: pos.position.direction,
+                    entryPrice: pos.position.level,
+                    takeProfit: pos.position.profitLevel,
+                    stopLoss: pos.position.stopLevel,
+                    currentPrice: pos.market.bid, // or offer, depending on direction
+                };
+                await tradingService.updateTrailingStopIfNeeded(positionData);
             }
-        }, interval); // every 1 min
+        } catch (error) {
+            logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
+        }
     }
 
     scheduleMidnightSessionRefresh() {
