@@ -65,9 +65,6 @@ class TradingBot {
             // this.setupWebSocket(tokens); // just for 15, 5, 1 minute candles
             this.startSessionPing();
 
-            // 2. Initialize data
-            await this.initializeCandleHistory();
-
             // 4. Only after immediate analysis, start the intervals
             await this.startAnalysisInterval();
 
@@ -77,30 +74,7 @@ class TradingBot {
             throw error;
         }
     }
-
-    async initializeCandleHistory() {
-        for (const symbol of SYMBOLS) {
-            try {
-                const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
-                const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
-                const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
-
-                if (!d1Data || !h4Data || !h1Data) return console.error(`[Bot] Failed to fetch historical data for ${symbol}`);
-
-                this.candleHistory[symbol] = {
-                    D1: d1Data?.prices?.slice(-this.maxCandleHistory) || [],
-                    H4: h4Data?.prices?.slice(-this.maxCandleHistory) || [],
-                    H1: h1Data?.prices?.slice(-this.maxCandleHistory) || [],
-                };
-                logger.info(
-                    `[Bot] Initialized candle history for ${symbol}: H1: ${this.candleHistory[symbol].H1.length}, H4: ${this.candleHistory[symbol].H4.length}, D1: ${this.candleHistory[symbol].D1.length}`
-                );
-            } catch (error) {
-                logger.error(`[Bot] Error initializing candle history for ${symbol}:`, error);
-            }
-        }
-    }
-
+    
     // WebSocket connection is just for 15, 5, 1 minute candles
     // setupWebSocket(tokens) {
     //     webSocketService.connect(tokens, SYMBOLS, (data) => {
@@ -138,28 +112,22 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                if (ANALYSIS.BACKTESTING.ENABLED) {
-                    // Always run backtest, regardless of trading hours
-                    await this.analyzeAllSymbols();
-                } else {
-                    if (!this.isTradingAllowed()) {
-                        logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                        return;
-                    }
-                    logger.info(`[Running scheduled analysis...]`);
-
-                    await this.updateAccountInfo();
-                    await this.analyzeAllSymbols();
-
-                    // if (this.monitorInterval) {
-                    //     clearInterval(this.monitorInterval);
-                    //     this.monitorInterval = null;
-                    // }
-
-                    // if (this.openedPositions && this.openedPositions > 0) {
-                    //     this.startMonitorOpenTrades();
-                    // }
+                if (!this.isTradingAllowed()) {
+                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                    return;
                 }
+
+                await this.updateAccountInfo();
+                await this.analyzeAllSymbols();
+
+                // if (this.monitorInterval) {
+                //     clearInterval(this.monitorInterval);
+                //     this.monitorInterval = null;
+                // }
+
+                // if (this.openedPositions && this.openedPositions > 0) {
+                //     this.startMonitorOpenTrades();
+                // }
             } catch (error) {
                 logger.error("Analysis interval error:", error);
             }
@@ -202,11 +170,8 @@ class TradingBot {
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         for (const symbol of SYMBOLS) {
-            try {
-                await this.analyzeSymbol(symbol);
-            } catch (error) {
-                logger.error(`Error analyzing ${symbol}:`, error.message);
-            }
+            await this.analyzeSymbol(symbol);
+            await this.delay(2000); // Add at least 1 second delay between symbols
         }
     }
 
@@ -214,30 +179,40 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        // Get latest H1 candle for real-time price
+        // Fetch latest historical data for each timeframe
+        // const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
+        // await this.delay(500);
+        // const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
+        // await this.delay(500);
+        const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
+        await this.delay(500);
+        const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
+        await this.delay(500);
+        const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
+        await this.delay(500);
+        const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
+
+        // const d1Candles = this.candleHistory[symbol].D1;
+        // const h4Candles = this.candleHistory[symbol].H4;
         const h1Candles = this.candleHistory[symbol].H1;
-        const h4Candles = this.candleHistory[symbol].H4;
-        const d1Candles = this.candleHistory[symbol].D1;
+        const m15Candles = this.candleHistory[symbol].M15;
+        const m5Candles = this.candleHistory[symbol].M5;
+        const m1Candles = this.candleHistory[symbol].M1;
 
         const prev = h1Candles[h1Candles.length - 2];
         const last = h1Candles[h1Candles.length - 1];
 
-        if (!h1Candles || !h4Candles || !d1Candles) {
-            logger.warn(`[${symbol}] No candle data available`);
+        if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
+            logger.error(`[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`);
             return;
         }
-
-        // Get latest real-time candle
-        // const latestCandle = this.latestCandles[symbol]?.latest;
-        // if (!latestCandle) {
-        //     logger.info(`[Bot] No latest candle for ${symbol}, skipping analysis.`);
-        //     return;
-        // }
-        // Calculate trends and indicators
         const indicators = {
             d1Trend: (await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1)).trend,
             h4Trend: (await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4)).trend,
             h1: await calcIndicators(h1Candles, symbol, ANALYSIS.TIMEFRAMES.H1),
+            m15: await calcIndicators(m15Candles, symbol, ANALYSIS.TIMEFRAMES.M15),
+            m5: await calcIndicators(m5Candles, symbol, ANALYSIS.TIMEFRAMES.M5),
+            m1: await calcIndicators(m1Candles, symbol, ANALYSIS.TIMEFRAMES.M1),
         };
 
         await tradingService.processPrice({
@@ -255,9 +230,6 @@ class TradingBot {
         // }
     }
 
-    /**
-     * Cleanly shuts down the bot and all intervals/connections.
-     */
     async shutdown() {
         this.isRunning = false;
         clearInterval(this.analysisInterval);
@@ -297,9 +269,6 @@ class TradingBot {
         }, 1 * 60 * 1000); // every 1 min
     }
 
-    /**
-     * Schedules a session refresh at midnight every day.
-     */
     scheduleMidnightSessionRefresh() {
         const now = new Date();
         const nextMidnight = new Date(now);
@@ -340,6 +309,10 @@ class TradingBot {
             return false;
         }
         return true;
+    }
+
+    delay(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
 
