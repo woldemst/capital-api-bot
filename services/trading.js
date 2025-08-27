@@ -99,6 +99,11 @@ class TradingService {
         const macd15 = m15.macd || null;
         const macd15Hist = macd15 && typeof macd15.histogram === "number" ? macd15.histogram : null;
         const adx15 = typeof m15.adx === "number" ? m15.adx : null;
+        const atr15 = typeof m15.atr === "number" ? m15.atr : null;
+        const baseRSI = 50;
+        const baseADX = 20;
+        const adaptiveRSI = atr15 ? baseRSI + Math.min(10, atr15 * 100) : baseRSI;
+        const adaptiveADX = atr15 ? baseADX + Math.min(10, atr15 * 10) : baseADX;
 
         const ema9h1 = typeof h1.ema9 === "number" ? h1.ema9 : null;
         const ema21h1 = typeof h1.ema21 === "number" ? h1.ema21 : null;
@@ -112,18 +117,18 @@ class TradingService {
             h1Trend === "bullish",
             emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
             ema9h1 != null ? lastClose > ema9h1 : true,
-            rsi15 != null ? rsi15 > 50 : true,
+            rsi15 != null ? rsi15 > adaptiveRSI : true,
             macd15Hist != null ? macd15Hist > 0 : true,
-            adx15 != null ? adx15 > 20 : true,
+            adx15 != null ? adx15 > adaptiveADX : true,
         ];
 
         const sellConditions = [
             h1Trend === "bearish",
             emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
             ema9h1 != null ? lastClose < ema9h1 : true,
-            rsi15 != null ? rsi15 < 50 : true,
+            rsi15 != null ? rsi15 < 100 - adaptiveRSI : true,
             macd15Hist != null ? macd15Hist < 0 : true,
-            adx15 != null ? adx15 > 20 : true,
+            adx15 != null ? adx15 > adaptiveADX : true,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
@@ -149,6 +154,15 @@ class TradingService {
 
         if (!signal) {
             return { signal: null, reason: "score_too_low", buyScore, sellScore };
+        }
+        if (adx15 && adx15 < 20) {
+            logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
+            return { signal: null, reason: "ranging_market" };
+        }
+        if (atr15 && atr15 < 0.0005) {
+            // adjust threshold for your market
+            logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+            return { signal: null, reason: "low_volatility" };
         }
 
         return {

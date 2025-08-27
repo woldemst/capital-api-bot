@@ -1,4 +1,4 @@
-import { SMA, EMA, RSI, BollingerBands, MACD, ADX, highest} from "technicalindicators";
+import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
 
 export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
@@ -20,6 +20,7 @@ export async function calcIndicators(bars) {
         rsi: RSI.calculate({ period: 14, values: closes }).pop(),
         bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
+        atr: ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop(),
         macd: MACD.calculate({
             fastPeriod: 12,
             slowPeriod: 26,
@@ -65,29 +66,5 @@ export async function analyzeTrend(symbol, getHistorical) {
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);
         return { overallTrend: "unknown" };
-    }
-}
-
-// --- ATR Calculation for dynamic SL/TP ---
-export async function calculateATR(symbol) {
-    try {
-        const data = await getHistorical(symbol, "MINUTE_15", 15);
-        if (!data?.prices || data.prices.length < 14) throw new Error("Insufficient data for ATR calculation");
-        let tr = [];
-        const prices = data.prices;
-        for (let i = 1; i < prices.length; i++) {
-            const high = prices[i].highPrice?.ask || prices[i].high;
-            const low = prices[i].lowPrice?.bid || prices[i].low;
-            const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
-            const tr1 = high - low;
-            const tr2 = Math.abs(high - prevClose);
-            const tr3 = Math.abs(low - prevClose);
-            tr.push(Math.max(tr1, tr2, tr3));
-        }
-        const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-        return atr;
-    } catch (error) {
-        logger.error("[ATR] Error:", error);
-        return 0.001;
     }
 }
