@@ -216,38 +216,60 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
  * Updates the trailing stop for an open position.
  * Ensures stopLevel is at least minSLDistance away from current price.
  */
-export async function updateTrailingStop(positionId, stopLevel, symbol, direction, price) {
-    // Fetch allowed stop range and enforce min distance
-    if (symbol && direction && typeof price === "number") {
+export async function updateTrailingStop(
+    positionId, // (string) the position/deal id to update
+    currentPrice, // (number) latest market price (bid for BUY, offer for SELL)
+    entryPrice, // (number) price at which the position was entered
+    takeProfit, // (number) planned take‑profit level
+    direction, // (string) "BUY" or "SELL"
+    symbol, // (string) market epic (e.g. "USDCAD")
+    isTrailingEnabled // (boolean) true if trailing already active
+) {
+    const tpDistance = Math.abs(takeProfit - entryPrice);
+    const thresholdPrice = direction.toUpperCase() === "BUY" ? entryPrice + 0.7 * tpDistance : entryPrice - 0.7 * tpDistance;
+
+    const thresholdMet = direction.toUpperCase() === "BUY" ? currentPrice >= thresholdPrice : currentPrice <= thresholdPrice;
+
+    if (!thresholdMet && !isTrailingEnabled) {
+        return; // keep the original SL until the threshold is hit
+    }
+
+    const trailingDistance = 0.1 * tpDistance;
+    let newStop = direction.toUpperCase() === "BUY" ? currentPrice - trailingDistance : currentPrice + trailingDistance;
+
+    try {
         const range = await getAllowedTPRange(symbol);
         const decimals = range.decimals || 5;
         const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-        if (direction === "buy") {
-            if (price - stopLevel < minStopDistance) {
-                stopLevel = price - minStopDistance;
+
+        if (direction.toUpperCase() === "BUY") {
+            if (currentPrice - newStop < minStopDistance) {
+                newStop = currentPrice - minStopDistance;
             }
         } else {
-            if (stopLevel - price < minStopDistance) {
-                stopLevel = price + minStopDistance;
+            if (newStop - currentPrice < minStopDistance) {
+                newStop = currentPrice + minStopDistance;
             }
         }
+    } catch (e) {
+        logger.warn("[API] Unable to fetch TP/SL limits – proceeding without min‑stop check");
     }
 
-    return await withSessionRetry(async () => {
-        logger.info(`[API] Updating trailing stop for position ${positionId} to ${stopLevel}`);
+    try {
         const response = await axios.put(
             `${API.BASE_URL}/positions/${positionId}`,
             {
                 trailingStop: true,
-                stopLevel,
+                stopLevel: newStop,
             },
-            {
-                headers: getHeaders(true),
-            }
+            { headers: getHeaders(true) }
         );
-        logger.info("[API] Trailing stop updated successfully:", response.data);
+        logger.info(`[API] Trailing stop for ${positionId} set to ${newStop}`);
         return response.data;
-    });
+    } catch (err) {
+        logger.error(`[API] updateTrailingStop error for ${positionId}:`, err.response?.data || err.message);
+        throw err;
+    }
 }
 
 export async function placePosition(symbol, direction, size, price, SL, TP) {

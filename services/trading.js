@@ -319,8 +319,11 @@ class TradingService {
     // --- Trailing stop logic (unchanged) ---
     async updateTrailingStopIfNeeded(position) {
         const { dealId, direction, entryPrice, takeProfit, stopLoss, currentPrice } = position;
+
         const tpDistance = Math.abs(takeProfit - entryPrice);
+
         const tp60 = direction === "BUY" ? entryPrice + tpDistance * 0.6 : entryPrice - tpDistance * 0.6;
+
         const reached60TP = direction === "BUY" ? currentPrice >= tp60 : currentPrice <= tp60;
         if (!reached60TP) return;
         const trailingBuffer = tpDistance * 0.1;
@@ -328,7 +331,7 @@ class TradingService {
         const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
         if (!shouldUpdate) return;
         try {
-            await updateTrailingStop(dealId, newStop);
+            await updateTrailingStop(dealId, newStop, position.market, direction, currentPrice);
             logger.info(`[TrailingStop] Updated trailing stop for ${dealId}: ${newStop}`);
         } catch (error) {
             logger.error(`[TrailingStop] Failed to update trailing stop for ${dealId}:`, error);
