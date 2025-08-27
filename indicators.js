@@ -1,15 +1,13 @@
-import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
+import { SMA, EMA, RSI, BollingerBands, MACD, ADX, highest} from "technicalindicators";
 
 export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
-        // console.error('Invalid or empty bars array:', bars);
         return {};
     }
 
-    const closes = bars.map((b) => {
-        // Handle different price formats
-        return b.close || b.Close || b.closePrice?.bid || 0;
-    });
+    const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
+    const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
+    const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
 
     // Ensure we have enough data points
     const minLength = Math.max(20, bars.length);
@@ -21,6 +19,7 @@ export async function calcIndicators(bars) {
         ema20: EMA.calculate({ period: 20, values: closes }).pop(),
         rsi: RSI.calculate({ period: 14, values: closes }).pop(),
         bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
+        adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
         macd: MACD.calculate({
             fastPeriod: 12,
             slowPeriod: 26,
