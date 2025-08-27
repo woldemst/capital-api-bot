@@ -1,7 +1,8 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition, getHistorical } from "../api.js";
 import logger from "../utils/logger.js";
-import { logTradeResult } from "../utils/tradeLogger.js";
+import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
+import fs from "fs";
 const { MAX_POSITIONS, RISK_PER_TRADE } = TRADING;
 
 // Add a default required score for signals
@@ -93,10 +94,11 @@ class TradingService {
         // --- 3) Indicator confirmation (simple, fast to compute) ---
         const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
 
-        // Use M15 RSI/MACD + H1 EMAs & EMA9 for momentum
+        // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
         const rsi15 = typeof m15.rsi === "number" ? m15.rsi : null;
         const macd15 = m15.macd || null;
         const macd15Hist = macd15 && typeof macd15.histogram === "number" ? macd15.histogram : null;
+        const adx15 = typeof m15.adx === "number" ? m15.adx : null;
 
         const ema9h1 = typeof h1.ema9 === "number" ? h1.ema9 : null;
         const ema21h1 = typeof h1.ema21 === "number" ? h1.ema21 : null;
@@ -112,6 +114,7 @@ class TradingService {
             ema9h1 != null ? lastClose > ema9h1 : true,
             rsi15 != null ? rsi15 > 50 : true,
             macd15Hist != null ? macd15Hist > 0 : true,
+            adx15 != null ? adx15 > 20 : true,
         ];
 
         const sellConditions = [
@@ -120,6 +123,7 @@ class TradingService {
             ema9h1 != null ? lastClose < ema9h1 : true,
             rsi15 != null ? rsi15 < 50 : true,
             macd15Hist != null ? macd15Hist < 0 : true,
+            adx15 != null ? adx15 > 20 : true,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
@@ -128,10 +132,10 @@ class TradingService {
         // Decide signal
         const threshold = typeof REQUIRED_SCORE === "number" && REQUIRED_SCORE > 0 ? REQUIRED_SCORE : 3;
         let signal = null;
-        // if (patternDir === "bullish" && buyScore >= threshold) signal = "BUY";
-        // if (patternDir === "bearish" && sellScore >= threshold) signal = "SELL";
-        if (patternDir === "bullish") signal = "BUY";
-        if (patternDir === "bearish") signal = "SELL";
+        if (patternDir === "bullish" && buyScore >= threshold) signal = "BUY";
+        if (patternDir === "bearish" && sellScore >= threshold) signal = "SELL";
+        // if (patternDir === "bullish") signal = "BUY";
+        // if (patternDir === "bearish") signal = "SELL";
 
         logger.info(`[Signal Analysis] ${symbol}
             H1 Trend: ${h1Trend}
@@ -140,6 +144,7 @@ class TradingService {
             SellScore: ${sellScore}/${sellConditions.length}
             M15 RSI: ${rsi15}
             M15 MACD hist: ${macd15Hist}
+            M15 ADX: ${adx15}
         `);
 
         if (!signal) {
@@ -158,6 +163,7 @@ class TradingService {
                 ema21h1,
                 emaFastH1,
                 emaSlowH1,
+                adx15,
             },
         };
     }
@@ -176,8 +182,8 @@ class TradingService {
         const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
         if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-        // Add small buffer (0.5-1 pip) to avoid close hits
-        const buffer = symbol.includes("JPY") ? 0.05 : 0.0005;
+        // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
+        const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
 
         let stopLossPrice, slDistance, takeProfitPrice;
 
@@ -185,14 +191,30 @@ class TradingService {
             // For BUY: SL below previous candle low
             stopLossPrice = prevCandle.low - buffer;
             slDistance = price - stopLossPrice;
-            // TP = entry + (1.5 × SL distance)
-            takeProfitPrice = price + slDistance * 1.5;
+            // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
+            takeProfitPrice = price + slDistance * 1.8;
         } else {
             // For SELL: SL above previous candle high
             stopLossPrice = prevCandle.high + buffer;
             slDistance = stopLossPrice - price;
-            // TP = entry - (1.5 × SL distance)
-            takeProfitPrice = price - slDistance * 1.5;
+            // TP = entry - (1.8 × SL distance)
+            takeProfitPrice = price - slDistance * 1.8;
+        }
+
+        // Ensure minimum SL distance to avoid excessively tight SLs
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const minSlPips = symbol.includes("JPY") ? 12 : 10; // slightly larger minimum SL
+        const minSl = minSlPips * pip;
+        if (Math.abs(slDistance) < minSl) {
+            if (signal === "BUY") {
+                stopLossPrice = price - minSl;
+                slDistance = price - stopLossPrice;
+                takeProfitPrice = price + slDistance * 1.8;
+            } else {
+                stopLossPrice = price + minSl;
+                slDistance = stopLossPrice - price;
+                takeProfitPrice = price - slDistance * 1.8;
+            }
         }
 
         // Round prices to appropriate decimals
@@ -252,7 +274,7 @@ class TradingService {
     }
 
     // --- Trade execution ---
-    async executeTrade(symbol, signal, bid, ask, m1Candles) {
+    async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
         const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
         const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
         const position = await placePosition(symbol, signal, size, price, SL, TP);
@@ -260,6 +282,36 @@ class TradingService {
             const confirmation = await getDealConfirmation(position.dealReference);
             if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                 logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+            } else {
+                logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${SL} TP=${TP} ref=${position.dealReference}`);
+                // Log opened trade to monthly log for later ML training
+                try {
+                    const logPath = getCurrentTradesLogPath();
+                    const logEntry = {
+                        time: new Date().toISOString(),
+                        id: position.dealReference,
+                        symbol,
+                        direction: signal.toLowerCase(),
+                        entry: price,
+                        sl: SL,
+                        tp: TP,
+                        size,
+                        indicators: {
+                            emaFast: indicators?.h1?.emaFast,
+                            emaSlow: indicators?.h1?.emaSlow,
+                            ema9: indicators?.h1?.ema9,
+                            ema21: indicators?.h1?.ema21,
+                            rsi15: indicators?.m15?.rsi,
+                            macd15Hist: indicators?.m15?.macd?.histogram,
+                            atr: indicators?.m1?.atr,
+                        },
+                        result: null,
+                    };
+                    fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
+                    logger.info(`[TradeLog] Logged opened trade ${position.dealReference} to ${logPath}`);
+                } catch (err) {
+                    logger.error("[TradeLog] Failed to append opened trade:", err);
+                }
             }
         }
     }
@@ -290,7 +342,7 @@ class TradingService {
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
-                await this.processSignal(symbol, signal, bid, ask, m1Candles);
+                await this.processSignal(symbol, signal, bid, ask, m1Candles, indicators);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal found`);
             }
@@ -300,16 +352,9 @@ class TradingService {
     }
 
     // --- Signal processing ---
-    async processSignal(symbol, signal, bid, ask, m1Candles) {
-        // Check daily loss limit
-        // const dailyLossLimit = -Math.abs(this.accountBalance * this.dailyLossLimitPct);
-        // if (this.dailyLoss < dailyLossLimit) {
-        //     logger.warn(`[Risk] Daily loss limit reached: ${this.dailyLoss.toFixed(2)} €. Limit: ${dailyLossLimit.toFixed(2)} €`);
-        //     return;
-        // }
-
+    async processSignal(symbol, signal, bid, ask, m1Candles, indicators = {}) {
         try {
-            await this.executeTrade(symbol, signal, bid, ask, m1Candles);
+            await this.executeTrade(symbol, signal, bid, ask, m1Candles, indicators);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);
@@ -331,8 +376,31 @@ class TradingService {
         const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
         if (!shouldUpdate) return;
         try {
-            await updateTrailingStop(dealId, newStop, position.market, direction, currentPrice);
+            await updateTrailingStop(
+                dealId,
+                currentPrice, // latest market price
+                entryPrice, // entry
+                takeProfit, // planned TP
+                direction.toUpperCase(), // ensure uppercase
+                position.symbol || position.market, // epic/symbol
+                position.isTrailing || false // if you track trailing status
+            );
             logger.info(`[TrailingStop] Updated trailing stop for ${dealId}: ${newStop}`);
+
+            // 2. Disable TP after first trailing activation
+            // if (!position.tpDisabled) {
+            //     await updateTrailingStop(
+            //         dealId,
+            //         currentPrice,
+            //         entryPrice,
+            //         null, // set TP to null to disable
+            //         direction.toUpperCase(),
+            //         position.symbol || position.market,
+            //         true
+            //     );
+            //     position.tpDisabled = true; // mark so we don’t call it again
+            //     logger.info(`[TrailingStop] Disabled TP for ${dealId}, now managed only by SL`);
+            // }
         } catch (error) {
             logger.error(`[TrailingStop] Failed to update trailing stop for ${dealId}:`, error);
         }
