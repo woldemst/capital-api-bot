@@ -1,5 +1,5 @@
 import yahooFinance from "yahoo-finance2";
-import { TRADING, ANALYSIS } from "./config.js";
+import { SYMBOLS, ANALYSIS } from "./config.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
@@ -87,7 +87,7 @@ async function backtest(symbol, start = ANALYSIS.BACKTESTING.START_DATE, end = A
 // Run backtest for all symbols and save results
 async function runAndSaveBacktest() {
     const results = {};
-    for (const symbol of TRADING.SYMBOLS) {
+    for (const symbol of SYMBOLS) {
         results[symbol] = await backtest(symbol, ANALYSIS.BACKTESTING.START_DATE, ANALYSIS.BACKTESTING.END_DATE);
     }
     // Save to file

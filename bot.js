@@ -1,11 +1,10 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { TRADING, DEV, PROD, ANALYSIS } from "./config.js";
+import { SYMBOLS, DEV, PROD, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import logger from "./utils/logger.js";
 
-const { SYMBOLS } = TRADING;
 
 class TradingBot {
     constructor() {
@@ -96,18 +95,13 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                // if (!this.isTradingAllowed()) {
-                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                //     return;
-                // }
+                if (!this.isTradingAllowed()) {
+                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                    return;
+                }
 
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
-
-                // if (this.monitorInterval) {
-                //     clearInterval(this.monitorInterval);
-                //     this.monitorInterval = null;
-                // }
 
                 await this.startMonitorOpenTrades();
             } catch (error) {
@@ -157,31 +151,35 @@ class TradingBot {
         }
     }
 
+    async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
+        try {
+            const [h1, m15, m5, m1] = await Promise.all([
+                getHistorical(symbol, timeframes.H1, historyLength),
+                getHistorical(symbol, timeframes.M15, historyLength),
+                getHistorical(symbol, timeframes.M5, historyLength),
+                getHistorical(symbol, timeframes.M1, historyLength),
+            ]);
+            return { h1, m15, m5, m1 };
+        } catch (error) {
+            logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
+            return {};
+        }
+    }
+
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        // Fetch latest historical data for each timeframe
-        // const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
-        // await this.delay(500);
-        // const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
-        // await this.delay(500);
-        const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
-        await this.delay(500);
-        const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
-        await this.delay(500);
-        const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
-        await this.delay(500);
-        const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
+        const { h1, m15, m5, m1 } = await this.fetchAllCandles(symbol, getHistorical, timeframes, this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
             // D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
             // H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
-            H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
-            M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
-            M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
-            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
+            H1: h1.prices.slice(-this.maxCandleHistory) || [],
+            M15: m15.prices.slice(-this.maxCandleHistory) || [],
+            M5: m5.prices.slice(-this.maxCandleHistory) || [],
+            M1: m1.prices.slice(-this.maxCandleHistory) || [],
         };
 
         // const d1Candles = this.candleHistory[symbol].D1;
@@ -283,7 +281,6 @@ class TradingBot {
         }
     }
 
-    // Checks if trading is allowed (not weekend, and within trading hours)
     isTradingAllowed() {
         const now = new Date();
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday

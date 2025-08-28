@@ -10,35 +10,23 @@ export const API = {
 };
 
 // Trading Configuration
-export const TRADING = {
-    // Instruments and timeframes
-    SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
+export const SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
+export const CRYPTO = ["BTC/USD", "ETH/USD"];
+export const STOCKS = ["AAPL", "TSLA"];
+export const ETFS = ["SPY", "QQQ"];
 
-    crypto: ["BTC/USD", "ETH/USD"],
-    stocks: ["AAPL", "TSLA"],
-    etfs: ["SPY", "QQQ"],
-
-    // Position sizing and risk management
+export const RISK = {
     LEVERAGE: 30,
-    RISK_PER_TRADE: 0.02, // 2% risk per trade
-    MAX_POSITIONS: 5, // Maximum 3 simultaneous positions
-    POSITION_BUFFER_PIPS: 1, // Buffer for SL calculation
-
-    // Take profit and stop loss
-    REWARD_RISK_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 240, // Maximum hold time in minutes
-
-    // Partial profit taking
+    PER_TRADE: 0.02, // 2% risk per trade
+    MAX_POSITIONS: 5, // Maximum simultaneous positions
+    BUFFER_PIPS: 1, // Buffer for SL calculation
+    REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
+    MAX_HOLD_MINUTES: 240, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
-
-    // Slippage control (in pips)
-    MAX_SLIPPAGE_PIPS: 2, // Maximum allowed slippage in pips
-
-    // Daily risk control
-    MAX_DAILY_LOSS: 0.04, // Stop trading after 4% loss in a day
-    MAX_DAILY_PROFIT: 0.06, // Stop trading after 6% profit in a day
-
+    MAX_SLIPPAGE_PIPS: 2,
+    MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
+    MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
     REQUIRED_SCORE: 1,
 };
 
@@ -56,18 +44,10 @@ export const ANALYSIS = {
 
     // EMAs for trend and entry
     EMA: {
-        D1: {
-            FAST: 20,
-            SLOW: 50,
-        },
-        H4: {
-            FAST: 20,
-            SLOW: 50,
-        },
-        H1: {
-            FAST: 9,
-            SLOW: 21,
-        },
+        D1: { FAST: 20, SLOW: 50 },
+        H4: { FAST: 20, SLOW: 50 },
+        H1: { FAST: 9, SLOW: 21 },
+        
     }, // RSI settings
     RSI: {
         PERIOD: 14,
@@ -77,18 +57,13 @@ export const ANALYSIS = {
         EXIT_OVERSOLD: 35,
     },
 
-    // Risk Management
-    RISK: {
-        PER_TRADE: 0.02, // 2% risk per trade
-        REWARD_RATIO: 2.0, // Target 2:1 reward/risk
-        PARTIAL_TAKE_PROFIT: 0.5, // Take 50% profit at 1:1
-    },
-
     BACKTESTING: {
         ENABLED: false,
         START_DATE: "2023-01-01",
         END_DATE: "2023-12-31",
     },
+
+    MAX_HOLD_TIME: 240, // Maximum hold time in minutes
 };
 
 // Trading Sessions (UTC times)

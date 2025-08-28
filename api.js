@@ -1,6 +1,3 @@
-// --- API Utility: Handles all Capital.com REST API calls and session management ---
-// Human-readable, robust, and well-commented for maintainability.
-
 import { API } from "./config.js";
 import axios from "axios";
 import logger from "./utils/logger.js";
@@ -10,7 +7,8 @@ let sessionStartTime = Date.now();
 
 /**
  * Returns the headers required for API requests.
- * Optionally includes Content-Type for POST/PUT requests.
+ * @param {boolean} includeContentType - Whether to include Content-Type header
+ * @returns {object} Headers object
  */
 export const getHeaders = (includeContentType = false) => {
     const baseHeaders = {
@@ -21,7 +19,11 @@ export const getHeaders = (includeContentType = false) => {
     return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
-// Start a new session with the API
+/**
+ * Starts a new session with the Capital.com API.
+ * Stores session tokens for future requests.
+ * @returns {Promise<object>} Session data
+ */
 export const startSession = async () => {
     /**
      * Starts a new session with the Capital.com API.
@@ -42,17 +44,15 @@ export const startSession = async () => {
 
         console.log("");
         logger.info("Session started");
-        // logger.info(response.data);
-
-        // Store the session tokens
         cst = response.headers["cst"];
         xsecurity = response.headers["x-security-token"];
+
         if (!cst || !xsecurity) {
             logger.warn("Session tokens not received in response headers");
             logger.info("Response headers:", response.headers);
         }
 
-        console.log(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
+        // console.log(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
         return response.data;
     } catch (error) {

@@ -1,12 +1,10 @@
-import { TRADING, ANALYSIS } from "../config.js";
-import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition, getHistorical } from "../api.js";
+import { RISK } from "../config.js";
+import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
 import logger from "../utils/logger.js";
 import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
-const { MAX_POSITIONS, RISK_PER_TRADE } = TRADING;
 
-// Add a default required score for signals
-const REQUIRED_SCORE = TRADING.REQUIRED_SCORE;
+const { PER_TRADE, MAX_POSITIONS, REQUIRED_SCORE } = RISK;
 
 class TradingService {
     constructor() {
@@ -14,7 +12,7 @@ class TradingService {
         this.accountBalance = 0;
         this.availableMargin = 0;
         this.lastTradeTimestamps = {};
-        this.maxRiskPerTrade = RISK_PER_TRADE;
+        this.maxRiskPerTrade = PER_TRADE;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
     }
@@ -139,8 +137,6 @@ class TradingService {
         let signal = null;
         if (patternDir === "bullish" && buyScore >= threshold) signal = "BUY";
         if (patternDir === "bearish" && sellScore >= threshold) signal = "SELL";
-        // if (patternDir === "bullish") signal = "BUY";
-        // if (patternDir === "bearish") signal = "SELL";
 
         logger.info(`[Signal Analysis] ${symbol}
             H1 Trend: ${h1Trend}
@@ -337,6 +333,7 @@ class TradingService {
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask) return;
 
+            //TODO
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
             //     logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}%) hit. Skip all new trades today.`);
@@ -400,21 +397,6 @@ class TradingService {
                 position.isTrailing || false // if you track trailing status
             );
             logger.info(`[TrailingStop] Updated trailing stop for ${dealId}: ${newStop}`);
-
-            // 2. Disable TP after first trailing activation
-            // if (!position.tpDisabled) {
-            //     await updateTrailingStop(
-            //         dealId,
-            //         currentPrice,
-            //         entryPrice,
-            //         null, // set TP to null to disable
-            //         direction.toUpperCase(),
-            //         position.symbol || position.market,
-            //         true
-            //     );
-            //     position.tpDisabled = true; // mark so we don’t call it again
-            //     logger.info(`[TrailingStop] Disabled TP for ${dealId}, now managed only by SL`);
-            // }
         } catch (error) {
             logger.error(`[TrailingStop] Failed to update trailing stop for ${dealId}:`, error);
         }
