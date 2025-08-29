@@ -4,7 +4,7 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import logger from "./utils/logger.js";
-
+const { TIMEFRAMES } = ANALYSIS;
 
 class TradingBot {
     constructor() {
@@ -19,7 +19,7 @@ class TradingBot {
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
-        this.tradingHours = { start: 2, end: 22 };
+        this.tradingHours = { start: 8, end: 21 };
     }
 
     async initialize() {
@@ -170,7 +170,7 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        const { h1, m15, m5, m1 } = await this.fetchAllCandles(symbol, getHistorical, timeframes, this.maxCandleHistory);
+        const { h1, m15, m5, m1 } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
@@ -198,12 +198,12 @@ class TradingBot {
         }
 
         const indicators = {
-            // d1: await calcIndicators(d1Candles, symbol, ANALYSIS.TIMEFRAMES.D1),j
-            // h4: await calcIndicators(h4Candles, symbol, ANALYSIS.TIMEFRAMES.H4),
-            h1: await calcIndicators(h1Candles, symbol, ANALYSIS.TIMEFRAMES.H1),
-            m15: await calcIndicators(m15Candles, symbol, ANALYSIS.TIMEFRAMES.M15),
-            m5: await calcIndicators(m5Candles, symbol, ANALYSIS.TIMEFRAMES.M5),
-            m1: await calcIndicators(m1Candles, symbol, ANALYSIS.TIMEFRAMES.M1),
+            // d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),j
+            // h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
+            h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
+            m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
+            m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
+            m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
         const trendAnalysis = await analyzeTrend(symbol, getHistorical);
