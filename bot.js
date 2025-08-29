@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { SYMBOLS, DEV, PROD, ANALYSIS } from "./config.js";
+import { SYMBOLS, NIGHT_SYMBOLS, DEV, PROD, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators.js";
@@ -103,7 +103,8 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                await this.startMonitorOpenTrades();
+                // Don't need for that strategy
+                // await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -143,9 +144,22 @@ class TradingBot {
         }
     }
 
+    getActiveSymbols() {
+        const now = new Date();
+        const hour = now.getUTCHours();
+        // Asian session: 22:00 - 08:00 UTC
+        if (hour >= 22 || hour < 8) {
+            logger.info("[Bot] Night session detected: Using NIGHT_SYMBOLS.");
+            return NIGHT_SYMBOLS;
+        }
+        logger.info("[Bot] Day session detected: Using SYMBOLS.");
+        return SYMBOLS;
+    }
+
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
-        for (const symbol of SYMBOLS) {
+        const activeSymbols = this.getActiveSymbols();
+        for (const symbol of activeSymbols) {
             await this.analyzeSymbol(symbol);
             await this.delay(2000); // Add at least 1 second delay between symbols
         }

@@ -14,6 +14,9 @@ export const SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
 export const CRYPTO = ["BTC/USD", "ETH/USD"];
 export const STOCKS = ["AAPL", "TSLA"];
 export const ETFS = ["SPY", "QQQ"];
+export const NIGHT_SYMBOLS = [
+    "USDJPY", "AUDUSD", "NZDUSD", "AUDJPY", "EURJPY"
+];
 
 export const RISK = {
     LEVERAGE: 30,
