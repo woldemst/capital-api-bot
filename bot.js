@@ -295,6 +295,61 @@ class TradingBot {
         }
     }
 
+    scheduleFridayClose() {
+        const now = new Date();
+        const day = now.getDay();
+        if (day !== 5) { // Only schedule on Fridays
+            // Calculate next Friday
+            const daysUntilFriday = (5 - day + 7) % 7;
+            const nextFriday = new Date(now);
+            nextFriday.setDate(now.getDate() + daysUntilFriday);
+            nextFriday.setHours(0, 0, 0, 0);
+            setTimeout(() => this.scheduleFridayClose(), nextFriday - now);
+            return;
+        }
+
+        // Schedule 21:00 close profitable positions
+        const closeProfitableTime = new Date(now);
+        closeProfitableTime.setHours(21, 0, 0, 0);
+        setTimeout(() => this.closeProfitablePositions(), closeProfitableTime - now);
+
+        // Schedule 22:00 close all positions
+        const closeAllTime = new Date(now);
+        closeAllTime.setHours(22, 0, 0, 0);
+        setTimeout(() => this.closeAllPositions(), closeAllTime - now);
+
+        logger.info("[Bot] Scheduled Friday position closing at 21:00 and 22:00 UTC.");
+    }
+
+    async closeProfitablePositions() {
+        logger.info("[Bot] Closing profitable positions before weekend...");
+        try {
+            const positions = await getOpenPositions();
+            for (const pos of positions.positions) {
+                const profit = pos.position.profit;
+                if (profit > 0) {
+                    await tradingService.closePosition(pos.dealId);
+                    logger.info(`[Bot] Closed profitable position: ${pos.market.epic} | Profit: ${profit}`);
+                }
+            }
+        } catch (error) {
+            logger.error("[Bot] Error closing profitable positions:", error);
+        }
+    }
+
+    async closeAllPositions() {
+        logger.info("[Bot] Closing all positions before weekend...");
+        try {
+            const positions = await getOpenPositions();
+            for (const pos of positions.positions) {
+                await tradingService.closePosition(pos.dealId);
+                logger.info(`[Bot] Closed position: ${pos.market.epic}`);
+            }
+        } catch (error) {
+            logger.error("[Bot] Error closing all positions:", error);
+        }
+    }
+
     isTradingAllowed() {
         const now = new Date();
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday
@@ -324,3 +379,6 @@ bot.initialize().catch((error) => {
     logger.error("[bot.js] Bot initialization failed:", error);
     process.exit(1);
 });
+
+// After bot.initialize(), add:
+bot.scheduleFridayClose();
