@@ -1,5 +1,5 @@
 import yahooFinance from "yahoo-finance2";
-import { TRADING, ANALYSIS } from "./config.js";
+import { SYMBOLS, ANALYSIS } from "./config.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
@@ -46,9 +46,10 @@ async function backtest(symbol, start = ANALYSIS.BACKTESTING.START_DATE, end = A
     }
 
     let trades = [];
-    for (let i = 50; i < h1Candles.length; i++) { // Start after enough candles for indicators
-        const d1Slice = d1Candles.filter(c => c.timestamp <= h1Candles[i].timestamp).slice(-50);
-        const h4Slice = h4Candles.filter(c => c.timestamp <= h1Candles[i].timestamp).slice(-50);
+    for (let i = 50; i < h1Candles.length; i++) {
+        // Start after enough candles for indicators
+        const d1Slice = d1Candles.filter((c) => c.timestamp <= h1Candles[i].timestamp).slice(-50);
+        const h4Slice = h4Candles.filter((c) => c.timestamp <= h1Candles[i].timestamp).slice(-50);
         const h1Slice = h1Candles.slice(i - 50, i + 1);
 
         // Calculate indicators for each timeframe
@@ -86,7 +87,7 @@ async function backtest(symbol, start = ANALYSIS.BACKTESTING.START_DATE, end = A
 // Run backtest for all symbols and save results
 async function runAndSaveBacktest() {
     const results = {};
-    for (const symbol of TRADING.SYMBOLS) {
+    for (const symbol of SYMBOLS) {
         results[symbol] = await backtest(symbol, ANALYSIS.BACKTESTING.START_DATE, ANALYSIS.BACKTESTING.END_DATE);
     }
     // Save to file

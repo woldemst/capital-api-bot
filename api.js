@@ -1,6 +1,3 @@
-// --- API Utility: Handles all Capital.com REST API calls and session management ---
-// Human-readable, robust, and well-commented for maintainability.
-
 import { API } from "./config.js";
 import axios from "axios";
 import logger from "./utils/logger.js";
@@ -10,7 +7,8 @@ let sessionStartTime = Date.now();
 
 /**
  * Returns the headers required for API requests.
- * Optionally includes Content-Type for POST/PUT requests.
+ * @param {boolean} includeContentType - Whether to include Content-Type header
+ * @returns {object} Headers object
  */
 export const getHeaders = (includeContentType = false) => {
     const baseHeaders = {
@@ -21,7 +19,11 @@ export const getHeaders = (includeContentType = false) => {
     return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
-// Start a new session with the API
+/**
+ * Starts a new session with the Capital.com API.
+ * Stores session tokens for future requests.
+ * @returns {Promise<object>} Session data
+ */
 export const startSession = async () => {
     /**
      * Starts a new session with the Capital.com API.
@@ -42,17 +44,15 @@ export const startSession = async () => {
 
         console.log("");
         logger.info("Session started");
-        // logger.info(response.data);
-
-        // Store the session tokens
         cst = response.headers["cst"];
         xsecurity = response.headers["x-security-token"];
+
         if (!cst || !xsecurity) {
             logger.warn("Session tokens not received in response headers");
             logger.info("Response headers:", response.headers);
         }
 
-        console.log(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
+        // console.log(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
         return response.data;
     } catch (error) {
@@ -216,46 +216,67 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
  * Updates the trailing stop for an open position.
  * Ensures stopLevel is at least minSLDistance away from current price.
  */
-export async function updateTrailingStop(positionId, stopLevel, symbol, direction, price) {
-    // Fetch allowed stop range and enforce min distance
-    if (symbol && direction && typeof price === "number") {
+export async function updateTrailingStop(
+    positionId, // (string) the position/deal id to update
+    currentPrice, // (number) latest market price (bid for BUY, offer for SELL)
+    entryPrice, // (number) price at which the position was entered
+    takeProfit, // (number) planned take‑profit level
+    direction, // (string) "BUY" or "SELL"
+    symbol, // (string) market epic (e.g. "USDCAD")
+    isTrailingEnabled // (boolean) true if trailing already active
+) {
+    const tpDistance = Math.abs(takeProfit - entryPrice);
+    const thresholdPrice = direction.toUpperCase() === "BUY" ? entryPrice + 0.7 * tpDistance : entryPrice - 0.7 * tpDistance;
+
+    const thresholdMet = direction.toUpperCase() === "BUY" ? currentPrice >= thresholdPrice : currentPrice <= thresholdPrice;
+
+    if (!thresholdMet && !isTrailingEnabled) {
+        return; // keep the original SL until the threshold is hit
+    }
+
+    const trailingDistance = 0.1 * tpDistance;
+    let newStop = direction.toUpperCase() === "BUY" ? currentPrice - trailingDistance : currentPrice + trailingDistance;
+
+    try {
         const range = await getAllowedTPRange(symbol);
         const decimals = range.decimals || 5;
         const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
-        if (direction === "buy") {
-            if (price - stopLevel < minStopDistance) {
-                stopLevel = price - minStopDistance;
+
+        if (direction.toUpperCase() === "BUY") {
+            if (currentPrice - newStop < minStopDistance) {
+                newStop = currentPrice - minStopDistance;
             }
         } else {
-            if (stopLevel - price < minStopDistance) {
-                stopLevel = price + minStopDistance;
+            if (newStop - currentPrice < minStopDistance) {
+                newStop = currentPrice + minStopDistance;
             }
         }
+    } catch (e) {
+        logger.warn("[API] Unable to fetch TP/SL limits – proceeding without min‑stop check");
     }
 
-    return await withSessionRetry(async () => {
-        logger.info(`[API] Updating trailing stop for position ${positionId} to ${stopLevel}`);
+    try {
         const response = await axios.put(
             `${API.BASE_URL}/positions/${positionId}`,
             {
                 trailingStop: true,
-                stopLevel,
+                stopLevel: newStop,
             },
-            {
-                headers: getHeaders(true),
-            }
+            { headers: getHeaders(true) }
         );
-        logger.info("[API] Trailing stop updated successfully:", response.data);
+        logger.info(`[API] Trailing stop for ${positionId} set to ${newStop}`);
         return response.data;
-    });
+    } catch (err) {
+        logger.error(`[API] updateTrailingStop error for ${positionId}:`, err.response?.data || err.message);
+        throw err;
+    }
 }
 
 export async function placePosition(symbol, direction, size, price, SL, TP) {
     // Fetch allowed stop range and enforce min distance
     if (symbol && direction && typeof price === "number" && SL) {
         const range = await getAllowedTPRange(symbol);
-        const decimals = range.decimals || 5;
-        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+        const minStopDistance = range.minSLDistance; // <-- already price distance!
         if (direction === "BUY") {
             if (price - SL < minStopDistance) {
                 SL = price - minStopDistance;
@@ -266,8 +287,7 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
             }
         }
     }
-    
-    
+
     return await withSessionRetry(async () => {
         logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${SL}, TP: ${TP}`);
         const position = {
@@ -278,7 +298,6 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
             guaranteedStop: false,
             stopLevel: SL ? parseFloat(SL).toFixed(5) : undefined,
             profitLevel: TP ? parseFloat(TP).toFixed(5) : undefined,
-            // forceOpen: true, // Removed as it's deprecated in newer API versions
         };
         logger.info("[API] Sending position request:", position);
         const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
@@ -330,12 +349,22 @@ export async function getAllowedTPRange(symbol) {
     try {
         const details = await getMarketDetails(symbol);
         const instr = details.instrument;
+        const decimals = instr.scalingFactor || instr.lotSizeScale || 5;
+        const minSLDistance = instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0;
+        const minTPDistance = instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0;
+
+        // Umrechnung in Preisabstand
+        const minSLDistancePrice = minSLDistance * Math.pow(10, -decimals);
+        const minTPDistancePrice = minTPDistance * Math.pow(10, -decimals);
+
         return {
-            minTPDistance: instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0,
+            minTPDistance,
             maxTPDistance: instr.limits?.limitDistance?.max || instr.limits?.limitLevel?.max || Number.POSITIVE_INFINITY,
-            minSLDistance: instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0,
+            minSLDistance,
             maxSLDistance: instr.limits?.stopDistance?.max || instr.limits?.stopLevel?.max || Number.POSITIVE_INFINITY,
-            decimals: instr.lotSizeScale || instr.scalingFactor || 5,
+            decimals,
+            minSLDistancePrice,
+            minTPDistancePrice,
             market: details.snapshot,
         };
     } catch (error) {
@@ -346,6 +375,8 @@ export async function getAllowedTPRange(symbol) {
             minSLDistance: 0,
             maxSLDistance: Number.POSITIVE_INFINITY,
             decimals: 5,
+            minSLDistancePrice: 0,
+            minTPDistancePrice: 0,
             market: {},
         };
     }

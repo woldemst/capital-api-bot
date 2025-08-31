@@ -1,15 +1,13 @@
-import { SMA, EMA, RSI, BollingerBands, MACD } from "technicalindicators";
+import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
 
 export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
-        // console.error('Invalid or empty bars array:', bars);
         return {};
     }
 
-    const closes = bars.map((b) => {
-        // Handle different price formats
-        return b.close || b.Close || b.closePrice?.bid || 0;
-    });
+    const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
+    const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
+    const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
 
     // Ensure we have enough data points
     const minLength = Math.max(20, bars.length);
@@ -21,6 +19,8 @@ export async function calcIndicators(bars) {
         ema20: EMA.calculate({ period: 20, values: closes }).pop(),
         rsi: RSI.calculate({ period: 14, values: closes }).pop(),
         bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
+        adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
+        atr: ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop(),
         macd: MACD.calculate({
             fastPeriod: 12,
             slowPeriod: 26,
@@ -40,38 +40,28 @@ export async function analyzeTrend(symbol, getHistorical) {
     }
 
     try {
-        const [h4Data, d1Data] = await Promise.all([getHistorical(symbol, "HOUR_4", 50), getHistorical(symbol, "DAY", 30)]);
+        const h1Data = await getHistorical(symbol, "HOUR", 50);
 
-        // console.log(`h4Data from analyzeTrend:`, h4Data);
-
-        // Add validation for historical data
-        if (!h4Data?.prices || !d1Data?.prices) {
+        if (!h1Data?.prices) {
             console.error("Missing prices in historical data");
             return { overallTrend: "unknown" };
         }
 
-        console.log(`Analyzing trend for ${symbol} on higher timeframes`);
+        console.log(`Analyzing trend for ${symbol} on H1 only`);
 
-        // Calculate indicators for H4 timeframe
-        const h4Indicators = await calcIndicators(h4Data.prices);
+        // Calculate indicators for h1 timeframe
+        const h1Indicators = await calcIndicators(h1Data.prices);
 
-        // Calculate indicators for D1 timeframe
-        const d1Indicators = await calcIndicators(d1Data.prices);
+        // Determine trend direction only by H4
+        const h1Trend = h1Indicators.maFast > h1Indicators.maSlow ? "bullish" : "bearish";
 
-        // Determine trend direction
-        const h4Trend = h4Indicators.maFast > h4Indicators.maSlow ? "bullish" : "bearish";
-        const d1Trend = d1Indicators.maFast > d1Indicators.maSlow ? "bullish" : "bearish";
+        console.log(`${symbol} H1 Trend: ${h1Trend}`);
 
-        console.log(`${symbol} H4 Trend: ${h4Trend}, D1 Trend: ${d1Trend}`);
-
-        // Return trend analysis
+        // Return trend analysis (overallTrend = h1Trend)
         return {
-            h4Trend,
-            d1Trend,
-            h4Indicators,
-            d1Indicators,
-            // Overall trend is bullish if both timeframes are bullish
-            overallTrend: h4Trend === "bullish" && d1Trend === "bullish" ? "bullish" : h4Trend === "bearish" && d1Trend === "bearish" ? "bearish" : "mixed",
+            h1Trend,
+            h1Indicators,
+            overallTrend: h1Trend,
         };
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);
