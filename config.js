@@ -10,13 +10,11 @@ export const API = {
 };
 
 // Trading Configuration
-export const SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
+export const DAY_SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
+export const NIGHT_SYMBOLS = ["USDJPY", "AUDUSD", "NZDUSD", "AUDJPY", "EURJPY"];
 export const CRYPTO = ["BTC/USD", "ETH/USD"];
 export const STOCKS = ["AAPL", "TSLA"];
 export const ETFS = ["SPY", "QQQ"];
-export const NIGHT_SYMBOLS = [
-    "USDJPY", "AUDUSD", "NZDUSD", "AUDJPY", "EURJPY"
-];
 
 export const RISK = {
     LEVERAGE: 30,
@@ -50,7 +48,6 @@ export const ANALYSIS = {
         D1: { FAST: 20, SLOW: 50 },
         H4: { FAST: 20, SLOW: 50 },
         H1: { FAST: 9, SLOW: 21 },
-        
     }, // RSI settings
     RSI: {
         PERIOD: 14,
@@ -66,7 +63,7 @@ export const ANALYSIS = {
         END_DATE: "2023-12-31",
     },
 
-    MAX_HOLD_TIME: 240, // Maximum hold time in minutes
+    MAX_HOLD_TIME: 120, // Maximum hold time in minutes
 };
 
 // Trading Sessions (UTC times)

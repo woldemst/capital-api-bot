@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { SYMBOLS, NIGHT_SYMBOLS, DEV, PROD, ANALYSIS } from "./config.js";
+import { DAY_SYMBOLS, NIGHT_SYMBOLS, DEV, PROD, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators.js";
@@ -19,7 +19,7 @@ class TradingBot {
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
-        this.tradingHours = { start: 8, end: 21 };
+        this.tradingHours = { start: 1, end: 21 };
     }
 
     async initialize() {
@@ -61,7 +61,7 @@ class TradingBot {
 
     // WebSocket connection is just for 15, 5, 1 minute candles
     // setupWebSocket(tokens) {
-    //     webSocketService.connect(tokens, SYMBOLS, (data) => {
+    //     webSocketService.connect(tokens, DAY_SYMBOLS, (data) => {
     //         try {
     //             const message = JSON.parse(data.toString());
 
@@ -152,8 +152,8 @@ class TradingBot {
             logger.info("[Bot] Night session detected: Using NIGHT_SYMBOLS.");
             return NIGHT_SYMBOLS;
         }
-        logger.info("[Bot] Day session detected: Using SYMBOLS.");
-        return SYMBOLS;
+        logger.info("[Bot] Day session detected: Using DAY_SYMBOLS.");
+        return DAY_SYMBOLS;
     }
 
     // Analyzes all symbols in the trading universe.
@@ -165,35 +165,49 @@ class TradingBot {
         }
     }
 
-    async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
-        try {
-            const [h1, m15, m5, m1] = await Promise.all([
-                getHistorical(symbol, timeframes.H1, historyLength),
-                getHistorical(symbol, timeframes.M15, historyLength),
-                getHistorical(symbol, timeframes.M5, historyLength),
-                getHistorical(symbol, timeframes.M1, historyLength),
-            ]);
-            return { h1, m15, m5, m1 };
-        } catch (error) {
-            logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
-            return {};
-        }
-    }
+    // async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
+    //     try {
+    //         const [h1, m15, m5, m1] = await Promise.all([
+    //             getHistorical(symbol, timeframes.H1, historyLength),
+    //             getHistorical(symbol, timeframes.M15, historyLength),
+    //             getHistorical(symbol, timeframes.M5, historyLength),
+    //             getHistorical(symbol, timeframes.M1, historyLength),
+    //         ]);
+    //         return { h1, m15, m5, m1 };
+    //     } catch (error) {
+    //         logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
+    //         return {};
+    //     }
+    // }
 
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        const { h1, m15, m5, m1 } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+        // const { h1, m15, m5, m1 } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+
+        // Fetch latest historical data for each timeframe
+        // const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
+        // await this.delay(500);
+        // const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
+        // await this.delay(500);
+        const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
+        await this.delay(500);
+        const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
+        await this.delay(500);
+        const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
+        await this.delay(500);
+        const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
+
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
             // D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
             // H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
-            H1: h1.prices.slice(-this.maxCandleHistory) || [],
-            M15: m15.prices.slice(-this.maxCandleHistory) || [],
-            M5: m5.prices.slice(-this.maxCandleHistory) || [],
-            M1: m1.prices.slice(-this.maxCandleHistory) || [],
+            H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
+            M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
+            M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
+            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
         };
 
         // const d1Candles = this.candleHistory[symbol].D1;
@@ -295,47 +309,6 @@ class TradingBot {
         }
     }
 
-    scheduleFridayClose() {
-        const now = new Date();
-        const day = now.getDay();
-        if (day !== 5) { // Only schedule on Fridays
-            // Calculate next Friday
-            const daysUntilFriday = (5 - day + 7) % 7;
-            const nextFriday = new Date(now);
-            nextFriday.setDate(now.getDate() + daysUntilFriday);
-            nextFriday.setHours(0, 0, 0, 0);
-            setTimeout(() => this.scheduleFridayClose(), nextFriday - now);
-            return;
-        }
-
-        // Schedule 21:00 close profitable positions
-        const closeProfitableTime = new Date(now);
-        closeProfitableTime.setHours(21, 0, 0, 0);
-        setTimeout(() => this.closeProfitablePositions(), closeProfitableTime - now);
-
-        // Schedule 22:00 close all positions
-        const closeAllTime = new Date(now);
-        closeAllTime.setHours(22, 0, 0, 0);
-        setTimeout(() => this.closeAllPositions(), closeAllTime - now);
-
-        logger.info("[Bot] Scheduled Friday position closing at 21:00 and 22:00 UTC.");
-    }
-
-    async closeProfitablePositions() {
-        logger.info("[Bot] Closing profitable positions before weekend...");
-        try {
-            const positions = await getOpenPositions();
-            for (const pos of positions.positions) {
-                const profit = pos.position.profit;
-                if (profit > 0) {
-                    await tradingService.closePosition(pos.dealId);
-                    logger.info(`[Bot] Closed profitable position: ${pos.market.epic} | Profit: ${profit}`);
-                }
-            }
-        } catch (error) {
-            logger.error("[Bot] Error closing profitable positions:", error);
-        }
-    }
 
     async closeAllPositions() {
         logger.info("[Bot] Closing all positions before weekend...");
@@ -379,6 +352,3 @@ bot.initialize().catch((error) => {
     logger.error("[bot.js] Bot initialization failed:", error);
     process.exit(1);
 });
-
-// After bot.initialize(), add:
-bot.scheduleFridayClose();
