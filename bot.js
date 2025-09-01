@@ -1,10 +1,12 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DAY_SYMBOLS, NIGHT_SYMBOLS, DEV, PROD, ANALYSIS } from "./config.js";
+import { DEV, PROD, ANALYSIS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
+
+import { SESSIONS, RISK } from "./config.js";
 
 class TradingBot {
     constructor() {
@@ -147,13 +149,23 @@ class TradingBot {
     getActiveSymbols() {
         const now = new Date();
         const hour = now.getUTCHours();
-        // Asian session: 22:00 - 08:00 UTC
-        if (hour >= 22 || hour < 8) {
-            logger.info("[Bot] Night session detected: Using NIGHT_SYMBOLS.");
-            return NIGHT_SYMBOLS;
+
+        if (hour >= 8 || hour < 17) {
+            logger.info("[Bot] LONDON session detected.");
+            return SESSIONS.LONDON.SYMBOLS;
         }
-        logger.info("[Bot] Day session detected: Using DAY_SYMBOLS.");
-        return DAY_SYMBOLS;
+        if (hour >= 13 || hour < 21) {
+            logger.info("[Bot] NEW YORK session detected.");
+            return SESSIONS.NY.SYMBOLS;
+        }
+        if (hour >= 22 || hour < 7) {
+            logger.info("[Bot] SYDNEY session detected.");
+            return SESSIONS.SYDNEY.SYMBOLS;
+        }
+        if (hour >= 0 || hour < 9) {
+            logger.info("[Bot] SYDNEY session detected.");
+            return SESSIONS.SYDNEY.SYMBOLS;
+        }
     }
 
     // Analyzes all symbols in the trading universe.
@@ -165,40 +177,39 @@ class TradingBot {
         }
     }
 
-    // async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
-    //     try {
-    //         const [h1, m15, m5, m1] = await Promise.all([
-    //             getHistorical(symbol, timeframes.H1, historyLength),
-    //             getHistorical(symbol, timeframes.M15, historyLength),
-    //             getHistorical(symbol, timeframes.M5, historyLength),
-    //             getHistorical(symbol, timeframes.M1, historyLength),
-    //         ]);
-    //         return { h1, m15, m5, m1 };
-    //     } catch (error) {
-    //         logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
-    //         return {};
-    //     }
-    // }
+    async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
+        try {
+            const [h1Data, m15Data, m5Data, m1Data] = await Promise.all([
+                getHistorical(symbol, timeframes.H1, historyLength),
+                getHistorical(symbol, timeframes.M15, historyLength),
+                getHistorical(symbol, timeframes.M5, historyLength),
+                getHistorical(symbol, timeframes.M1, historyLength),
+            ]);
+            return { h1Data, m15Data, m5Data, m1Data };
+        } catch (error) {
+            logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
+            return {};
+        }
+    }
 
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        // const { h1, m15, m5, m1 } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+        const { h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
         // Fetch latest historical data for each timeframe
         // const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
         // await this.delay(500);
         // const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
         // await this.delay(500);
-        const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
-        await this.delay(500);
-        const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
-        await this.delay(500);
-        const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
-        await this.delay(500);
-        const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
-
+        // const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
+        // await this.delay(500);
+        // const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
+        // await this.delay(500);
+        // const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
+        // await this.delay(500);
+        // const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
@@ -309,7 +320,6 @@ class TradingBot {
         }
     }
 
-
     async closeAllPositions() {
         logger.info("[Bot] Closing all positions before weekend...");
         try {
@@ -323,6 +333,26 @@ class TradingBot {
         }
     }
 
+    async startMaxHoldMonitor() {
+        setInterval(async () => {
+            try {
+                const positions = await getOpenPositions();
+                const now = Date.now();
+                for (const pos of positions.positions) {
+                    // Capital.com returns openTime as ISO string
+                    const openTime = new Date(pos.position.openTime).getTime();
+                    const minutesHeld = (now - openTime) / (1000 * 60);
+                    if (minutesHeld > RISK.MAX_HOLD_TIME) {
+                        await tradingService.closePosition(pos.dealId);
+                        logger.info(`[Bot] Closed position ${pos.market.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
+                    }
+                }
+            } catch (error) {
+                logger.error("[Bot] Error in max hold monitor:", error);
+            }
+        }, 60 * 1000); // Check every minute
+    }
+
     isTradingAllowed() {
         const now = new Date();
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday
@@ -334,10 +364,10 @@ class TradingBot {
             return false;
         }
         // Block outside trading hours (22:00 - 02:00)
-        if (hour < this.tradingHours.start || hour >= this.tradingHours.end) {
-            logger.info(`[Bot] Trading blocked: Outside trading hours (${this.tradingHours.start}:00-${this.tradingHours.end}:00).`);
-            return false;
-        }
+        // if (hour < this.tradingHours.start || hour >= this.tradingHours.end) {
+        //     logger.info(`[Bot] Trading blocked: Outside trading hours (${this.tradingHours.start}:00-${this.tradingHours.end}:00).`);
+        //     return false;
+        // }
         return true;
     }
 

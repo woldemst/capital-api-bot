@@ -9,9 +9,37 @@ export const API = {
     WS_URL: process.env.WS_BASE_URL,
 };
 
+// Trading Sessions (UTC times)
+export const SESSIONS = {
+    LONDON: {
+        START: "08:00",
+        END: "17:00",
+        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF", "EURJPY"],
+    },
+    NY: {
+        START: "13:00",
+        END: "21:00",
+        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "XAUUSD"], // Gold often trades here
+    },
+    SYDNEY: {
+        START: "22:00",
+        END: "07:00",
+        SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
+    },
+    TOKYO: {
+        START: "00:00",
+        END: "09:00",
+        SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
+    },
+};
+
+// London & New York (13:00 – 17:00 GMT) → 🔥 most volatile, most liquidity.
+
+// Tokyo & London (08:00 – 09:00 GMT) → short overlap, moderate moves.
+
+// Sydney & Tokyo (00:00 – 07:00 GMT) → smooth liquidity for AUD, NZD, JPY pairs.
+
 // Trading Configuration
-export const DAY_SYMBOLS = ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"];
-export const NIGHT_SYMBOLS = ["USDJPY", "AUDUSD", "NZDUSD", "AUDJPY", "EURJPY"];
 export const CRYPTO = ["BTC/USD", "ETH/USD"];
 export const STOCKS = ["AAPL", "TSLA"];
 export const ETFS = ["SPY", "QQQ"];
@@ -22,7 +50,7 @@ export const RISK = {
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     BUFFER_PIPS: 1, // Buffer for SL calculation
     REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_MINUTES: 240, // Maximum hold time in minutes
+    MAX_HOLD_TIME: 120, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
@@ -62,16 +90,6 @@ export const ANALYSIS = {
         START_DATE: "2023-01-01",
         END_DATE: "2023-12-31",
     },
-
-    MAX_HOLD_TIME: 120, // Maximum hold time in minutes
-};
-
-// Trading Sessions (UTC times)
-export const SESSIONS = {
-    LONDON_START: "08:00",
-    LONDON_END: "16:00",
-    NY_START: "13:00",
-    NY_END: "21:00",
 };
 
 export const HISTORY = {
