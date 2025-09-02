@@ -59,29 +59,46 @@ class TradingService {
         return false;
     }
 
-    generateSignal({ symbol, indicators, trendAnalysis, m1Candles, m5Candles, m15Candles, bid, ask, h1Candles }) {
+    generateSignal({ symbol, indicators, h1Trend, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
         const { m1, m5, m15, h1 } = indicators || {};
         if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles) {
             logger.warn(`[Signal] Missing indicators/candles for ${symbol}`);
             return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
         }
 
-        // --- 1) Determine H1 trend (EMA fast vs slow or isBullishTrend if provided) ---
-        let h1Trend = "neutral";
-        if (typeof h1.isBullishTrend === "boolean") {
-            h1Trend = h1.isBullishTrend ? "bullish" : "bearish";
-        } else if (typeof h1.emaFast === "number" && typeof h1.emaSlow === "number") {
-            h1Trend = h1.emaFast > h1.emaSlow ? "bullish" : "bearish";
-        } else if (trendAnalysis && typeof trendAnalysis.h1Trend === "string") {
-            h1Trend = trendAnalysis.h1Trend.toLowerCase();
-        }
+        // const prev = m15Candles[m15Candles.length - 3]; // previous closed
+        // const last = m15Candles[m15Candles.length - 2]; // most recent closed
 
-        // --- 2) Take the last two CLOSED M15 candles: prev = second last, last = last closed ---
-        if (m15Candles.length < 3) {
-            return { signal: null, reason: "not_enough_m15_candles" };
-        }
-        const prev = m15Candles[m15Candles.length - 3]; // previous closed
-        const last = m15Candles[m15Candles.length - 2]; // most recent closed
+        // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
+        const ema9h1 = h1.ema9;
+        const ema21h1 = h1.ema21;
+        const emaFastH1 = h1.emaFast;
+        const emaSlowH1 = h1.emaSlow;
+
+        // --- 3) Indicator confirmation (simple, fast to compute) ---
+        const getClose = (c) => c.close;
+
+        const lastClose = getClose(last);
+
+        // Build conditions explicitly
+        const buyConditions = [
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
+            ema9h1 != null ? lastClose > ema9h1 : true,
+            // m15.rsi != null ? m15.rsi > m15.adaptiveRSI : true,
+            m15.macd.histogram != null ? m15.macd.histogram > 0 : true,
+            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
+        ];
+
+        const sellConditions = [
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
+            ema9h1 != null ? lastClose < ema9h1 : true,
+            // m15.rsi != null ? m15.rsi < 100 - m15.adaptiveRSI : true,
+            m15.macd.histogram != null ? m15.macd.histogram < 0 : true,
+            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
+        ];
+
+        const buyScore = buyConditions.filter(Boolean).length;
+        const sellScore = sellConditions.filter(Boolean).length;
 
         const patternDir = this.detectPattern(h1Trend, prev, last);
         if (!patternDir) {
@@ -89,91 +106,56 @@ class TradingService {
             return { signal: null, reason: "no_valid_pattern" };
         }
 
-        // --- 3) Indicator confirmation (simple, fast to compute) ---
-        const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
-
-        // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
-        const rsi15 = typeof m15.rsi === "number" ? m15.rsi : null;
-        const macd15 = m15.macd || null;
-        const macd15Hist = macd15 && typeof macd15.histogram === "number" ? macd15.histogram : null;
-        const adx15 = typeof m15.adx === "number" ? m15.adx : null;
-        const atr15 = typeof m15.atr === "number" ? m15.atr : null;
-        const baseRSI = 50;
-        const baseADX = 20;
-        const adaptiveRSI = atr15 ? baseRSI + Math.min(10, atr15 * 100) : baseRSI;
-        const adaptiveADX = atr15 ? baseADX + Math.min(10, atr15 * 10) : baseADX;
-
-        const ema9h1 = typeof h1.ema9 === "number" ? h1.ema9 : null;
-        const ema21h1 = typeof h1.ema21 === "number" ? h1.ema21 : null;
-        const emaFastH1 = typeof h1.emaFast === "number" ? h1.emaFast : null;
-        const emaSlowH1 = typeof h1.emaSlow === "number" ? h1.emaSlow : null;
-
-        const lastClose = getClose(last);
-
-        // Build conditions explicitly
-        const buyConditions = [
-            h1Trend === "bullish",
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
-            ema9h1 != null ? lastClose > ema9h1 : true,
-            rsi15 != null ? rsi15 > adaptiveRSI : true,
-            macd15Hist != null ? macd15Hist > 0 : true,
-            adx15 != null ? adx15 > adaptiveADX : true,
-        ];
-
-        const sellConditions = [
-            h1Trend === "bearish",
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
-            ema9h1 != null ? lastClose < ema9h1 : true,
-            rsi15 != null ? rsi15 < 100 - adaptiveRSI : true,
-            macd15Hist != null ? macd15Hist < 0 : true,
-            adx15 != null ? adx15 > adaptiveADX : true,
-        ];
-
-        const buyScore = buyConditions.filter(Boolean).length;
-        const sellScore = sellConditions.filter(Boolean).length;
-
-        // Decide signal
-        const threshold = typeof REQUIRED_SCORE === "number" && REQUIRED_SCORE > 0 ? REQUIRED_SCORE : 3;
-        let signal = null;
-        if (patternDir === "bullish" && buyScore >= threshold) signal = "BUY";
-        if (patternDir === "bearish" && sellScore >= threshold) signal = "SELL";
-
         logger.info(`[Signal Analysis] ${symbol}
-            H1 Trend: ${h1Trend}
             Pattern: ${patternDir}
             BuyScore: ${buyScore}/${buyConditions.length}
             SellScore: ${sellScore}/${sellConditions.length}
-            M15 RSI: ${rsi15}
-            M15 MACD hist: ${macd15Hist}
-            M15 ADX: ${adx15}
+            M15 RSI: ${m15.rsi}
+            M15 MACD hist: ${m15.macd.histogram}
+            M15 ADX: ${m15.adx.adx}
+            H1 ADX: ${h1.adx.adx}
         `);
+
+        let signal = null;
+
+        // if (patternDir === "bullish" && buyScore >= REQUIRED_SCORE && h1.adx.adx > 18) {
+        //     signal = "BUY";
+        // }
+        // if (patternDir === "bearish" && sellScore >= REQUIRED_SCORE && h1.adx.adx > 18) {
+        //     signal = "SELL";
+        // }
+
+        // Decide signal
+        const threshold = typeof REQUIRED_SCORE === "number" && REQUIRED_SCORE > 0 ? REQUIRED_SCORE : 3;
+
+        if (buyScore >= threshold) signal = "BUY";
+        if (sellScore >= threshold) signal = "SELL";
 
         if (!signal) {
             return { signal: null, reason: "score_too_low", buyScore, sellScore };
         }
-        if (adx15 && adx15 < 20) {
-            logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
-            return { signal: null, reason: "ranging_market" };
-        }
-        if (atr15 && atr15 < 0.0005) {
-            // adjust threshold for your market
-            logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
-            return { signal: null, reason: "low_volatility" };
-        }
+        // if ( m15.adx.adx < 20) {
+        //     logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
+        //     return { signal: null, reason: "ranging_market" };
+        // }
+        // if (m15.atr && m15.atr < 0.0005) {
+        //     // adjust threshold for your market
+        //     logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+        //     return { signal: null, reason: "low_volatility" };
+        // }
 
         return {
             signal,
             buyScore,
             sellScore,
-            reason: "pattern_and_score_passed",
             metrics: {
-                rsi15: rsi15,
-                macd15Hist,
+                rsi: m15.rsi,
+                macd: m15.macd.histogram,
                 ema9h1,
                 ema21h1,
                 emaFastH1,
                 emaSlowH1,
-                adx15,
+                adx: m15.adx.adx,
             },
         };
     }
@@ -213,7 +195,9 @@ class TradingService {
 
         // Ensure minimum SL distance to avoid excessively tight SLs
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+
         const minSlPips = symbol.includes("JPY") ? 12 : 10;
+
         const minSl = minSlPips * pip;
         if (Math.abs(slDistance) < minSl) {
             if (signal === "BUY") {
@@ -231,17 +215,13 @@ class TradingService {
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // --- FIX: Normalize SL distance for JPY pairs ---
-        let normalizedSlDistance = slDistance;
-        if (symbol.includes("JPY")) {
-            normalizedSlDistance = slDistance / pip; // Convert to pips for JPY pairs
-        }
-
         // Calculate position size based on risk
-        const maxSimultaneousTrades = MAX_POSITIONS
+        const maxSimultaneousTrades = MAX_POSITIONS;
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-        let size = riskAmount / Math.abs(normalizedSlDistance);
-        size = Math.floor(size / 100) * 100; // Round to nearest 100
+
+        // For FX, pipValue = pip / price
+        const pipValue = pip / price;
+        let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
         if (size < 100) size = 100; // Minimum size
 
         logger.info(`[Trade Parameters] ${symbol} ${signal}:
@@ -335,7 +315,7 @@ class TradingService {
     //  Main price processing ---
     async processPrice(message) {
         try {
-            const { symbol, indicators, trendAnalysis, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
+            const { symbol, indicators, h1Trend, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask) return;
 
@@ -384,10 +364,10 @@ class TradingService {
 
         const tpDistance = Math.abs(takeProfit - entryPrice);
 
-        const tp60 = direction === "BUY" ? entryPrice + tpDistance * 0.6 : entryPrice - tpDistance * 0.6;
+        const tp80 = direction === "BUY" ? entryPrice + tpDistance * 0.8 : entryPrice - tpDistance * 0.8;
 
-        const reached60TP = direction === "BUY" ? currentPrice >= tp60 : currentPrice <= tp60;
-        if (!reached60TP) return;
+        const reached80TP = direction === "BUY" ? currentPrice >= tp80 : currentPrice <= tp80;
+        if (!reached80TP) return;
         const trailingBuffer = tpDistance * 0.1;
         const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
         const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;

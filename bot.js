@@ -107,7 +107,7 @@ class TradingBot {
                 await this.analyzeAllSymbols();
 
                 // Don't need for that strategy
-                // await this.startMonitorOpenTrades();
+                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -236,7 +236,7 @@ class TradingBot {
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        const trendAnalysis = await analyzeTrend(symbol, getHistorical);
+        const h1Trend = await analyzeTrend(symbol, getHistorical);
 
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
@@ -247,7 +247,7 @@ class TradingBot {
         await tradingService.processPrice({
             symbol,
             indicators,
-            trendAnalysis,
+            h1Trend,
             h1Candles: h1Candles,
             m15Candles: m15Candles,
             m5Candles: m5Candles,
@@ -271,15 +271,19 @@ class TradingBot {
         try {
             const positions = await getOpenPositions();
             for (const pos of positions.positions) {
-                console.log("pos", pos);
+                // console.log("pos", pos);
 
                 const positionData = {
-                    dealId: pos.dealId,
+                    dealId: pos.position.dealId,
+                    currency: pos.position.currency,
                     direction: pos.position.direction,
+                    size: pos.position.size,
+                    leverage: pos.position.leverage,
                     entryPrice: pos.position.level,
                     takeProfit: pos.position.profitLevel,
                     stopLoss: pos.position.stopLevel,
                     currentPrice: pos.market.bid, // or offer, depending on direction
+                    trailingStop: pos.position.trailingStop,
                 };
                 await tradingService.updateTrailingStopIfNeeded(positionData);
             }

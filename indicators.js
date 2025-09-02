@@ -16,11 +16,25 @@ export async function calcIndicators(bars) {
         maFast: SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop(),
         maSlow: SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop(),
         ema5: EMA.calculate({ period: 5, values: closes }).pop(),
+        ema9: EMA.calculate({ period: 9, values: closes }).pop(),
         ema20: EMA.calculate({ period: 20, values: closes }).pop(),
+        ema21: EMA.calculate({ period: 21, values: closes }).pop(),
+        emaFast: EMA.calculate({ period: 12, values: closes }).pop(),
+        emaSlow: EMA.calculate({ period: 26, values: closes }).pop(),
         rsi: RSI.calculate({ period: 14, values: closes }).pop(),
         bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
         atr: ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop(),
+        adaptiveRSI: (() => {
+            const baseRSI = 50;
+            const atrVal = ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop();
+            return atrVal ? baseRSI + Math.min(10, atrVal * 100) : baseRSI;
+        })(),
+        adaptiveADX: (() => {
+            const baseADX = 20;
+            const atrVal = ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop();
+            return atrVal ? baseADX + Math.min(10, atrVal * 10) : baseADX;
+        })(),
         macd: MACD.calculate({
             fastPeriod: 12,
             slowPeriod: 26,
@@ -34,13 +48,8 @@ export async function calcIndicators(bars) {
 
 // Analyze trend on higher timeframes
 export async function analyzeTrend(symbol, getHistorical) {
-    if (!symbol || typeof getHistorical !== "function") {
-        console.error("Invalid parameters for analyzeTrend");
-        return { overallTrend: "unknown" };
-    }
-
     try {
-        const h1Data = await getHistorical(symbol, "HOUR", 50);
+        const h1Data = await getHistorical(symbol, "HOUR", 70);
 
         if (!h1Data?.prices) {
             console.error("Missing prices in historical data");
@@ -55,12 +64,7 @@ export async function analyzeTrend(symbol, getHistorical) {
 
         console.log(`${symbol} H1 Trend: ${h1Trend}`);
 
-        // Return trend analysis (overallTrend = h1Trend)
-        return {
-            h1Trend,
-            h1Indicators,
-            overallTrend: h1Trend,
-        };
+        return h1Trend;
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);
         return { overallTrend: "unknown" };
