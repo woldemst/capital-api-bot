@@ -54,6 +54,7 @@ class TradingBot {
 
             this.startAnalysisInterval();
 
+            this.startMaxHoldMonitor();
             this.isRunning = true;
         } catch (error) {
             logger.error("[bot.js][Bot] Error starting live trading:", error);
@@ -148,24 +149,27 @@ class TradingBot {
 
     getActiveSymbols() {
         const now = new Date();
-        const hour = now.getUTCHours();
+        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
 
-        if (hour >= 8 || hour < 17) {
-            logger.info("[Bot] LONDON session detected.");
-            return SESSIONS.LONDON.SYMBOLS;
-        }
-        if (hour >= 13 || hour < 21) {
-            logger.info("[Bot] NEW YORK session detected.");
-            return SESSIONS.NY.SYMBOLS;
-        }
-        if (hour >= 22 || hour < 7) {
-            logger.info("[Bot] SYDNEY session detected.");
-            return SESSIONS.SYDNEY.SYMBOLS;
-        }
-        if (hour >= 0 || hour < 9) {
-            logger.info("[Bot] SYDNEY session detected.");
-            return SESSIONS.SYDNEY.SYMBOLS;
-        }
+        // Helper to check if hour is in session
+        const inSession = (start, end) => {
+            if (start < end) return hour >= start && hour < end;
+            return hour >= start || hour < end; // Overnight session
+        };
+
+        const activeSessions = [];
+        if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
+        if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
+        if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
+        if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
+
+        // Combine symbols from all active sessions, remove duplicates
+        let combined = [];
+        activeSessions.forEach((arr) => combined.push(...arr));
+        combined = [...new Set(combined)];
+
+        logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
+        return combined;
     }
 
     // Analyzes all symbols in the trading universe.
@@ -197,19 +201,6 @@ class TradingBot {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
         const { h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
-
-        // Fetch latest historical data for each timeframe
-        // const d1Data = await getHistorical(symbol, "DAY", this.maxCandleHistory);
-        // await this.delay(500);
-        // const h4Data = await getHistorical(symbol, "HOUR_4", this.maxCandleHistory);
-        // await this.delay(500);
-        // const h1Data = await getHistorical(symbol, "HOUR", this.maxCandleHistory);
-        // await this.delay(500);
-        // const m15Data = await getHistorical(symbol, "MINUTE_15", this.maxCandleHistory);
-        // await this.delay(500);
-        // const m5Data = await getHistorical(symbol, "MINUTE_5", this.maxCandleHistory);
-        // await this.delay(500);
-        // const m1Data = await getHistorical(symbol, "MINUTE", this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {

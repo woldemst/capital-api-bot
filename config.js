@@ -19,7 +19,7 @@ export const SESSIONS = {
     NY: {
         START: "13:00",
         END: "21:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "XAUUSD"], // Gold often trades here
+        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "GOLD"], // Gold often trades here
     },
     SYDNEY: {
         START: "22:00",

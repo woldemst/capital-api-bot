@@ -213,7 +213,7 @@ class TradingService {
 
         // Ensure minimum SL distance to avoid excessively tight SLs
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-        const minSlPips = symbol.includes("JPY") ? 12 : 10; // slightly larger minimum SL
+        const minSlPips = symbol.includes("JPY") ? 12 : 10;
         const minSl = minSlPips * pip;
         if (Math.abs(slDistance) < minSl) {
             if (signal === "BUY") {
@@ -231,10 +231,16 @@ class TradingService {
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
+        // --- FIX: Normalize SL distance for JPY pairs ---
+        let normalizedSlDistance = slDistance;
+        if (symbol.includes("JPY")) {
+            normalizedSlDistance = slDistance / pip; // Convert to pips for JPY pairs
+        }
+
         // Calculate position size based on risk
-        const maxSimultaneousTrades = MAX_POSITIONS || 5;
+        const maxSimultaneousTrades = MAX_POSITIONS
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-        let size = riskAmount / Math.abs(slDistance);
+        let size = riskAmount / Math.abs(normalizedSlDistance);
         size = Math.floor(size / 100) * 100; // Round to nearest 100
         if (size < 100) size = 100; // Minimum size
 

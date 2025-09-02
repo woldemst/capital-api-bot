@@ -47,8 +47,6 @@ export async function analyzeTrend(symbol, getHistorical) {
             return { overallTrend: "unknown" };
         }
 
-        console.log(`Analyzing trend for ${symbol} on H1 only`);
-
         // Calculate indicators for h1 timeframe
         const h1Indicators = await calcIndicators(h1Data.prices);
 
