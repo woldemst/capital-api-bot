@@ -309,13 +309,39 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
 /**
  * Gets deal confirmation for a given deal reference.
  */
-export async function getDealConfirmation(dealReference) {
+export async function gevtDealConfirmation(dealReference) {
     return await withSessionRetry(async () => {
         logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
         const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
         logger.info("[API] DealConfirmation", response.data);
         return response.data;
     });
+}
+async function getDealConfirmation(dealReference) {
+    try {
+        const url = `${API_URL}/confirms/${dealReference}`;
+        logger.info(`[API] Fetching deal confirmation for ${dealReference}: ${url}`);
+
+        const response = await axios.get(url, {
+            headers: {
+                'X-SECURITY-TOKEN': securityToken,
+                'X-CAP-API-KEY': apiKey,
+                CST: cst,
+                'User-Agent': userAgent
+            }
+        });
+
+        logger.info(`[API] Deal confirmation fetched for ${dealReference}:`, response.data);
+        return response.data;
+
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            logger.error(`[API] Deal reference not found: ${dealReference}. Response data:`, error.response.data || 'No data');
+        } else {
+            logger.error(`[API] Error fetching deal confirmation for ${dealReference}:`, error.message);
+        }
+        throw error;
+    }
 }
 
 /**

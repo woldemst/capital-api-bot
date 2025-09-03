@@ -85,6 +85,7 @@ class TradingService {
         const getClose = (c) => c.close;
 
         const lastClose = getClose(last);
+        console.log("ema9h1", ema9h1, "ema21h1", ema21h1, "lastClose", lastClose);
 
         // Build conditions explicitly
         const buyConditions = [
@@ -115,8 +116,7 @@ class TradingService {
         let signal = null;
 
         const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
-        console.log('h1.adx.adx', fixedH1Adx);
-        
+
         if (patternDir === "bullish" && buyScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
             signal = "BUY";
         }
@@ -124,10 +124,10 @@ class TradingService {
             signal = "SELL";
         }
 
-        console.log("REQUIRED_SCORE", REQUIRED_SCORE, buyScore, sellScore);
+        console.log("REQUIRED_SCORE:", REQUIRED_SCORE, "buyScore:", buyScore, "sellScore:", sellScore);
 
         if (!signal) {
-            return { signal: null, reason: "score_too_low", buyScore, sellScore };
+            return { signal: null, reason: `score_too_low: b${buyScore}, s${sellScore}` };
         }
 
         const fixedAdx = Number(m15.adx.adx.toFixed(2));
@@ -269,7 +269,7 @@ class TradingService {
     }
 
     // --- Trade execution ---
-    async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
+    async executeTdrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
         const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
         const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
         const position = await placePosition(symbol, signal, size, price, SL, TP);
@@ -311,6 +311,58 @@ class TradingService {
         }
     }
 
+    async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
+    try {
+        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
+        const position = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
+
+        // Validate deal reference
+        if (!position?.dealReference) {
+            logger.error(`[trading.js][Order] Deal reference is missing: ${JSON.stringify(position)}`);
+            return;
+        }
+
+        const confirmation = await getDealConfirmation(position.dealReference);
+        
+        if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
+            logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+        } else {
+            logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`);
+
+            // Log opened trade to monthly log for later ML training
+            try {
+                const logPath = getCurrentTradesLogPath();
+                const logEntry = {
+                    time: new Date().toISOString(),
+                    id: position.dealReference,
+                    symbol,
+                    direction: signal.toLowerCase(),
+                    entry: price,
+                    sl: stopLossPrice,
+                    tp: takeProfitPrice,
+                    size,
+                    indicators: {
+                        emaFast: indicators?.h1?.emaFast,
+                        emaSlow: indicators?.h1?.emaSlow,
+                        ema9: indicators?.h1?.ema9,
+                        ema21: indicators?.h1?.ema21,
+                        rsi15: indicators?.m15?.rsi,
+                        macd15Hist: indicators?.m15?.macd?.histogram,
+                        atr: indicators?.m1?.atr,
+                    },
+                    result: null,
+                };
+                fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
+                logger.info(`[TradeLog] Logged opened trade ${position.dealReference} to ${logPath}`);
+            } catch (err) {
+                logger.error("[TradeLog] Failed to append opened trade:", err);
+            }
+        }
+    } catch (error) {
+        logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
+    }
+}
+
     //  Main price processing ---
     async processPrice(message) {
         try {
@@ -334,13 +386,13 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal } = this.generateSignal(message);
+            const { signal, reason } = this.generateSignal(message);
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
                 await this.processSignal(symbol, signal, bid, ask, m1Candles, indicators);
             } else {
-                logger.debug(`[Signal] ${symbol}: No signal found`);
+                logger.debug(`[Signal] ${symbol}: No signal found for reason: ${reason}`);
             }
         } catch (error) {
             logger.error(`[trading.js][ProcessPrice] Error for ${symbol}:`, error);
