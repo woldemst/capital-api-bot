@@ -59,6 +59,25 @@ class TradingService {
         return false;
     }
 
+    checkCalmRiver(m5Candles, ema20, ema50) {
+        if (!m5Candles || m5Candles.length < 60) return null;
+
+        const closes = m5Candles.map((c) => c.close);
+        const lastClose = closes[closes.length - 1];
+        const prevCloses = closes.slice(-4, -1); // last 3 before trigger
+
+        const trendUp = lastClose > ema20 && ema20 > ema50;
+        const trendDown = lastClose < ema20 && ema20 < ema50;
+
+        // Count candles closed between ema20 & ema50
+        const insideCount = prevCloses.filter((c) => c < Math.max(ema20, ema50) && c > Math.min(ema20, ema50)).length;
+        if (insideCount > 3) return null; // too much congestion
+
+        if (trendUp && lastClose > ema20) return "BUY";
+        if (trendDown && lastClose < ema20) return "SELL";
+        return null;
+    }
+
     generateSignal({ symbol, indicators, h1Trend, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
         const { m1, m5, m15, h1 } = indicators || {};
         if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles) {
@@ -103,10 +122,13 @@ class TradingService {
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
+        logger.debug(`[Conditions] ${symbol} buy=[${buyConditions.map(Boolean)}] sell=[${sellConditions.map(Boolean)}]`);
+
         logger.info(`[Signal Analysis] ${symbol}
             Pattern: ${patternDir}
             BuyScore: ${buyScore}/${buyConditions.length}
             SellScore: ${sellScore}/${sellConditions.length}
+            RequiredScore: ${REQUIRED_SCORE}
             M15 RSI: ${m15.rsi}
             M15 MACD hist: ${m15.macd.histogram}
             M15 ADX: ${m15.adx.adx}
@@ -114,20 +136,18 @@ class TradingService {
         `);
 
         let signal = null;
-
         const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
 
-        if (patternDir === "bullish" && buyScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
+        if (buyScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
             signal = "BUY";
         }
-        if (patternDir === "bearish" && sellScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
+        if (sellScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
             signal = "SELL";
         }
 
-        console.log("REQUIRED_SCORE:", REQUIRED_SCORE, "buyScore:", buyScore, "sellScore:", sellScore);
-
         if (!signal) {
-            return { signal: null, reason: `score_too_low: b${buyScore}, s${sellScore}` };
+            const reason = (buyScore >= REQUIRED_SCORE || sellScore >= REQUIRED_SCORE) ? "pattern_not_met" : `score_too_low: b${buyScore}, s${sellScore}`;
+            return { signal: null, reason };
         }
 
         const fixedAdx = Number(m15.adx.adx.toFixed(2));
@@ -138,10 +158,16 @@ class TradingService {
             return { signal: null, reason: "ranging_market" };
         }
         if (fixedAtr < 0.0005) {
-            // adjust threshold for your market
             logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
             return { signal: null, reason: "low_volatility" };
         }
+
+        //  Calm River strategy check
+        // const calmRiverSignal = this.checkCalmRiver(m5Candles, m5.ema20, m5.ema50);
+        // if (calmRiverSignal) {
+        //     logger.info(`[CalmRiver] ${symbol}: ${calmRiverSignal} signal found`);
+        //     return { signal: calmRiverSignal, strategy: "CalmRiver" };
+        // }
 
         return {
             signal,
@@ -160,9 +186,9 @@ class TradingService {
     }
 
     // --- Price rounding ---
-    roundPrice(price, symbol) {
-        const decimals = symbol.includes("JPY") ? 3 : 5;
-        return Number(price).toFixed(decimals) * 1;
+    roundPrice(price, symbol, decimals) {
+        const d = typeof decimals === "number" ? decimals : symbol.includes("JPY") ? 3 : 5;
+        return Number(Number(price).toFixed(d));
     }
 
     // --- Position size + achievable SL/TP for M1 ---
@@ -210,9 +236,16 @@ class TradingService {
             }
         }
 
+        // Ensure minimum SL distance to avoid excessively tight SLs
+        // ... (existing code above unchanged)
+
+        // Fetch allowed decimals and use for rounding
+        const allowed = await getAllowedTPRange(symbol);
+        const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
+
         // Round prices to appropriate decimals
-        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+        stopLossPrice = this.roundPrice(stopLossPrice, symbol, decimals);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol, decimals);
 
         // Calculate position size based on risk
         const maxSimultaneousTrades = MAX_POSITIONS;
@@ -243,13 +276,14 @@ class TradingService {
         logger.info(`[TP/SL Validation] Entry: ${entryPrice}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
 
         const allowed = await getAllowedTPRange(symbol);
+        const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
 
         let newTP = takeProfitPrice;
         let newSL = stopLossPrice;
 
         // Berechne tatsächlichen Abstand
         const slDistance = Math.abs(entryPrice - stopLossPrice);
-        const minSLDistance = allowed?.minStopDistance || 0;
+        const minSLDistance = allowed?.minSLDistancePrice || 0;
 
         // Wenn SL zu nah, passe ihn an
         if (slDistance < minSLDistance) {
@@ -261,25 +295,31 @@ class TradingService {
         }
 
         // Runde Preise ggf. auf die erlaubte Tickgröße
-        newSL = this.roundPrice(newSL, symbol);
-        newTP = this.roundPrice(newTP, symbol);
+        newSL = this.roundPrice(newSL, symbol, decimals);
+        newTP = this.roundPrice(newTP, symbol, decimals);
 
         logger.info(`[TP/SL Validation] Final SL: ${newSL}, Final TP: ${newTP}`);
         return { SL: newSL, TP: newTP };
     }
 
-    // --- Trade execution ---
-    async executeTdrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
-        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
-        const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
-        const position = await placePosition(symbol, signal, size, price, SL, TP);
-        if (position?.dealReference) {
+    // (removed entire async executeTdrade(...) method)
+
+    async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
+        try {
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
+            const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
+            const position = await placePosition(symbol, signal, size, price, SL, TP);
+
+            if (!position?.dealReference) {
+                logger.error(`[trading.js][Order] Deal reference is missing: ${JSON.stringify(position)}`);
+                return;
+            }
+
             const confirmation = await getDealConfirmation(position.dealReference);
             if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                 logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
             } else {
                 logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${SL} TP=${TP} ref=${position.dealReference}`);
-                // Log opened trade to monthly log for later ML training
                 try {
                     const logPath = getCurrentTradesLogPath();
                     const logEntry = {
@@ -308,67 +348,17 @@ class TradingService {
                     logger.error("[TradeLog] Failed to append opened trade:", err);
                 }
             }
+        } catch (error) {
+            logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
         }
     }
-
-    async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
-    try {
-        const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
-        const position = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
-
-        // Validate deal reference
-        if (!position?.dealReference) {
-            logger.error(`[trading.js][Order] Deal reference is missing: ${JSON.stringify(position)}`);
-            return;
-        }
-
-        const confirmation = await getDealConfirmation(position.dealReference);
-        
-        if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
-            logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
-        } else {
-            logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`);
-
-            // Log opened trade to monthly log for later ML training
-            try {
-                const logPath = getCurrentTradesLogPath();
-                const logEntry = {
-                    time: new Date().toISOString(),
-                    id: position.dealReference,
-                    symbol,
-                    direction: signal.toLowerCase(),
-                    entry: price,
-                    sl: stopLossPrice,
-                    tp: takeProfitPrice,
-                    size,
-                    indicators: {
-                        emaFast: indicators?.h1?.emaFast,
-                        emaSlow: indicators?.h1?.emaSlow,
-                        ema9: indicators?.h1?.ema9,
-                        ema21: indicators?.h1?.ema21,
-                        rsi15: indicators?.m15?.rsi,
-                        macd15Hist: indicators?.m15?.macd?.histogram,
-                        atr: indicators?.m1?.atr,
-                    },
-                    result: null,
-                };
-                fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
-                logger.info(`[TradeLog] Logged opened trade ${position.dealReference} to ${logPath}`);
-            } catch (err) {
-                logger.error("[TradeLog] Failed to append opened trade:", err);
-            }
-        }
-    } catch (error) {
-        logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
-    }
-}
 
     //  Main price processing ---
     async processPrice(message) {
         try {
             const { symbol, indicators, h1Trend, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
 
-            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || !bid || !ask) return;
+            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
 
             //TODO
             // Check trading conditions

@@ -62,7 +62,7 @@ class TradingBot {
         }
     }
 
-    // WebSocket connection is just for 15, 5, 1 minute candles
+    // WebSocket connection is just for 1 5, 5, 1 minute candles
     // setupWebSocket(tokens) {
     //     webSocketService.connect(tokens, DAY_SYMBOLS, (data) => {
     //         try {

@@ -141,18 +141,14 @@ export const getAccountInfo = async () =>
         return response.data;
     });
 
-/**
- * Fetches a list of available markets (default: EURUSD).
- */
+
 export const getMarkets = async () =>
     withSessionRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
         return Array.isArray(response.data.markets) ? response.data.markets : [];
     });
 
-/**
- * Fetches detailed information for a specific market symbol.x
- */
+
 export async function getMarketDetails(symbol) {
     return await withSessionRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
@@ -161,9 +157,6 @@ export async function getMarketDetails(symbol) {
     });
 }
 
-/**
- * Fetches open positions for the account.
- */
 export const getOpenPositions = async () =>
     withSessionRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
@@ -171,15 +164,9 @@ export const getOpenPositions = async () =>
         return response.data;
     });
 
-/**
- * Fetches historical price data for a symbol and timeframe.
- * Returns an array of candle objects.
- */
 export async function getHistorical(symbol, resolution, count) {
     logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
-
-    // console.log(response.data);
     return {
         prices: response.data.prices.map((p) => ({
             close: p.closePrice?.bid,
@@ -191,9 +178,6 @@ export async function getHistorical(symbol, resolution, count) {
     };
 }
 
-/**
- * Places a limit order for a symbol.
- */
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
     return await withSessionRetry(async () => {
         logger.info(`[API] Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
@@ -212,10 +196,7 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
     });
 }
 
-/**
- * Updates the trailing stop for an open position.
- * Ensures stopLevel is at least minSLDistance away from current price.
- */
+
 export async function updateTrailingStop(
     positionId, // (string) the position/deal id to update
     currentPrice, // (number) latest market price (bid for BUY, offer for SELL)
@@ -239,8 +220,7 @@ export async function updateTrailingStop(
 
     try {
         const range = await getAllowedTPRange(symbol);
-        const decimals = range.decimals || 5;
-        const minStopDistance = range.minSLDistance * Math.pow(10, -decimals);
+        const minStopDistance = range.minSLDistancePrice || 0;
 
         if (direction.toUpperCase() === "BUY") {
             if (currentPrice - newStop < minStopDistance) {
@@ -273,17 +253,19 @@ export async function updateTrailingStop(
 }
 
 export async function placePosition(symbol, direction, size, price, SL, TP) {
-    // Fetch allowed stop range and enforce min distance
-    if (symbol && direction && typeof price === "number" && SL) {
-        const range = await getAllowedTPRange(symbol);
-        const minStopDistance = range.minSLDistance; // <-- already price distance!
-        if (direction === "BUY") {
-            if (price - SL < minStopDistance) {
-                SL = price - minStopDistance;
+    // Fetch allowed stop range and enforce min distance (price terms)
+    const range = await getAllowedTPRange(symbol);
+    const decimals = range.decimals || (symbol.includes("JPY") ? 3 : 5);
+    const minSLDistancePrice = range.minSLDistancePrice || 0;
+
+    if (symbol && direction && typeof price === "number" && typeof SL === "number") {
+        if (direction.toUpperCase() === "BUY") {
+            if (price - SL < minSLDistancePrice) {
+                SL = price - minSLDistancePrice;
             }
         } else {
-            if (SL - price < minStopDistance) {
-                SL = price + minStopDistance;
+            if (SL - price < minSLDistancePrice) {
+                SL = price + minSLDistancePrice;
             }
         }
     }
@@ -293,11 +275,11 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
         const position = {
             epic: symbol,
             direction: direction.toUpperCase(),
-            size: size.toFixed(5),
+            size: Number(size),
             orderType: "MARKET",
             guaranteedStop: false,
-            stopLevel: SL ? parseFloat(SL).toFixed(5) : undefined,
-            profitLevel: TP ? parseFloat(TP).toFixed(5) : undefined,
+            stopLevel: typeof SL === "number" ? Number(SL).toFixed(decimals) : undefined,
+            profitLevel: typeof TP === "number" ? Number(TP).toFixed(decimals) : undefined,
         };
         logger.info("[API] Sending position request:", position);
         const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
@@ -306,9 +288,6 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
     });
 }
 
-/**
- * Gets deal confirmation for a given deal reference.
- */
 export async function gevtDealConfirmation(dealReference) {
     return await withSessionRetry(async () => {
         logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
@@ -317,36 +296,16 @@ export async function gevtDealConfirmation(dealReference) {
         return response.data;
     });
 }
-async function getDealConfirmation(dealReference) {
-    try {
-        const url = `${API_URL}/confirms/${dealReference}`;
-        logger.info(`[API] Fetching deal confirmation for ${dealReference}: ${url}`);
 
-        const response = await axios.get(url, {
-            headers: {
-                'X-SECURITY-TOKEN': securityToken,
-                'X-CAP-API-KEY': apiKey,
-                CST: cst,
-                'User-Agent': userAgent
-            }
-        });
-
-        logger.info(`[API] Deal confirmation fetched for ${dealReference}:`, response.data);
+export async function getDealConfirmation(dealReference) {
+    return await withSessionRetry(async () => {
+        logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
+        const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
+        logger.info("[API] DealConfirmation", response.data);
         return response.data;
-
-    } catch (error) {
-        if (error.response && error.response.status === 404) {
-            logger.error(`[API] Deal reference not found: ${dealReference}. Response data:`, error.response.data || 'No data');
-        } else {
-            logger.error(`[API] Error fetching deal confirmation for ${dealReference}:`, error.message);
-        }
-        throw error;
-    }
+    });
 }
 
-/**
- * Closes an open position by dealId.
- */
 export async function closePosition(dealId) {
     try {
         const response = await axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
@@ -360,17 +319,10 @@ export async function closePosition(dealId) {
     }
 }
 
-/**
- * Returns the current session tokens (CST and X-SECURITY-TOKEN).
- */
 export function getSessionTokens() {
     return { cst, xsecurity };
 }
 
-/**
- * Gets allowed take profit and stop loss ranges for a symbol.
- * Returns min/max distances and decimals for price calculations.
- */
 export async function getAllowedTPRange(symbol) {
     try {
         const details = await getMarketDetails(symbol);
