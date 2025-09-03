@@ -75,36 +75,32 @@ class TradingService {
         const emaFastH1 = h1.emaFast;
         const emaSlowH1 = h1.emaSlow;
 
-        // --- 3) Indicator confirmation (simple, fast to compute) ---
+        const patternDir = this.detectPattern(h1Trend, prev, last);
+
+        // if (!patternDir) {
+        //     logger.info(`[Signal Analysis] ${symbol}: No valid M15 pattern for H1 trend (${h1Trend}).`);
+        //     return { signal: null, reason: "no_valid_pattern" };
+        // }
+
         const getClose = (c) => c.close;
 
         const lastClose = getClose(last);
 
         // Build conditions explicitly
         const buyConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
-            ema9h1 != null ? lastClose > ema9h1 : true,
-            // m15.rsi != null ? m15.rsi > m15.adaptiveRSI : true,
-            m15.macd.histogram != null ? m15.macd.histogram > 0 : true,
-            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
+            ema9h1 != null ? lastClose > ema9h1 : false,
+            m15.macd.histogram != null ? m15.macd.histogram > 0 : false,
         ];
 
         const sellConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
-            ema9h1 != null ? lastClose < ema9h1 : true,
-            // m15.rsi != null ? m15.rsi < 100 - m15.adaptiveRSI : true,
-            m15.macd.histogram != null ? m15.macd.histogram < 0 : true,
-            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
+            ema9h1 != null ? lastClose < ema9h1 : false,
+            m15.macd.histogram != null ? m15.macd.histogram < 0 : false,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
-
-        const patternDir = this.detectPattern(h1Trend, prev, last);
-        if (!patternDir) {
-            logger.info(`[Signal Analysis] ${symbol}: No valid M15 pattern for H1 trend (${h1Trend}).`);
-            return { signal: null, reason: "no_valid_pattern" };
-        }
 
         logger.info(`[Signal Analysis] ${symbol}
             Pattern: ${patternDir}
@@ -118,31 +114,34 @@ class TradingService {
 
         let signal = null;
 
-        // if (patternDir === "bullish" && buyScore >= REQUIRED_SCORE && h1.adx.adx > 18) {
-        //     signal = "BUY";
-        // }
-        // if (patternDir === "bearish" && sellScore >= REQUIRED_SCORE && h1.adx.adx > 18) {
-        //     signal = "SELL";
-        // }
+        const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
+        console.log('h1.adx.adx', fixedH1Adx);
+        
+        if (patternDir === "bullish" && buyScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
+            signal = "BUY";
+        }
+        if (patternDir === "bearish" && sellScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
+            signal = "SELL";
+        }
 
-        // Decide signal
-        const threshold = typeof REQUIRED_SCORE === "number" && REQUIRED_SCORE > 0 ? REQUIRED_SCORE : 3;
-
-        if (buyScore >= threshold) signal = "BUY";
-        if (sellScore >= threshold) signal = "SELL";
+        console.log("REQUIRED_SCORE", REQUIRED_SCORE, buyScore, sellScore);
 
         if (!signal) {
             return { signal: null, reason: "score_too_low", buyScore, sellScore };
         }
-        // if ( m15.adx.adx < 20) {
-        //     logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
-        //     return { signal: null, reason: "ranging_market" };
-        // }
-        // if (m15.atr && m15.atr < 0.0005) {
-        //     // adjust threshold for your market
-        //     logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
-        //     return { signal: null, reason: "low_volatility" };
-        // }
+
+        const fixedAdx = Number(m15.adx.adx.toFixed(2));
+        const fixedAtr = Number(m15.atr.toFixed(4));
+
+        if (fixedAdx < 20) {
+            logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
+            return { signal: null, reason: "ranging_market" };
+        }
+        if (fixedAtr < 0.0005) {
+            // adjust threshold for your market
+            logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+            return { signal: null, reason: "low_volatility" };
+        }
 
         return {
             signal,

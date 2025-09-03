@@ -56,7 +56,7 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 1,
+    REQUIRED_SCORE: 3,
 };
 
 // Technical Analysis Configuration
@@ -101,7 +101,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 10 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: false,
+    MODE: true,
 };
 
 export const PROD = {
