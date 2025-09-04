@@ -1,18 +1,112 @@
-export const checkCalmRiver = (m5Candles, ema20, ema50) => {
-    if (!m5Candles || m5Candles.length < 60) return null;
+//  Calm River strategy (enhanced)
+export const checkCalmRiver = (m5Candles, ema20, ema50, opts = {}) => {
+    // Require sufficient data
+    if (!m5Candles || m5Candles.length < 60 || ema20 == null || ema50 == null) return null;
 
-    const closes = m5Candles.map((c) => c.close);
-    const lastClose = closes[closes.length - 1];
-    const prevCloses = closes.slice(-4, -1); // last 3 before trigger
+    const { ema20Prev, ema50Prev, ema20Series = [], ema50Series = [], atr } = opts;
 
-    const trendUp = lastClose > ema20 && ema20 > ema50;
-    const trendDown = lastClose < ema20 && ema20 < ema50;
+    const last = m5Candles[m5Candles.length - 1];
+    const lastClose = last.close;
 
-    // Count candles closed between ema20 & ema50
-    const insideCount = prevCloses.filter((c) => c < Math.max(ema20, ema50) && c > Math.min(ema20, ema50)).length;
+    // Slopes (if prev provided). If not provided, don't block on slope.
+    const upSlope = (typeof ema20Prev === "number" && typeof ema50Prev === "number")
+        ? (ema20 > ema20Prev && ema50 > ema50Prev)
+        : true;
+    const downSlope = (typeof ema20Prev === "number" && typeof ema50Prev === "number")
+        ? (ema20 < ema20Prev && ema50 < ema50Prev)
+        : true;
+
+    // Helper to get EMA pair for a given candle index (fallbacks to current values if series not aligned)
+    const getBandAt = (i) => {
+        if (ema20Series.length === m5Candles.length && ema50Series.length === m5Candles.length) {
+            return [ema20Series[i], ema50Series[i]];
+        }
+        return [ema20, ema50];
+    };
+
+    // 1) Congestion filter: count closes inside the EMA channel in the last 10 bars (excluding the latest)
+    let insideCount = 0;
+    for (let i = Math.max(0, m5Candles.length - 11); i < m5Candles.length - 1; i++) {
+        const [e20, e50] = getBandAt(i);
+        const hi = Math.max(e20, e50);
+        const lo = Math.min(e20, e50);
+        const c = m5Candles[i].close;
+        if (c > lo && c < hi) insideCount++;
+    }
     if (insideCount > 3) return null; // too much congestion
+
+    // 2) Noisy channel filter: count EMA20/EMA50 crossovers in the last 20 bars of the series
+    let crosses = 0;
+    if (ema20Series.length && ema50Series.length) {
+        const n = Math.min(ema20Series.length, ema50Series.length);
+        const start = Math.max(1, n - 20);
+        for (let i = start; i < n; i++) {
+            const prevDiff = ema20Series[i - 1] - ema50Series[i - 1];
+            const currDiff = ema20Series[i] - ema50Series[i];
+            if ((prevDiff <= 0 && currDiff > 0) || (prevDiff >= 0 && currDiff < 0)) crosses++;
+        }
+    }
+    if (crosses > 1) return null; // river should be calm
+
+    // 3) Channel width filter: average width over last 10 bars must exceed a fraction of ATR
+    let widthOK = true;
+    if (ema20Series.length && ema50Series.length) {
+        const n = Math.min(ema20Series.length, ema50Series.length);
+        const start = Math.max(0, n - 10);
+        const widths = [];
+        for (let i = start; i < n; i++) widths.push(Math.abs(ema20Series[i] - ema50Series[i]));
+        const avgWidth = widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : Math.abs(ema20 - ema50);
+        const minWidth = atr ? atr * 0.3 : 0; // 30% of ATR by default
+        widthOK = avgWidth >= minWidth;
+    }
+    if (!widthOK) return null;
+
+    // 4) Pullback: within last 3 bars before the trigger, price must touch the band
+    const prev3 = [m5Candles[m5Candles.length - 4], m5Candles[m5Candles.length - 3], m5Candles[m5Candles.length - 2]];
+    let touched = false;
+    for (let i = m5Candles.length - 4; i <= m5Candles.length - 2; i++) {
+        const bar = m5Candles[i];
+        const [e20, e50] = getBandAt(i);
+        const hi = Math.max(e20, e50);
+        const lo = Math.min(e20, e50);
+        if (bar && bar.low <= hi && bar.high >= lo) { touched = true; break; }
+    }
+    if (!touched) return null;
+
+    // 5) Trend alignment and trigger candle
+    const trendUp = lastClose > ema20 && ema20 > ema50 && upSlope;
+    const trendDown = lastClose < ema20 && ema20 < ema50 && downSlope;
 
     if (trendUp && lastClose > ema20) return "BUY";
     if (trendDown && lastClose < ema20) return "SELL";
     return null;
 };
+
+// Green Red Candle Pattern
+export const greenRedCandlePattern = (trend, prev, last) => {
+    if (!prev || !last || !trend) return false;
+
+    // Support both {open, close} and {o, c}
+    const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
+    const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
+
+    if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) {
+        return false;
+    }
+
+    const isBullish = (c) => getClose(c) > getOpen(c);
+    const isBearish = (c) => getClose(c) < getOpen(c);
+
+    const trendDirection = String(trend).toLowerCase();
+
+    if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
+        // red -> green in bullish trend
+        return "bullish";
+    }
+    if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) {
+        // green -> red in bearish trend
+        return "bearish";
+    }
+    return false;
+};
+

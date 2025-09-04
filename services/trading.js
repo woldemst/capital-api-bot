@@ -3,7 +3,7 @@ import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, get
 import logger from "../utils/logger.js";
 import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
-import { checkCalmRiver } from "../strategies/strategies.js";
+import { checkCalmRiver, greenRedCandlePattern } from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS, REQUIRED_SCORE } = RISK;
 
@@ -33,125 +33,106 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    detectPattern(trend, prev, last) {
-        if (!prev || !last || !trend) return false;
-
-        // Support both {open, close} and {o, c}
-        const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
-        const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
-
-        if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) {
-            return false;
-        }
-
-        const isBullish = (c) => getClose(c) > getOpen(c);
-        const isBearish = (c) => getClose(c) < getOpen(c);
-
-        const trendDirection = String(trend).toLowerCase();
-
-        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
-            // red -> green in bullish trend
-            return "bullish";
-        }
-        if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) {
-            // green -> red in bearish trend
-            return "bearish";
-        }
-        return false;
-    }
-
     generateSignal({ symbol, indicators, h1Trend, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
-        const { m1, m5, m15, h1 } = indicators || {};
-        if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles) {
-            logger.warn(`[Signal] Missing indicators/candles for ${symbol}`);
-            return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
+        if (!m5Candles || !m15Candles || !h1Candles) {
+            logger.warn(`[generateSignal] Missing candles for ${symbol}`);
+            return { signal: null, reason: "missing_data" };
         }
 
-        // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
-        const ema9h1 = h1.ema9;
-        const emaFastH1 = h1.emaFast;
-        const emaSlowH1 = h1.emaSlow;
+        // Calm River (M5) – try first
+        try {
+            const calmSignal = checkCalmRiver(m5Candles, indicators?.m5?.ema20, indicators?.m5?.ema50, {
+                ema20Prev: indicators?.m5?.ema20Prev,
+                ema50Prev: indicators?.m5?.ema50Prev,
+                ema20Series: indicators?.m5?.ema20SeriesTail,
+                ema50Series: indicators?.m5?.ema50SeriesTail,
+                atr: indicators?.m5?.atr,
+            });
+            if (calmSignal) {
+                logger.info(`[CalmRiver] ${symbol}: ${calmSignal} signal`);
 
-        const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
-        const fixedM15Adx = Number(m15.adx.adx.toFixed(2));
-        const fixedM15Atr = Number(m15.atr.toFixed(4));
+                logger.info(`[Signal Analysis] ${symbol}
+                    m5Candles: ${m5Candles.length}
+                    M5 EMA20: ${m5.ema20}
+                    M5 EMA50: ${m5.ema50}
+                `);
 
-        const patternDir = this.detectPattern(h1Trend, prev, last);
+                return { signal: calmSignal, reason: "calm_river" };
+            }
 
-        const getClose = (c) => c.close;
-
-        const lastClose = getClose(last);
-
-        // Build conditions explicitly
-        const buyConditions = [
-            patternDir === "bullish",
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
-            ema9h1 != null ? lastClose > ema9h1 : false,
-            m15.macd.histogram != null ? m15.macd.histogram > 0 : false,
-        ];
-
-        const sellConditions = [
-            patternDir === "bearish",
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
-            ema9h1 != null ? lastClose < ema9h1 : false,
-            m15.macd.histogram != null ? m15.macd.histogram < 0 : false,
-        ];
-
-        const buyScore = buyConditions.filter(Boolean).length;
-        const sellScore = sellConditions.filter(Boolean).length;
-
-        logger.info(`[Signal Analysis] ${symbol}
-            Pattern: ${patternDir}
-            RequiredScore: ${REQUIRED_SCORE}
-            BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
-            SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-            M15 MACD hist: ${m15.macd.histogram}
-            M15 RSI: ${m15.rsi}
-            M15 ADX: ${fixedM15Adx}
-            H1 ADX: ${fixedH1Adx}
-        `);
-
-        let signal = null;
-
-        if (buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
-            signal = "BUY";
-        } else {
-            const reason = `score_too_low: ${buyScore}`;
-            return { signal: null, reason };
-        }
-        if (sellScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
-            signal = "SELL";
-        } else {
-            const reason = `score_too_low: ${sellScore}`;
-            return { signal: null, reason };
+            return { signal: null, reason: "no_signal" };
+        } catch (e) {
+            logger.warn(`[CalmRiver] ${symbol}: check failed: ${e?.message || e}`);
         }
 
-        if (fixedM15Adx < 20) {
-            logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
-            return { signal: null, reason: "ranging_market" };
-        }
-        if (fixedM15Atr < 0.0005) {
-            logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
-            return { signal: null, reason: "low_volatility" };
-        }
+        // const ema9h1 = indicators.h1.ema9;
+        // const emaFastH1 = indicators.h1.emaFast;
+        // const emaSlowH1 = indicators.h1.emaSlow;
 
-        return signal;
+        // const fixedH1Adx = Number(indicators.h1.adx.adx.toFixed(2));
+        // const fixedM15Adx = Number(indicators.m15.adx.adx.toFixed(2));
+        // const fixedM15Atr = Number(indicators.m15.atr.toFixed(4));
 
-        // //  Not Delete !!!
-        // //  Calm River strategy check
-        // const calmRiverSignal = this.checkCalmRiver(m5Candles, m5.ema20, m5.ema50);
-        // if (calmRiverSignal) {
-        //     logger.info(`[CalmRiver] ${symbol}: ${calmRiverSignal} signal found`);
-        //     return { signal: calmRiverSignal, reason: "CalmRiver" };
-        // }
+        // const patternDir = greenRedCandlePattern(h1Trend, prev, last);
+
+        // const getClose = (c) => c.close;
+        // const lastClose = getClose(last);
+
+        // // Build conditions explicitly
+        // const buyConditions = [
+        //     patternDir === "bullish",
+        //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
+        //     ema9h1 != null ? lastClose > ema9h1 : false,
+        //     indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram > 0 : false,
+        // ];
+
+        // const sellConditions = [
+        //     patternDir === "bearish",
+        //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
+        //     ema9h1 != null ? lastClose < ema9h1 : false,
+        //     indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram < 0 : false,
+        // ];
+
+        // const buyScore = buyConditions.filter(Boolean).length;
+        // const sellScore = sellConditions.filter(Boolean).length;
 
         // logger.info(`[Signal Analysis] ${symbol}
-        //     m5Candles: ${m5Candles.length}
-        //     M5 EMA20: ${m5.ema20}
-        //     M5 EMA50: ${m5.ema50}
+        //     Pattern: ${patternDir}
+        //     RequiredScore: ${REQUIRED_SCORE}
+        //     BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
+        //     SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
+        //     M15 MACD hist: ${indicators.m15.macd.histogram}
+        //     M15 RSI: ${indicators.m15.rsi}
+        //     M15 ADX: ${fixedM15Adx}
+        //     M15 ATR: ${fixedM15Atr}
+        //     H1 ADX: ${fixedH1Adx}
         // `);
 
-        // return { signal: calmRiverSignal, reason: "Not CalmRiver" };
+        // const longOK = buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0;
+        // const shortOK = sellScore >= REQUIRED_SCORE && fixedM15Adx > 15.0;
+
+        // let signal = null;
+        // let reason = null;
+
+        // if (longOK && !shortOK) {
+        //     signal = "BUY";
+        // } else if (shortOK && !longOK) {
+        //     signal = "SELL";
+        // } else if (longOK && shortOK) {
+        //     // If both sides qualify, follow the pattern direction if any
+        //     if (patternDir === "bullish") signal = "BUY"; else if (patternDir === "bearish") signal = "SELL"; else reason = "both_sides_ok";
+        // } else {
+        //     reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
+        // }
+
+        // if (!signal) return { signal: null, reason };
+
+        // if (fixedM15Atr < 0.0005) {
+        //     logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+        //     return { signal: null, reason: "low_volatility" };
+        // }
+
+        // return { signal, reason: "rules" };
     }
 
     // --- Price rounding ---
@@ -276,8 +257,6 @@ class TradingService {
         return { SL: newSL, TP: newTP };
     }
 
-    // (removed entire async executeTdrade(...) method)
-
     async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
         try {
             const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
@@ -383,15 +362,7 @@ class TradingService {
         const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
         if (!shouldUpdate) return;
         try {
-            await updateTrailingStop(
-                dealId,
-                currentPrice, // latest market price
-                entryPrice, // entry
-                takeProfit, // planned TP
-                direction.toUpperCase(), // ensure uppercase
-                position.symbol || position.market, // epic/symbol
-                position.isTrailing || false // if you track trailing status
-            );
+            await updateTrailingStop(dealId, currentPrice, entryPrice, takeProfit, direction.toUpperCase(), position.symbol || position.market, position.isTrailing || false);
             logger.info(`[TrailingStop] Updated trailing stop for ${dealId}: ${newStop}`);
         } catch (error) {
             logger.error(`[TrailingStop] Failed to update trailing stop for ${dealId}:`, error);
