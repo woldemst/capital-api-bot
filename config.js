@@ -19,7 +19,7 @@ export const SESSIONS = {
     NY: {
         START: "13:00",
         END: "21:00",
-            SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "GOLD"], // Gold often trades here
+        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "GOLD"],
     },
     SYDNEY: {
         START: "22:00",
@@ -56,7 +56,7 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 3,
+    REQUIRED_SCORE: 2,
 };
 
 // Technical Analysis Configuration

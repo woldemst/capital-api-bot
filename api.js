@@ -141,13 +141,11 @@ export const getAccountInfo = async () =>
         return response.data;
     });
 
-
 export const getMarkets = async () =>
     withSessionRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
         return Array.isArray(response.data.markets) ? response.data.markets : [];
     });
-
 
 export async function getMarketDetails(symbol) {
     return await withSessionRetry(async () => {
@@ -195,7 +193,6 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
         return response.data;
     });
 }
-
 
 export async function updateTrailingStop(
     positionId, // (string) the position/deal id to update
@@ -253,24 +250,11 @@ export async function updateTrailingStop(
 }
 
 export async function placePosition(symbol, direction, size, price, SL, TP) {
-    // Fetch allowed stop range and enforce min distance (price terms)
-    const range = await getAllowedTPRange(symbol);
-    const decimals = range.decimals || (symbol.includes("JPY") ? 3 : 5);
-    const minSLDistancePrice = range.minSLDistancePrice || 0;
+    try {
+        const range = await getAllowedTPRange(symbol);
+        const decimals = range.decimals || (symbol.includes("JPY") ? 3 : 5);
 
-    if (symbol && direction && typeof price === "number" && typeof SL === "number") {
-        if (direction.toUpperCase() === "BUY") {
-            if (price - SL < minSLDistancePrice) {
-                SL = price - minSLDistancePrice;
-            }
-        } else {
-            if (SL - price < minSLDistancePrice) {
-                SL = price + minSLDistancePrice;
-            }
-        }
-    }
 
-    return await withSessionRetry(async () => {
         logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${SL}, TP: ${TP}`);
         const position = {
             epic: symbol,
@@ -278,14 +262,23 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
             size: Number(size),
             orderType: "MARKET",
             guaranteedStop: false,
-            stopLevel: typeof SL === "number" ? Number(SL).toFixed(decimals) : undefined,
-            profitLevel: typeof TP === "number" ? Number(TP).toFixed(decimals) : undefined,
+            stopLevel: Number(SL).toFixed(decimals),
+            profitLevel: Number(TP).toFixed(decimals),
         };
         logger.info("[API] Sending position request:", position);
+
         const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
+
         logger.info("[API] Position created successfully:", response.data);
         return response.data;
-    });
+    } catch (error) {
+        logger.error(`[API] Error placing position for ${symbol}:`, error.response ? JSON.stringify(error.response.data) : error.message);
+        if (error.response) {
+            logger.error(`[API] Response status:`, error.response.status);
+            logger.error(`[API] Response headers:`, JSON.stringify(error.response.headers));
+        }
+        throw error;
+    }
 }
 
 export async function gevtDealConfirmation(dealReference) {

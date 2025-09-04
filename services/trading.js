@@ -85,104 +85,88 @@ class TradingService {
             return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
         }
 
-        // const prev = m15Candles[m15Candles.length - 3]; // previous closed
-        // const last = m15Candles[m15Candles.length - 2]; // most recent closed
+        // // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
+        // const ema9h1 = h1.ema9;
+        // const emaFastH1 = h1.emaFast;
+        // const emaSlowH1 = h1.emaSlow;
 
-        // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
-        const ema9h1 = h1.ema9;
-        const ema21h1 = h1.ema21;
-        const emaFastH1 = h1.emaFast;
-        const emaSlowH1 = h1.emaSlow;
+        // const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
+        // const fixedM15Adx = Number(m15.adx.adx.toFixed(2));
+        // const fixedM15Atr = Number(m15.atr.toFixed(4));
 
-        const patternDir = this.detectPattern(h1Trend, prev, last);
+        // const patternDir = this.detectPattern(h1Trend, prev, last);
 
-        // if (!patternDir) {
-        //     logger.info(`[Signal Analysis] ${symbol}: No valid M15 pattern for H1 trend (${h1Trend}).`);
-        //     return { signal: null, reason: "no_valid_pattern" };
+        // const getClose = (c) => c.close;
+
+        // const lastClose = getClose(last);
+
+        // // Build conditions explicitly
+        // const buyConditions = [
+        //     patternDir === "bullish",
+        //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
+        //     ema9h1 != null ? lastClose > ema9h1 : false,
+        //     m15.macd.histogram != null ? m15.macd.histogram > 0 : false,
+        // ];
+
+        // const sellConditions = [
+        //     patternDir === "bearish",
+        //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
+        //     ema9h1 != null ? lastClose < ema9h1 : false,
+        //     m15.macd.histogram != null ? m15.macd.histogram < 0 : false,
+        // ];
+
+        // const buyScore = buyConditions.filter(Boolean).length;
+        // const sellScore = sellConditions.filter(Boolean).length;
+
+        // logger.info(`[Signal Analysis] ${symbol}
+        //     Pattern: ${patternDir}
+        //     RequiredScore: ${REQUIRED_SCORE}
+        //     BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
+        //     SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
+        //     M15 MACD hist: ${m15.macd.histogram}
+        //     M15 RSI: ${m15.rsi}
+        //     M15 ADX: ${fixedM15Adx}
+        //     H1 ADX: ${fixedH1Adx}
+        // `);
+
+        // let signal = null;
+
+        // if (buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
+        //     signal = "BUY";
+        // } else {
+        //     const reason = `score_too_low: ${buyScore}`;
+        //     return { signal: null, reason };
+        // }
+        // if (sellScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
+        //     signal = "SELL";
+        // } else {
+        //     const reason = `score_too_low: ${sellScore}`;
+        //     return { signal: null, reason };
         // }
 
-        const getClose = (c) => c.close;
-
-        const lastClose = getClose(last);
-        console.log("ema9h1", ema9h1, "ema21h1", ema21h1, "lastClose", lastClose);
-
-        // Build conditions explicitly
-        const buyConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
-            ema9h1 != null ? lastClose > ema9h1 : false,
-            m15.macd.histogram != null ? m15.macd.histogram > 0 : false,
-        ];
-
-        const sellConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
-            ema9h1 != null ? lastClose < ema9h1 : false,
-            m15.macd.histogram != null ? m15.macd.histogram < 0 : false,
-        ];
-
-        const buyScore = buyConditions.filter(Boolean).length;
-        const sellScore = sellConditions.filter(Boolean).length;
-
-        logger.debug(`[Conditions] ${symbol} buy=[${buyConditions.map(Boolean)}] sell=[${sellConditions.map(Boolean)}]`);
-
-        logger.info(`[Signal Analysis] ${symbol}
-            Pattern: ${patternDir}
-            BuyScore: ${buyScore}/${buyConditions.length}
-            SellScore: ${sellScore}/${sellConditions.length}
-            RequiredScore: ${REQUIRED_SCORE}
-            M15 RSI: ${m15.rsi}
-            M15 MACD hist: ${m15.macd.histogram}
-            M15 ADX: ${m15.adx.adx}
-            H1 ADX: ${h1.adx.adx}
-        `);
-
-        let signal = null;
-        const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
-
-        if (buyScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
-            signal = "BUY";
-        }
-        if (sellScore >= REQUIRED_SCORE && fixedH1Adx > 18) {
-            signal = "SELL";
-        }
-
-        if (!signal) {
-            const reason = (buyScore >= REQUIRED_SCORE || sellScore >= REQUIRED_SCORE) ? "pattern_not_met" : `score_too_low: b${buyScore}, s${sellScore}`;
-            return { signal: null, reason };
-        }
-
-        const fixedAdx = Number(m15.adx.adx.toFixed(2));
-        const fixedAtr = Number(m15.atr.toFixed(4));
-
-        if (fixedAdx < 20) {
-            logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
-            return { signal: null, reason: "ranging_market" };
-        }
-        if (fixedAtr < 0.0005) {
-            logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
-            return { signal: null, reason: "low_volatility" };
-        }
+        // if (fixedM15Adx < 20) {
+        //     logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
+        //     return { signal: null, reason: "ranging_market" };
+        // }
+        // if (fixedM15Atr < 0.0005) {
+        //     logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+        //     return { signal: null, reason: "low_volatility" };
+        // }
 
         //  Calm River strategy check
-        // const calmRiverSignal = this.checkCalmRiver(m5Candles, m5.ema20, m5.ema50);
-        // if (calmRiverSignal) {
-        //     logger.info(`[CalmRiver] ${symbol}: ${calmRiverSignal} signal found`);
-        //     return { signal: calmRiverSignal, strategy: "CalmRiver" };
-        // }
+        const calmRiverSignal = this.checkCalmRiver(m5Candles, m5.ema20, m5.ema50);
+        if (calmRiverSignal) {
+            logger.info(`[CalmRiver] ${symbol}: ${calmRiverSignal} signal found`);
+            return { signal: calmRiverSignal, reason: "CalmRiver" };
+        }
 
-        return {
-            signal,
-            buyScore,
-            sellScore,
-            metrics: {
-                rsi: m15.rsi,
-                macd: m15.macd.histogram,
-                ema9h1,
-                ema21h1,
-                emaFastH1,
-                emaSlowH1,
-                adx: m15.adx.adx,
-            },
-        };
+        logger.info(`[Signal Analysis] ${symbol}
+            m5Candles: ${m5Candles.length}
+            M5 EMA20: ${m5.ema20}
+            M5 EMA50: ${m5.ema50}
+        `);
+
+        return { signal: calmRiverSignal, reason: "Not CalmRiver" };
     }
 
     // --- Price rounding ---
@@ -193,81 +177,86 @@ class TradingService {
 
     // --- Position size + achievable SL/TP for M1 ---
     async calculateTradeParameters(signal, symbol, bid, ask, m1Candles) {
-        const price = signal === "BUY" ? ask : bid;
+        try {
+            const price = signal === "BUY" ? ask : bid;
 
-        // Use previous M1 candle for SL
-        const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
-        if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
+            // Use previous M1 candle for SL
+            const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
+            if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-        // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
-        const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
+            // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
+            const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
 
-        let stopLossPrice, slDistance, takeProfitPrice;
+            let stopLossPrice, slDistance, takeProfitPrice;
 
-        if (signal === "BUY") {
-            // For BUY: SL below previous candle low
-            stopLossPrice = prevCandle.low - buffer;
-            slDistance = price - stopLossPrice;
-            // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
-            takeProfitPrice = price + slDistance * 1.8;
-        } else {
-            // For SELL: SL above previous candle high
-            stopLossPrice = prevCandle.high + buffer;
-            slDistance = stopLossPrice - price;
-            // TP = entry - (1.8 × SL distance)
-            takeProfitPrice = price - slDistance * 1.8;
-        }
-
-        // Ensure minimum SL distance to avoid excessively tight SLs
-        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-
-        const minSlPips = symbol.includes("JPY") ? 12 : 10;
-
-        const minSl = minSlPips * pip;
-        if (Math.abs(slDistance) < minSl) {
             if (signal === "BUY") {
-                stopLossPrice = price - minSl;
+                // For BUY: SL below previous candle low
+                stopLossPrice = prevCandle.low - buffer;
                 slDistance = price - stopLossPrice;
+                // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
                 takeProfitPrice = price + slDistance * 1.8;
             } else {
-                stopLossPrice = price + minSl;
+                // For SELL: SL above previous candle high
+                stopLossPrice = prevCandle.high + buffer;
                 slDistance = stopLossPrice - price;
+                // TP = entry - (1.8 × SL distance)
                 takeProfitPrice = price - slDistance * 1.8;
             }
-        }
 
-        // Ensure minimum SL distance to avoid excessively tight SLs
-        // ... (existing code above unchanged)
+            // Ensure minimum SL distance to avoid excessively tight SLs
+            const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
 
-        // Fetch allowed decimals and use for rounding
-        const allowed = await getAllowedTPRange(symbol);
-        const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
+            const minSlPips = symbol.includes("JPY") ? 12 : 10;
 
-        // Round prices to appropriate decimals
-        stopLossPrice = this.roundPrice(stopLossPrice, symbol, decimals);
-        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol, decimals);
+            const minSl = minSlPips * pip;
+            if (Math.abs(slDistance) < minSl) {
+                if (signal === "BUY") {
+                    stopLossPrice = price - minSl;
+                    slDistance = price - stopLossPrice;
+                    takeProfitPrice = price + slDistance * 1.8;
+                } else {
+                    stopLossPrice = price + minSl;
+                    slDistance = stopLossPrice - price;
+                    takeProfitPrice = price - slDistance * 1.8;
+                }
+            }
 
-        // Calculate position size based on risk
-        const maxSimultaneousTrades = MAX_POSITIONS;
-        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+            // Ensure minimum SL distance to avoid excessively tight SLs
+            // ... (existing code above unchanged)
 
-        // For FX, pipValue = pip / price
-        const pipValue = pip / price;
-        let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
-        if (size < 100) size = 100; // Minimum size
+            // Fetch allowed decimals and use for rounding
+            const allowed = await getAllowedTPRange(symbol);
+            const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
 
-        logger.info(`[Trade Parameters] ${symbol} ${signal}:
+            // Round prices to appropriate decimals
+            stopLossPrice = this.roundPrice(stopLossPrice, symbol, decimals);
+            takeProfitPrice = this.roundPrice(takeProfitPrice, symbol, decimals);
+
+            // Calculate position size based on risk
+            const maxSimultaneousTrades = MAX_POSITIONS;
+            const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+
+            // For FX, pipValue = pip / price
+            const pipValue = pip / price;
+            let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
+            if (size < 100) size = 100; // Minimum size
+
+            logger.info(`[Trade Parameters] ${symbol} ${signal}:
             Entry: ${price}
             SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
             TP: ${takeProfitPrice}
             Size: ${size}`);
 
-        return {
-            size,
-            price,
-            stopLossPrice,
-            takeProfitPrice,
-        };
+            return {
+                size,
+                price,
+                stopLossPrice,
+                takeProfitPrice,
+            };
+        } catch (error) {
+            logger.error(`[trading.js][calculateTradeParameters] Error calculating trade parameters for ${symbol}:`, error);
+            throw error;
+        }
     }
 
     // --- TP/SL validation (unchanged) ---
@@ -316,10 +305,13 @@ class TradingService {
             }
 
             const confirmation = await getDealConfirmation(position.dealReference);
+
+            // Check the status of the deal confirmation
             if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                 logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
             } else {
-                logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${SL} TP=${TP} ref=${position.dealReference}`);
+                logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`);
+
                 try {
                     const logPath = getCurrentTradesLogPath();
                     const logEntry = {
