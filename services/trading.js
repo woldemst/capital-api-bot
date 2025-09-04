@@ -3,6 +3,7 @@ import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, get
 import logger from "../utils/logger.js";
 import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
+import { checkCalmRiver } from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS, REQUIRED_SCORE } = RISK;
 
@@ -59,25 +60,6 @@ class TradingService {
         return false;
     }
 
-    checkCalmRiver(m5Candles, ema20, ema50) {
-        if (!m5Candles || m5Candles.length < 60) return null;
-
-        const closes = m5Candles.map((c) => c.close);
-        const lastClose = closes[closes.length - 1];
-        const prevCloses = closes.slice(-4, -1); // last 3 before trigger
-
-        const trendUp = lastClose > ema20 && ema20 > ema50;
-        const trendDown = lastClose < ema20 && ema20 < ema50;
-
-        // Count candles closed between ema20 & ema50
-        const insideCount = prevCloses.filter((c) => c < Math.max(ema20, ema50) && c > Math.min(ema20, ema50)).length;
-        if (insideCount > 3) return null; // too much congestion
-
-        if (trendUp && lastClose > ema20) return "BUY";
-        if (trendDown && lastClose < ema20) return "SELL";
-        return null;
-    }
-
     generateSignal({ symbol, indicators, h1Trend, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
         const { m1, m5, m15, h1 } = indicators || {};
         if (!m1 || !m5 || !m15 || !h1 || !m1Candles || !m5Candles || !m15Candles || !h1Candles) {
@@ -85,88 +67,91 @@ class TradingService {
             return { signal: null, buyScore: 0, sellScore: 0, metrics: {} };
         }
 
-        // // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
-        // const ema9h1 = h1.ema9;
-        // const emaFastH1 = h1.emaFast;
-        // const emaSlowH1 = h1.emaSlow;
+        // Use M15 RSI/MACD/ADX + H1 EMAs & EMA9 for momentum
+        const ema9h1 = h1.ema9;
+        const emaFastH1 = h1.emaFast;
+        const emaSlowH1 = h1.emaSlow;
 
-        // const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
-        // const fixedM15Adx = Number(m15.adx.adx.toFixed(2));
-        // const fixedM15Atr = Number(m15.atr.toFixed(4));
+        const fixedH1Adx = Number(h1.adx.adx.toFixed(2));
+        const fixedM15Adx = Number(m15.adx.adx.toFixed(2));
+        const fixedM15Atr = Number(m15.atr.toFixed(4));
 
-        // const patternDir = this.detectPattern(h1Trend, prev, last);
+        const patternDir = this.detectPattern(h1Trend, prev, last);
 
-        // const getClose = (c) => c.close;
+        const getClose = (c) => c.close;
 
-        // const lastClose = getClose(last);
+        const lastClose = getClose(last);
 
-        // // Build conditions explicitly
-        // const buyConditions = [
-        //     patternDir === "bullish",
-        //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
-        //     ema9h1 != null ? lastClose > ema9h1 : false,
-        //     m15.macd.histogram != null ? m15.macd.histogram > 0 : false,
-        // ];
+        // Build conditions explicitly
+        const buyConditions = [
+            patternDir === "bullish",
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
+            ema9h1 != null ? lastClose > ema9h1 : false,
+            m15.macd.histogram != null ? m15.macd.histogram > 0 : false,
+        ];
 
-        // const sellConditions = [
-        //     patternDir === "bearish",
-        //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
-        //     ema9h1 != null ? lastClose < ema9h1 : false,
-        //     m15.macd.histogram != null ? m15.macd.histogram < 0 : false,
-        // ];
+        const sellConditions = [
+            patternDir === "bearish",
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
+            ema9h1 != null ? lastClose < ema9h1 : false,
+            m15.macd.histogram != null ? m15.macd.histogram < 0 : false,
+        ];
 
-        // const buyScore = buyConditions.filter(Boolean).length;
-        // const sellScore = sellConditions.filter(Boolean).length;
-
-        // logger.info(`[Signal Analysis] ${symbol}
-        //     Pattern: ${patternDir}
-        //     RequiredScore: ${REQUIRED_SCORE}
-        //     BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
-        //     SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-        //     M15 MACD hist: ${m15.macd.histogram}
-        //     M15 RSI: ${m15.rsi}
-        //     M15 ADX: ${fixedM15Adx}
-        //     H1 ADX: ${fixedH1Adx}
-        // `);
-
-        // let signal = null;
-
-        // if (buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
-        //     signal = "BUY";
-        // } else {
-        //     const reason = `score_too_low: ${buyScore}`;
-        //     return { signal: null, reason };
-        // }
-        // if (sellScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
-        //     signal = "SELL";
-        // } else {
-        //     const reason = `score_too_low: ${sellScore}`;
-        //     return { signal: null, reason };
-        // }
-
-        // if (fixedM15Adx < 20) {
-        //     logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
-        //     return { signal: null, reason: "ranging_market" };
-        // }
-        // if (fixedM15Atr < 0.0005) {
-        //     logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
-        //     return { signal: null, reason: "low_volatility" };
-        // }
-
-        //  Calm River strategy check
-        const calmRiverSignal = this.checkCalmRiver(m5Candles, m5.ema20, m5.ema50);
-        if (calmRiverSignal) {
-            logger.info(`[CalmRiver] ${symbol}: ${calmRiverSignal} signal found`);
-            return { signal: calmRiverSignal, reason: "CalmRiver" };
-        }
+        const buyScore = buyConditions.filter(Boolean).length;
+        const sellScore = sellConditions.filter(Boolean).length;
 
         logger.info(`[Signal Analysis] ${symbol}
-            m5Candles: ${m5Candles.length}
-            M5 EMA20: ${m5.ema20}
-            M5 EMA50: ${m5.ema50}
+            Pattern: ${patternDir}
+            RequiredScore: ${REQUIRED_SCORE}
+            BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
+            SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
+            M15 MACD hist: ${m15.macd.histogram}
+            M15 RSI: ${m15.rsi}
+            M15 ADX: ${fixedM15Adx}
+            H1 ADX: ${fixedH1Adx}
         `);
 
-        return { signal: calmRiverSignal, reason: "Not CalmRiver" };
+        let signal = null;
+
+        if (buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
+            signal = "BUY";
+        } else {
+            const reason = `score_too_low: ${buyScore}`;
+            return { signal: null, reason };
+        }
+        if (sellScore >= REQUIRED_SCORE && fixedH1Adx > 15.0) {
+            signal = "SELL";
+        } else {
+            const reason = `score_too_low: ${sellScore}`;
+            return { signal: null, reason };
+        }
+
+        if (fixedM15Adx < 20) {
+            logger.info(`[Signal] ${symbol}: Market is ranging, skipping trend-following signal.`);
+            return { signal: null, reason: "ranging_market" };
+        }
+        if (fixedM15Atr < 0.0005) {
+            logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+            return { signal: null, reason: "low_volatility" };
+        }
+
+        return signal;
+
+        // //  Not Delete !!!
+        // //  Calm River strategy check
+        // const calmRiverSignal = this.checkCalmRiver(m5Candles, m5.ema20, m5.ema50);
+        // if (calmRiverSignal) {
+        //     logger.info(`[CalmRiver] ${symbol}: ${calmRiverSignal} signal found`);
+        //     return { signal: calmRiverSignal, reason: "CalmRiver" };
+        // }
+
+        // logger.info(`[Signal Analysis] ${symbol}
+        //     m5Candles: ${m5Candles.length}
+        //     M5 EMA20: ${m5.ema20}
+        //     M5 EMA50: ${m5.ema50}
+        // `);
+
+        // return { signal: calmRiverSignal, reason: "Not CalmRiver" };
     }
 
     // --- Price rounding ---
@@ -323,15 +308,7 @@ class TradingService {
                         sl: SL,
                         tp: TP,
                         size,
-                        indicators: {
-                            emaFast: indicators?.h1?.emaFast,
-                            emaSlow: indicators?.h1?.emaSlow,
-                            ema9: indicators?.h1?.ema9,
-                            ema21: indicators?.h1?.ema21,
-                            rsi15: indicators?.m15?.rsi,
-                            macd15Hist: indicators?.m15?.macd?.histogram,
-                            atr: indicators?.m1?.atr,
-                        },
+                        indicators,
                         result: null,
                     };
                     fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
