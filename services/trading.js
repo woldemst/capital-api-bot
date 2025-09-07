@@ -39,22 +39,23 @@ class TradingService {
             return { signal: null, reason: "missing_data" };
         }
 
-        // Calm River (M5) – try first
+        const { m5 } = indicators;
+
         try {
-            const calmSignal = checkCalmRiver(m5Candles, indicators?.m5?.ema20, indicators?.m5?.ema50, {
-                ema20Prev: indicators?.m5?.ema20Prev,
-                ema50Prev: indicators?.m5?.ema50Prev,
-                ema20Series: indicators?.m5?.ema20SeriesTail,
-                ema50Series: indicators?.m5?.ema50SeriesTail,
-                atr: indicators?.m5?.atr,
+            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema50, {
+                ema20Prev: m5?.ema20Prev,
+                ema50Prev: m5?.ema50Prev,
+                ema20Series: m5?.ema20SeriesTail,
+                ema50Series: m5?.ema50SeriesTail,
+                atr: m5?.atr,
             });
             if (calmSignal) {
                 logger.info(`[CalmRiver] ${symbol}: ${calmSignal} signal`);
 
                 logger.info(`[Signal Analysis] ${symbol}
                     m5Candles: ${m5Candles.length}
-                    M5 EMA20: ${m5.ema20}
-                    M5 EMA50: ${m5.ema50}
+                    M5 EMA20: ${m5?.ema20}
+                    M5 EMA50: ${m5?.ema50}
                 `);
 
                 return { signal: calmSignal, reason: "calm_river" };
