@@ -9,12 +9,8 @@ export const checkCalmRiver = (m5Candles, ema20, ema50, opts = {}) => {
     const lastClose = last.close;
 
     // Slopes (if prev provided). If not provided, don't block on slope.
-    const upSlope = (typeof ema20Prev === "number" && typeof ema50Prev === "number")
-        ? (ema20 > ema20Prev && ema50 > ema50Prev)
-        : true;
-    const downSlope = (typeof ema20Prev === "number" && typeof ema50Prev === "number")
-        ? (ema20 < ema20Prev && ema50 < ema50Prev)
-        : true;
+    const upSlope = typeof ema20Prev === "number" && typeof ema50Prev === "number" ? ema20 > ema20Prev && ema50 > ema50Prev : true;
+    const downSlope = typeof ema20Prev === "number" && typeof ema50Prev === "number" ? ema20 < ema20Prev && ema50 < ema50Prev : true;
 
     // Helper to get EMA pair for a given candle index (fallbacks to current values if series not aligned)
     const getBandAt = (i) => {
@@ -69,7 +65,10 @@ export const checkCalmRiver = (m5Candles, ema20, ema50, opts = {}) => {
         const [e20, e50] = getBandAt(i);
         const hi = Math.max(e20, e50);
         const lo = Math.min(e20, e50);
-        if (bar && bar.low <= hi && bar.high >= lo) { touched = true; break; }
+        if (bar && bar.low <= hi && bar.high >= lo) {
+            touched = true;
+            break;
+        }
     }
     if (!touched) return null;
 
@@ -110,3 +109,61 @@ export const greenRedCandlePattern = (trend, prev, last) => {
     return false;
 };
 
+// scoring strategy 
+export const scoring = () => {
+    // const ema9h1 = indicators.h1.ema9;
+    // const emaFastH1 = indicators.h1.emaFast;
+    // const emaSlowH1 = indicators.h1.emaSlow;
+    // const fixedH1Adx = Number(indicators.h1.adx.adx.toFixed(2));
+    // const fixedM15Adx = Number(indicators.m15.adx.adx.toFixed(2));
+    // const fixedM15Atr = Number(indicators.m15.atr.toFixed(4));
+    // const patternDir = greenRedCandlePattern(h1Trend, prev, last);
+    // const getClose = (c) => c.close;
+    // const lastClose = getClose(last);
+    // // Build conditions explicitly
+    // const buyConditions = [
+    //     patternDir === "bullish",
+    //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
+    //     ema9h1 != null ? lastClose > ema9h1 : false,
+    //     indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram > 0 : false,
+    // ];
+    // const sellConditions = [
+    //     patternDir === "bearish",
+    //     emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
+    //     ema9h1 != null ? lastClose < ema9h1 : false,
+    //     indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram < 0 : false,
+    // ];
+    // const buyScore = buyConditions.filter(Boolean).length;
+    // const sellScore = sellConditions.filter(Boolean).length;
+    // logger.info(`[Signal Analysis] ${symbol}
+    //     Pattern: ${patternDir}
+    //     RequiredScore: ${REQUIRED_SCORE}
+    //     BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
+    //     SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
+    //     M15 MACD hist: ${indicators.m15.macd.histogram}
+    //     M15 RSI: ${indicators.m15.rsi}
+    //     M15 ADX: ${fixedM15Adx}
+    //     M15 ATR: ${fixedM15Atr}
+    //     H1 ADX: ${fixedH1Adx}
+    // `);
+    // const longOK = buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0;
+    // const shortOK = sellScore >= REQUIRED_SCORE && fixedM15Adx > 15.0;
+    // let signal = null;
+    // let reason = null;
+    // if (longOK && !shortOK) {
+    //     signal = "BUY";
+    // } else if (shortOK && !longOK) {
+    //     signal = "SELL";
+    // } else if (longOK && shortOK) {
+    //     // If both sides qualify, follow the pattern direction if any
+    //     if (patternDir === "bullish") signal = "BUY"; else if (patternDir === "bearish") signal = "SELL"; else reason = "both_sides_ok";
+    // } else {
+    //     reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
+    // }
+    // if (!signal) return { signal: null, reason };
+    // if (fixedM15Atr < 0.0005) {
+    //     logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
+    //     return { signal: null, reason: "low_volatility" };
+    // }
+    // return { signal, reason: "rules" };
+};
