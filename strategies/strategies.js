@@ -1,7 +1,7 @@
 //  Calm River strategy (enhanced)
-export const checkCalmRiver = (m5Candles, ema20, ema50, opts = {}) => {
+export const checkCalmRiver = (m5Candles, ema20, ema30, ema50, opts = {}) => {
     // Require sufficient data
-    if (!m5Candles || m5Candles.length < 60 || ema20 == null || ema50 == null) return null;
+    if (!m5Candles || m5Candles.length < 60 || ema20 == null || ema30 == null || ema50 == null) return null;
 
     const { ema20Prev, ema50Prev, ema20Series = [], ema50Series = [], atr } = opts;
 
@@ -109,7 +109,7 @@ export const greenRedCandlePattern = (trend, prev, last) => {
     return false;
 };
 
-// scoring strategy 
+// scoring strategy
 export const scoring = () => {
     // const ema9h1 = indicators.h1.ema9;
     // const emaFastH1 = indicators.h1.emaFast;
