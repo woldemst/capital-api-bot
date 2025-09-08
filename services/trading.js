@@ -42,12 +42,14 @@ class TradingService {
         const { m5 } = indicators;
 
         try {
-            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema50, {
+            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, m5?.ema50, {
                 ema20Prev: m5?.ema20Prev,
+                ema30Prev: m5?.ema30Prev,
                 ema50Prev: m5?.ema50Prev,
                 ema20Series: m5?.ema20SeriesTail,
                 ema50Series: m5?.ema50SeriesTail,
                 atr: m5?.atr,
+                macd: m5?.macd,
             });
             if (calmSignal) {
                 logger.info(`[CalmRiver] ${symbol}: ${calmSignal} signal`);
@@ -55,7 +57,9 @@ class TradingService {
                 logger.info(`[Signal Analysis] ${symbol}
                     m5Candles: ${m5Candles.length}
                     M5 EMA20: ${m5?.ema20}
+                    M5 EMA30: ${m5?.ema30}
                     M5 EMA50: ${m5?.ema50}
+                    M5 MACD:  ${m5?.macd}
                 `);
 
                 return { signal: calmSignal, reason: "calm_river" };

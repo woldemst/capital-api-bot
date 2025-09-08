@@ -1,12 +1,10 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
-
-import { SESSIONS, RISK } from "./config.js";
 
 class TradingBot {
     constructor() {
@@ -328,18 +326,75 @@ class TradingBot {
         }
     }
 
+    // NEW: make timestamp parsing bulletproof (string/seconds/ms, with/without timezone)
+    parseOpenTimeMs(openTime) {
+        if (!openTime && openTime !== 0) return NaN;
+
+        // numeric: seconds vs ms
+        if (typeof openTime === "number") {
+            return openTime < 1e12 ? openTime * 1000 : openTime; // < 10^12 ⇒ seconds
+        }
+
+        if (typeof openTime === "string") {
+            let s = openTime.trim();
+
+            // Capital.com often returns ISO-like strings; ensure ISO form
+            // "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DDTHH:MM:SS"
+            if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+                s = s.replace(" ", "T");
+            }
+
+            // If there’s no explicit timezone, assume UTC to avoid local-time skew
+            if (!/[zZ]|[+\-]\d{2}:\d{2}$/.test(s)) {
+                s += "Z";
+            }
+
+            const t = Date.parse(s);
+            return Number.isNaN(t) ? NaN : t;
+        }
+
+        return NaN;
+    }
+
+    // REPLACE the old startMaxHoldMonitor with this version
     async startMaxHoldMonitor() {
-        setInterval(async () => {
+        // keep only one interval running
+        if (this.maxHoldInterval) clearInterval(this.maxHoldInterval);
+
+        this.maxHoldInterval = setInterval(async () => {
             try {
                 const positions = await getOpenPositions();
-                const now = Date.now();
+                if (!positions?.positions?.length) return;
+
+                const nowMs = Date.now();
+
                 for (const pos of positions.positions) {
-                    // Capital.com returns openTime as ISO string
-                    const openTime = new Date(pos.position.openTime).getTime();
-                    const minutesHeld = (now - openTime) / (1000 * 60);
-                    if (minutesHeld > RISK.MAX_HOLD_TIME) {
-                        await tradingService.closePosition(pos.dealId);
-                        logger.info(`[Bot] Closed position ${pos.market.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
+                    const openRaw = pos?.position?.openTime ?? pos?.position?.createdDateUTC ?? pos?.position?.createdDate ?? pos?.openTime; // fallbacks, just in case
+
+                    logger.debug(`[Bot] Position ${pos?.market?.epic} - Open Time raw: ${openRaw}`);
+
+                    const openMs = this.parseOpenTimeMs(openRaw);
+
+                    if (Number.isNaN(openMs)) {
+                        logger.error(`[Bot] Could not parse open time for ${pos?.market?.epic}: ${openRaw}`);
+                        continue;
+                    }
+
+                    // clamp in case of clock skew
+                    const heldMs = Math.max(0, nowMs - openMs);
+                    const minutesHeld = heldMs / 60000; // exact minutes
+
+                    logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
+
+                    // RISK.MAX_HOLD_TIME is in minutes (e.g., 15)
+                    if (minutesHeld >= RISK.MAX_HOLD_TIME) {
+                        const dealId = pos?.position?.dealId ?? pos?.dealId;
+                        if (!dealId) {
+                            logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
+                            continue;
+                        }
+                        await tradingService.closePosition(dealId);
+                        logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
                     }
                 }
             } catch (error) {
