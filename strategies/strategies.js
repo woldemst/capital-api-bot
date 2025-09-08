@@ -1,84 +1,117 @@
-//  Calm River strategy (enhanced)
-export const checkCalmRiver = (m5Candles, ema20, ema30, ema50, opts = {}) => {
-    // Require sufficient data
-    if (!m5Candles || m5Candles.length < 60 || ema20 == null || ema30 == null || ema50 == null) return null;
+//  Calm River strategy (TLAP / VFXAlert implementation)
+//  - 5m timeframe
+//  - EMAs: 20 and 50
+//  - Wait for a pullback that touches the EMA band (20 or 50)
+//  - No more than `maxInside` closes inside the band in the recent window
+//  - Trigger: within `triggerWindow` candles after touch, a candle must close beyond EMA20
+//  - Additional filters: channel calmness (few crosses), channel width vs ATR, optional slope check
+export const checkCalmRiver = (m5Candles, ema20, ema50, opts = {}) => {
+    // Basic validation
+    if (!m5Candles || !Array.isArray(m5Candles) || m5Candles.length < 30) return null;
+    if (typeof ema20 !== "number" || typeof ema50 !== "number") return null;
 
-    const { ema20Prev, ema50Prev, ema20Series = [], ema50Series = [], atr } = opts;
+    const {
+        ema20Series = [],
+        ema50Series = [],
+        ema20Prev = null,
+        ema50Prev = null,
+        atr = null,
+        maxInside = 3,
+        lookbackInside = 10,
+        crossLimit = 1,
+        triggerWindow = 3,
+        minWidthAtrFrac = 0.3,
+        requireSlope = true,
+    } = opts;
 
-    const last = m5Candles[m5Candles.length - 1];
+    const n = m5Candles.length;
+    const lastIdx = n - 1;
+    const last = m5Candles[lastIdx];
     const lastClose = last.close;
 
-    // Slopes (if prev provided). If not provided, don't block on slope.
+    // slope checks (optional)
     const upSlope = typeof ema20Prev === "number" && typeof ema50Prev === "number" ? ema20 > ema20Prev && ema50 > ema50Prev : true;
     const downSlope = typeof ema20Prev === "number" && typeof ema50Prev === "number" ? ema20 < ema20Prev && ema50 < ema50Prev : true;
+    if (requireSlope && !upSlope && !downSlope) return null;
 
-    // Helper to get EMA pair for a given candle index (fallbacks to current values if series not aligned)
-    const getBandAt = (i) => {
-        if (ema20Series.length === m5Candles.length && ema50Series.length === m5Candles.length) {
-            return [ema20Series[i], ema50Series[i]];
-        }
-        return [ema20, ema50];
+    // helper to read series values safely
+    const emaAt = (series, idx, fallback) => {
+        if (Array.isArray(series) && series.length === n) return series[idx];
+        return fallback;
     };
 
-    // 1) Congestion filter: count closes inside the EMA channel in the last 10 bars (excluding the latest)
+    // 1) Count closes inside the EMA channel in the last lookbackInside bars (excluding the last bar)
     let insideCount = 0;
-    for (let i = Math.max(0, m5Candles.length - 11); i < m5Candles.length - 1; i++) {
-        const [e20, e50] = getBandAt(i);
+    const start = Math.max(0, n - 1 - lookbackInside);
+    for (let i = start; i < lastIdx; i++) {
+        const e20 = emaAt(ema20Series, i, ema20);
+        const e50 = emaAt(ema50Series, i, ema50);
         const hi = Math.max(e20, e50);
         const lo = Math.min(e20, e50);
         const c = m5Candles[i].close;
         if (c > lo && c < hi) insideCount++;
     }
-    if (insideCount > 3) return null; // too much congestion
+    if (insideCount > maxInside) return null; // too congested
 
-    // 2) Noisy channel filter: count EMA20/EMA50 crossovers in the last 20 bars of the series
-    let crosses = 0;
-    if (ema20Series.length && ema50Series.length) {
-        const n = Math.min(ema20Series.length, ema50Series.length);
-        const start = Math.max(1, n - 20);
-        for (let i = start; i < n; i++) {
+    // 2) Check EMA crosses over a recent window to ensure "calm river"
+    if (Array.isArray(ema20Series) && Array.isArray(ema50Series) && ema20Series.length === n && ema50Series.length === n) {
+        let crosses = 0;
+        const crossStart = Math.max(1, n - 20);
+        for (let i = crossStart; i < n; i++) {
             const prevDiff = ema20Series[i - 1] - ema50Series[i - 1];
             const currDiff = ema20Series[i] - ema50Series[i];
             if ((prevDiff <= 0 && currDiff > 0) || (prevDiff >= 0 && currDiff < 0)) crosses++;
         }
+        if (crosses > crossLimit) return null;
     }
-    if (crosses > 1) return null; // river should be calm
 
-    // 3) Channel width filter: average width over last 10 bars must exceed a fraction of ATR
-    let widthOK = true;
-    if (ema20Series.length && ema50Series.length) {
-        const n = Math.min(ema20Series.length, ema50Series.length);
-        const start = Math.max(0, n - 10);
-        const widths = [];
-        for (let i = start; i < n; i++) widths.push(Math.abs(ema20Series[i] - ema50Series[i]));
-        const avgWidth = widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : Math.abs(ema20 - ema50);
-        const minWidth = atr ? atr * 0.3 : 0; // 30% of ATR by default
-        widthOK = avgWidth >= minWidth;
+    // 3) Channel width vs ATR
+    if (atr && Array.isArray(ema20Series) && Array.isArray(ema50Series) && ema20Series.length === n && ema50Series.length === n) {
+        const widthArr = [];
+        const wStart = Math.max(0, n - 10);
+        for (let i = wStart; i < n; i++) widthArr.push(Math.abs(ema20Series[i] - ema50Series[i]));
+        const avgWidth = widthArr.length ? widthArr.reduce((a, b) => a + b, 0) / widthArr.length : Math.abs(ema20 - ema50);
+        if (avgWidth < atr * minWidthAtrFrac) return null;
     }
-    if (!widthOK) return null;
 
-    // 4) Pullback: within last 3 bars before the trigger, price must touch the band
-    const prev3 = [m5Candles[m5Candles.length - 4], m5Candles[m5Candles.length - 3], m5Candles[m5Candles.length - 2]];
-    let touched = false;
-    for (let i = m5Candles.length - 4; i <= m5Candles.length - 2; i++) {
+    // 4) Pullback detection: within the 3 bars before current, price must have touched the band
+    let touchedIndex = -1;
+    for (let i = n - 4; i <= n - 2; i++) {
+        if (i < 0) continue;
         const bar = m5Candles[i];
-        const [e20, e50] = getBandAt(i);
+        const e20 = emaAt(ema20Series, i, ema20);
+        const e50 = emaAt(ema50Series, i, ema50);
         const hi = Math.max(e20, e50);
         const lo = Math.min(e20, e50);
-        if (bar && bar.low <= hi && bar.high >= lo) {
-            touched = true;
+        if (bar.low <= hi && bar.high >= lo) {
+            touchedIndex = i;
             break;
         }
     }
-    if (!touched) return null;
+    if (touchedIndex === -1) return null;
 
-    // 5) Trend alignment and trigger candle
-    const trendUp = lastClose > ema20 && ema20 > ema50 && upSlope;
-    const trendDown = lastClose < ema20 && ema20 < ema50 && downSlope;
+    // 5) Trigger: within triggerWindow bars after touch (including the candle after touch), a candle must close beyond EMA20
+    let triggered = null; // "BUY" or "SELL"
+    for (let k = 1; k <= triggerWindow; k++) {
+        const idx = touchedIndex + k;
+        if (idx <= 0 || idx >= n) continue;
+        const bar = m5Candles[idx];
+        const e20 = emaAt(ema20Series, idx, ema20);
+        if (!bar || typeof e20 !== "number") continue;
+        if (bar.close > e20 && ema20 > ema50 && upSlope) {
+            triggered = "BUY";
+            break;
+        }
+        if (bar.close < e20 && ema20 < ema50 && downSlope) {
+            triggered = "SELL";
+            break;
+        }
+    }
+    if (!triggered) return null;
 
-    if (trendUp && lastClose > ema20) return "BUY";
-    if (trendDown && lastClose < ema20) return "SELL";
-    return null;
+    // 6) Final sanity checks: avoid entries when ADX low or ATR tiny can be checked in opts (caller should pass m5Indicators)
+    // return detected signal
+    return triggered;
 };
 
 // Green Red Candle Pattern

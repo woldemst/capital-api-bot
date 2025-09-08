@@ -39,7 +39,7 @@ class TradingService {
             return { signal: null, reason: "missing_data" };
         }
 
-        const { m5 } = indicators;
+        const m5 = indicators.m5 || {};
 
         try {
             const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, m5?.ema50, {
@@ -172,16 +172,34 @@ class TradingService {
         let newTP = takeProfitPrice;
         let newSL = stopLossPrice;
 
+        // Normalize direction to uppercase
+        const dir = direction.toUpperCase();
+
         // Berechne tatsächlichen Abstand
         const slDistance = Math.abs(entryPrice - stopLossPrice);
         const minSLDistance = allowed?.minSLDistancePrice || 0;
+        const minTPDistance = allowed?.minTPDistancePrice || 0;
 
-        // Wenn SL zu nah, passe ihn an
-        if (slDistance < minSLDistance) {
-            if (direction === "BUY") {
+        // Add explicit SL side check and adjust if invalid or too close
+        if (dir === "BUY") {
+            if (newSL >= entryPrice) {
                 newSL = entryPrice - minSLDistance;
-            } else {
+            }
+            if (Math.abs(entryPrice - newSL) < minSLDistance) {
+                newSL = entryPrice - minSLDistance;
+            }
+            if (Math.abs(newTP - entryPrice) < minTPDistance) {
+                newTP = entryPrice + minTPDistance;
+            }
+        } else if (dir === "SELL") {
+            if (newSL <= entryPrice) {
                 newSL = entryPrice + minSLDistance;
+            }
+            if (Math.abs(entryPrice - newSL) < minSLDistance) {
+                newSL = entryPrice + minSLDistance;
+            }
+            if (Math.abs(entryPrice - newTP) < minTPDistance) {
+                newTP = entryPrice - minTPDistance;
             }
         }
 
@@ -239,8 +257,9 @@ class TradingService {
 
     //  Main price processing ---
     async processPrice(message) {
+        const symbol = message?.symbol;
         try {
-            const { symbol, indicators, h1Trend, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
+            const { indicators, h1Trend, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
 

@@ -386,7 +386,7 @@ class TradingBot {
 
                     logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
 
-                    // RISK.MAX_HOLD_TIME is in minutes (e.g., 15)
+                    // RISK.MAX_HOLD_TIME is in minutes (15)
                     if (minutesHeld >= RISK.MAX_HOLD_TIME) {
                         const dealId = pos?.position?.dealId ?? pos?.dealId;
                         if (!dealId) {

@@ -98,3 +98,4 @@ export async function analyzeTrend(symbol, getHistorical) {
         return { overallTrend: "unknown" };
     }
 }
+
