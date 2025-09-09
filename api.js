@@ -5,11 +5,6 @@ import logger from "./utils/logger.js";
 let cst, xsecurity;
 let sessionStartTime = Date.now();
 
-/**
- * Returns the headers required for API requests.
- * @param {boolean} includeContentType - Whether to include Content-Type header
- * @returns {object} Headers object
- */
 export const getHeaders = (includeContentType = false) => {
     const baseHeaders = {
         "X-SECURITY-TOKEN": xsecurity,
@@ -19,16 +14,7 @@ export const getHeaders = (includeContentType = false) => {
     return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
-/**
- * Starts a new session with the Capital.com API.
- * Stores session tokens for future requests.
- * @returns {Promise<object>} Session data
- */
 export const startSession = async () => {
-    /**
-     * Starts a new session with the Capital.com API.
-     * Stores session tokens for future requests.
-     */
     try {
         const response = await axios.post(
             `${API.BASE_URL}/session`,
@@ -65,10 +51,6 @@ export const startSession = async () => {
     }
 };
 
-/**
- * Pings the API to keep the session alive.
- * Logs the current session tokens for diagnostics.
- */
 export const pingSession = async () => {
     try {
         const response = await axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() });
@@ -81,10 +63,6 @@ export const pingSession = async () => {
     }
 };
 
-/**
- * Refreshes session tokens if more than 8.5 minutes have passed.
- * Ensures all API calls remain authenticated.
- */
 export const refreshSession = async () => {
     if (Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
     try {
@@ -99,11 +77,7 @@ export const refreshSession = async () => {
     }
 };
 
-// Get session details
 export const getSessionDetails = async () => {
-    /**
-     * Gets session details for diagnostics.
-     */
     try {
         const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
         logger.info(`[API] Session details: ${JSON.stringify(response.data)}`);
@@ -112,10 +86,6 @@ export const getSessionDetails = async () => {
     }
 };
 
-/**
- * Helper: Retry an API call after refreshing the session if a session error is detected.
- * Ensures robust error handling for all API requests.
- */
 async function withSessionRetry(fn, ...args) {
     try {
         return await fn(...args);
@@ -131,10 +101,6 @@ async function withSessionRetry(fn, ...args) {
     }
 }
 
-// Wrap main API calls with withSessionRetry
-/**
- * Fetches account information (balance, margin, etc.).
- */
 export const getAccountInfo = async () =>
     withSessionRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/accounts`, { headers: getHeaders() });

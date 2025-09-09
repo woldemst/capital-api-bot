@@ -33,16 +33,14 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal({ symbol, indicators, h1Trend, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
-        if (!m5Candles || !m15Candles || !h1Candles) {
-            logger.warn(`[generateSignal] Missing candles for ${symbol}`);
-            return { signal: null, reason: "missing_data" };
-        }
+    generateSignal({ symbol, indicators, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
+        if (!m5Candles || !m15Candles || !h1Candles) return { signal: null, reason: "missing_data" };
 
         const m5 = indicators.m5 || {};
+        const h1 = indicators.h1 || {};
 
         try {
-            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, m5?.ema50, {
+            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, h1?.ema20, h1?.ema30, {
                 ema20Prev: m5?.ema20Prev,
                 ema30Prev: m5?.ema30Prev,
                 ema50Prev: m5?.ema50Prev,
@@ -50,6 +48,9 @@ class TradingService {
                 ema50Series: m5?.ema50SeriesTail,
                 atr: m5?.atr,
                 macd: m5?.macd,
+                // Pass H1 EMA values for higher timeframe alignment
+                h1Ema20: indicators?.h1?.ema20,
+                h1Ema30: indicators?.h1?.ema30,
             });
             if (calmSignal) {
                 logger.info(`[CalmRiver] ${symbol}: ${calmSignal} signal`);
@@ -58,8 +59,10 @@ class TradingService {
                     m5Candles: ${m5Candles.length}
                     M5 EMA20: ${m5?.ema20}
                     M5 EMA30: ${m5?.ema30}
-                    M5 EMA50: ${m5?.ema50}
                     M5 MACD:  ${m5?.macd}
+
+                    H1 EMA20 ${h1.ema20}
+                    H1 EMA30 ${h1.ema30}
                 `);
 
                 return { signal: calmSignal, reason: "calm_river" };

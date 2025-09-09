@@ -38,7 +38,6 @@ export const SESSIONS = {
     },
 };
 
-
 export const RISK = {
     LEVERAGE: 30,
     PER_TRADE: 0.02, // 2% risk per trade
@@ -96,7 +95,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 10 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: false,
+    MODE: true,
 };
 
 export const PROD = {
