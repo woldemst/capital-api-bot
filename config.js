@@ -14,17 +14,22 @@ export const SESSIONS = {
     LONDON: {
         START: "08:00",
         END: "17:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF", "EURJPY"],
+        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+        // "EURJPY"
+        CRYPTO: ["BTC/USD", "ETH/USD"],
+        STOCKS: ["AAPL", "TSLA"],
+        ETFS: ["SPY", "QQQ"],
     },
     NY: {
         START: "13:00",
         END: "21:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "GOLD"],
+        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+        // "GOLD"
     },
     SYDNEY: {
         START: "22:00",
         END: "07:00",
-        SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
+        SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJ PY", "NZDJPY"],
     },
     TOKYO: {
         START: "00:00",
@@ -33,16 +38,6 @@ export const SESSIONS = {
     },
 };
 
-// London & New York (13:00 – 17:00 GMT) → 🔥 most volatile, most liquidity.
-
-// Tokyo & London (08:00 – 09:00 GMT) → short overlap, moderate moves.
-
-// Sydney & Tokyo (00:00 – 07:00 GMT) → smooth liquidity for AUD, NZD, JPY pairs.
-
-// Trading Configuration
-export const CRYPTO = ["BTC/USD", "ETH/USD"];
-export const STOCKS = ["AAPL", "TSLA"];
-export const ETFS = ["SPY", "QQQ"];
 
 export const RISK = {
     LEVERAGE: 30,
