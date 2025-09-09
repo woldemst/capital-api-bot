@@ -259,7 +259,7 @@ class TradingService {
     async processPrice(message) {
         const symbol = message?.symbol;
         try {
-            const { indicators, h1Trend, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
+            const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
 
@@ -298,7 +298,12 @@ class TradingService {
             await this.executeTrade(symbol, signal, bid, ask, m1Candles, indicators);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
-            logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);
+            // Check if the error message contains 'Not placed'
+            if (error.message.includes("Not placed")) {
+                logger.error(`[trading.js][Signal] Order placement failed for ${signal} signal on ${symbol}:`, error);
+            } else {
+                logger.error(`[trading.js][Signal] Failed to process ${signal} signal for ${symbol}:`, error);
+            }
         }
     }
 

@@ -234,7 +234,7 @@ class TradingBot {
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        const h1Trend = await analyzeTrend(symbol, getHistorical);
+        // const h1Trend = await analyzeTrend(symbol, getHistorical);
 
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
@@ -245,7 +245,6 @@ class TradingBot {
         await tradingService.processPrice({
             symbol,
             indicators,
-            h1Trend,
             h1Candles: h1Candles,
             m15Candles: m15Candles,
             m5Candles: m5Candles,

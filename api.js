@@ -254,7 +254,6 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
         const range = await getAllowedTPRange(symbol);
         const decimals = range.decimals || (symbol.includes("JPY") ? 3 : 5);
 
-
         logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${SL}, TP: ${TP}`);
         const position = {
             epic: symbol,
@@ -290,10 +289,16 @@ export async function gevtDealConfirmation(dealReference) {
     });
 }
 
+// In api.js, update getDealConfirmation method
 export async function getDealConfirmation(dealReference) {
     return await withSessionRetry(async () => {
         logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
         const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
+
+        if (!response.data || !response.data.status) {
+            throw new Error("Invalid deal confirmation data received");
+        }
+
         logger.info("[API] DealConfirmation", response.data);
         return response.data;
     });
