@@ -1,14 +1,15 @@
-export const checkCalmRiver = (m5Candles, ema20, ema30, h1Ema20, h1Ema30, opts = {}) => {
-    // Basic validation
+export const checkCalmRiver = (m5Candles, ema20, ema30, opts = {}) => {
     if (!m5Candles || !Array.isArray(m5Candles) || m5Candles.length < 30) return null;
-    if (typeof ema20 !== "number" || typeof ema30 !== "number") return null;
 
     const {
-        ema20Series = [],
-        ema30Series = [],
-        ema20Prev = null,
-        ema30Prev = null,
-        atr = null,
+        ema20Series,
+        ema30Series,
+        ema20Prev,
+        ema30Prev,
+        h1Ema20,
+        h1Ema30,
+        atr,
+        macd,
         maxInside = 3,
         lookbackInside = 10,
         crossLimit = 1,
@@ -103,27 +104,14 @@ export const checkCalmRiver = (m5Candles, ema20, ema30, h1Ema20, h1Ema30, opts =
     if (!triggered) return null;
 
     // 6) MACD histogram validation (if provided)
-    // Use opts.macd, expecting {histogram: number} or number
-    if (opts.macd) {
-        let macdHist = null;
-        if (typeof opts.macd === "object" && opts.macd !== null && typeof opts.macd.histogram === "number") {
-            macdHist = opts.macd.histogram;
-        } else if (typeof opts.macd === "number") {
-            macdHist = opts.macd;
-        }
-        if (typeof macdHist === "number") {
-            if (triggered === "BUY" && macdHist <= 0) return null;
-            if (triggered === "SELL" && macdHist >= 0) return null;
-        }
+    if (macd) {
+        if (triggered === "BUY" && macd.histogram <= 0) return null;
+        if (triggered === "SELL" && macd.histogram >= 0) return null;
     }
 
     // 7) Higher timeframe alignment: require H1 EMA20 > EMA30 for BUY, EMA20 < EMA30 for SELL
-    if (typeof h1Ema20 === "number" && typeof h1Ema30 === "number") {
-        console.log(h1Ema20, h1Ema30);
-        
-        if (triggered === "BUY" && !(h1Ema20 > h1Ema30)) return null;
-        if (triggered === "SELL" && !(h1Ema20 < h1Ema30)) return null;
-    }
+    if (triggered === "BUY" && !(h1Ema20 > h1Ema30)) return null;
+    if (triggered === "SELL" && !(h1Ema20 < h1Ema30)) return null;
 
     // Final sanity checks: avoid entries when ADX low or ATR tiny can be checked in opts (caller should pass m5Indicators)
     // return detected signal

@@ -40,12 +40,11 @@ class TradingService {
         const h1 = indicators.h1 || {};
 
         try {
-            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, h1?.ema20, h1?.ema30, {
+            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, {
+                ema20Series: m5?.ema20SeriesTail,
+                ema30Series: m5?.ema30SeriesTail,
                 ema20Prev: m5?.ema20Prev,
                 ema30Prev: m5?.ema30Prev,
-                ema50Prev: m5?.ema50Prev,
-                ema20Series: m5?.ema20SeriesTail,
-                ema50Series: m5?.ema50SeriesTail,
                 atr: m5?.atr,
                 macd: m5?.macd,
                 // Pass H1 EMA values for higher timeframe alignment

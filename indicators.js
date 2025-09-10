@@ -48,6 +48,7 @@ export async function calcIndicators(bars) {
         ema50Slope,
         // keep short tails to avoid heavy payloads
         ema20SeriesTail: ema20Series.slice(-30),
+        ema30SeriesTail: ema30Series.slice(-30),
         ema50SeriesTail: ema50Series.slice(-30),
         rsi: RSI.calculate({ period: 14, values: closes }).pop(),
         bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
