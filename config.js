@@ -16,26 +16,30 @@ export const SESSIONS = {
         END: "17:00",
         SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
         // "EURJPY"
-        CRYPTO: ["BTC/USD", "ETH/USD"],
-        STOCKS: ["AAPL", "TSLA"],
-        ETFS: ["SPY", "QQQ"],
+        STRATEGY: "checkPullbackHybrid"
     },
     NY: {
         START: "13:00",
         END: "21:00",
         SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
         // "GOLD"
+        STRATEGY: "checkBreakout"
     },
     SYDNEY: {
         START: "22:00",
         END: "07:00",
-        SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJ PY", "NZDJPY"],
+        SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
+        STRATEGY: "checkMeanReversion"
     },
     TOKYO: {
         START: "00:00",
         END: "09:00",
         SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
+        STRATEGY: "checkMeanReversion"
     },
+    CRYPTO: ["BTC/USD", "ETH/USD"],
+    STOCKS: ["AAPL", "TSLA"],
+    ETFS: ["SPY", "QQQ"],
 };
 
 export const RISK = {

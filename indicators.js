@@ -26,6 +26,14 @@ export async function calcIndicators(bars) {
     // Ensure we have enough data points
     const minLength = Math.max(20, bars.length);
 
+    // --- Add missing indicator series for strategies ---
+    // RSI series for Mean Reversion
+    const rsiSeries = RSI.calculate({ period: 14, values: closes });
+    // Bollinger Bands series for Mean Reversion
+    const bbSeries = BollingerBands.calculate({ period: 20, stdDev: 2, values: closes });
+    const bbUpperSeries = bbSeries.map(b => b.upper);
+    const bbLowerSeries = bbSeries.map(b => b.lower);
+
     return {
         maFast: SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop(),
         maSlow: SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop(),
@@ -50,8 +58,8 @@ export async function calcIndicators(bars) {
         ema20SeriesTail: ema20Series.slice(-30),
         ema30SeriesTail: ema30Series.slice(-30),
         ema50SeriesTail: ema50Series.slice(-30),
-        rsi: RSI.calculate({ period: 14, values: closes }).pop(),
-        bb: BollingerBands.calculate({ period: 20, stdDev: 2, values: closes }).pop(),
+        rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
+        bb: bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
         atr: ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop(),
         adaptiveRSI: (() => {
@@ -72,8 +80,13 @@ export async function calcIndicators(bars) {
             SimpleMAOscillator: false,
             SimpleMASignal: false,
         }).pop(),
+        // --- Added series for strategies ---
+        rsiSeries,
+        bbSeries,
+        bbUpperSeries,
+        bbLowerSeries,
     };
-}
+ }
 
 // Analyze trend on higher timeframes
 export async function analyzeTrend(symbol, getHistorical) {

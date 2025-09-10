@@ -170,6 +170,19 @@ class TradingBot {
         return combined;
     }
 
+    // Determine which strategy to use based on current session
+    getStrategyForSession() {
+        const now = new Date();
+        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+        // London 8:00-13:00 → Pullback Hybrid
+        if (hour >= 8 && hour < 13) return "checkPullbackHybrid";
+        // London+NY overlap (13:00-17:00) and NY only after London closes (17:00-21:00) → Breakout
+        if (hour >= 13 && hour < 21) return "checkBreakout";
+        // Tokyo (0:00-9:00) and Sydney (22:00-7:00) → Mean Reversion
+        if ((hour >= 22 && hour <= 23) || (hour >= 0 && hour < 9)) return "checkMeanReversion";
+        return "checkBreakout"; // default
+    }
+
     // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         const activeSymbols = this.getActiveSymbols();
@@ -221,7 +234,9 @@ class TradingBot {
         const last = m15Candles[m15Candles.length - 1];
 
         if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
-            logger.error(`[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`);
+            logger.error(
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
+            );
             return;
         }
 
@@ -236,6 +251,8 @@ class TradingBot {
 
         // const h1Trend = await analyzeTrend(symbol, getHistorical);
 
+        // Determine strategy for current session
+        const strategy = this.getStrategyForSession();
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
         const bid = marketDetails?.snapshot?.bid;
@@ -253,6 +270,7 @@ class TradingBot {
             ask,
             prev,
             last,
+            strategy,
         });
     }
 

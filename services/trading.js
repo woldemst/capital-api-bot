@@ -3,9 +3,9 @@ import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, get
 import logger from "../utils/logger.js";
 import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
-import { checkCalmRiver, greenRedCandlePattern } from "../strategies/strategies.js";
+import { greenRedCandlePattern, checkCalmRiver, checkBreakout, checkMeanReversion, checkPullbackHybrid } from "../strategies/strategies.js";
 
-const { PER_TRADE, MAX_POSITIONS, REQUIRED_SCORE } = RISK;
+const { PER_TRADE, MAX_POSITIONS } = RISK;
 
 class TradingService {
     constructor() {
@@ -33,43 +33,64 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal({ symbol, indicators, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
-        if (!m5Candles || !m15Candles || !h1Candles) return { signal: null, reason: "missing_data" };
-
-        const m5 = indicators.m5 || {};
-        const h1 = indicators.h1 || {};
+    generateSignal({ symbol, strategy, indicators, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
+        if (!symbol || !m1Candles || !m5Candles || !m15Candles || !h1Candles) return { signal: null, reason: "missing_data" };
 
         try {
-            const calmSignal = checkCalmRiver(m5Candles, m5?.ema20, m5?.ema30, {
-                ema20Series: m5?.ema20SeriesTail,
-                ema30Series: m5?.ema30SeriesTail,
-                ema20Prev: m5?.ema20Prev,
-                ema30Prev: m5?.ema30Prev,
-                atr: m5?.atr,
-                macd: m5?.macd,
-                // Pass H1 EMA values for higher timeframe alignment
-                h1Ema20: indicators?.h1?.ema20,
-                h1Ema30: indicators?.h1?.ema30,
-            });
-            if (calmSignal) {
-                logger.info(`[CalmRiver] ${symbol}: ${calmSignal} signal`);
+            let triggered;
 
-                logger.info(`[Signal Analysis] ${symbol}
+            switch (strategy) {
+                case "checkPullbackHybrid":
+                    triggered = checkPullbackHybrid(
+                        m5Candles,
+                        indicators.m5.ema20SeriesTail || [],
+                        indicators.m5.ema30SeriesTail || [],
+                        indicators.h1.emaFast,
+                        indicators.h1.emaSlow,
+                        indicators.m15.adx?.adx ?? 0,
+                        indicators.m15.macd
+                    );
+                    break;
+                case "checkMeanReversion":
+                    triggered = checkMeanReversion(
+                        m15Candles,
+                        indicators.m15.rsiSeries || [],
+                        indicators.m15.bbUpperSeries || [],
+                        indicators.m15.bbLowerSeries || [],
+                        indicators.m15.atr
+                    );
+                    break;
+                case "checkBreakout":
+                default:
+                    triggered = checkBreakout(
+                        m15Candles,
+                        indicators.h1.emaFast,
+                        indicators.h1.emaSlow,
+                        indicators.m15.emaFast,
+                        indicators.m15.emaSlow,
+                        indicators.m15.atr,
+                        indicators.m15.macd
+                    );
+            }
+
+            logger.info(`[${strategy}] [Signal Analysis] ${symbol}
                     m5Candles: ${m5Candles.length}
-                    M5 EMA20: ${m5?.ema20}
-                    M5 EMA30: ${m5?.ema30}
-                    M5 MACD:  ${m5?.macd}
+                    M5 EMA20: ${indicators.m5?.ema20}
+                    M5 EMA30: ${indicators.m5?.ema30}
+                    M5 MACD:  ${indicators.m5?.macd}
 
-                    H1 EMA20 ${h1.ema20}
-                    H1 EMA30 ${h1.ema30}
+                    H1 EMA20 ${indicators.h1.ema20}
+                    H1 EMA30 ${indicators.h1.ema30}
                 `);
 
-                return { signal: calmSignal, reason: "calm_river" };
+            if (triggered) {
+                logger.info(`${strategy} ${symbol}: ${triggered} signal`);
+                return { signal: triggered, reason: "signal" };
             }
 
             return { signal: null, reason: "no_signal" };
         } catch (e) {
-            logger.warn(`[CalmRiver] ${symbol}: check failed: ${e?.message || e}`);
+            logger.warn(`${strategy} ${symbol}: check failed: ${e?.message || e}`);
         }
     }
 
@@ -230,7 +251,9 @@ class TradingService {
             if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                 logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
             } else {
-                logger.info(`[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`);
+                logger.info(
+                    `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
+                );
 
                 try {
                     const logPath = getCurrentTradesLogPath();
