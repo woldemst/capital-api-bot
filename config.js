@@ -14,28 +14,26 @@ export const SESSIONS = {
     LONDON: {
         START: "08:00",
         END: "17:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-        // "EURJPY"
-        STRATEGY: "checkPullbackHybrid"
+        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"], // "EURJPY"
+        STRATEGY: "checkPullbackHybrid",
     },
     NY: {
         START: "13:00",
         END: "21:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
-        // "GOLD"
-        STRATEGY: "checkBreakout"
+        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"], // "GOLD"
+        STRATEGY: "checkBreakout",
     },
     SYDNEY: {
         START: "22:00",
         END: "07:00",
         SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
-        STRATEGY: "checkMeanReversion"
+        STRATEGY: "checkMeanReversion",
     },
     TOKYO: {
         START: "00:00",
         END: "09:00",
         SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
-        STRATEGY: "checkMeanReversion"
+        STRATEGY: "checkMeanReversion",
     },
     CRYPTO: ["BTC/USD", "ETH/USD"],
     STOCKS: ["AAPL", "TSLA"],

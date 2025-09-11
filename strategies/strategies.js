@@ -1,8 +1,55 @@
 // strategies.js
 import logger from "../utils/logger.js";
+import { RISK } from "../config.js";
 
-// ... rest of the file ...
-// New strategy: checkBreakout
+const { REQUIRED_SCORE } = RISK;
+// Helper: applyFilter
+export const applyFilter = (signal, filterName, candles, indicators) => {
+    console.log("applyFilter", signal, filterName);
+
+    if (!signal) return { signal: null, reason: "no_signal" };
+    let confirmed = true;
+    switch (filterName) {
+        case "checkBreakout":
+            confirmed = checkBreakout(
+                candles.m15,
+                indicators.h1.emaFast,
+                indicators.h1.emaSlow,
+                indicators.m15.emaFast,
+                indicators.m15.emaSlow,
+                indicators.m15.atr,
+                indicators.m15.macd
+            );
+            break;
+        case "checkMeanReversion":
+            confirmed = checkMeanReversion(
+                candles.m15,
+                indicators.m15.rsiSeries || [],
+                indicators.m15.bbUpperSeries || [],
+                indicators.m15.bbLowerSeries || [],
+                indicators.m15.atr,
+                signal
+            );
+            break;
+        case "checkPullbackHybrid":
+            confirmed = checkPullbackHybrid(
+                candles.m5,
+                indicators.m5.ema20SeriesTail || [],
+                indicators.m5.ema30SeriesTail || [],
+                indicators.h1.emaFast,
+                indicators.h1.emaSlow,
+                indicators.m15.adx?.adx ?? 0,
+                indicators.m15.macd
+            );
+            break;
+        default:
+            confirmed = true;
+    }
+
+    let trigger = confirmed ? signal : null;
+    return { signal: trigger, reason: "passed trough filter" };
+};
+
 export const checkBreakout = (m15Candles, h1EmaFast, h1EmaSlow, m15EmaFast, m15EmaSlow, atr, macd, opts = {}) => {
     logger.info(`m15Candles: ${m15Candles.length}
 
@@ -46,37 +93,29 @@ export const checkBreakout = (m15Candles, h1EmaFast, h1EmaSlow, m15EmaFast, m15E
 };
 
 // New strategy: checkMeanReversion
-export const checkMeanReversion = (m15Candles, rsiSeries, bbUpperSeries, bbLowerSeries, atr, opts = {}) => {
-    logger.info(`m15Candles: ${m15Candles.length}
-                M15 rsiSeries: ${rsiSeries}
-
-                M15 bbUpperSeries: ${bbUpperSeries}
-                M15 bbLowerSeries: ${bbLowerSeries}
-
-                M15 ATR:  ${atr}`);
+export const checkMeanReversion = (m15Candles, rsiSeries, bbUpperSeries, bbLowerSeries, atr, proposedSignal) => {
+    // logger.info(`m15Candles: ${m15Candles.length}
+    //     M15 rsiSeries: ${rsiSeries}
+    //     M15 bbUpperSeries: ${bbUpperSeries}
+    //     M15 bbLowerSeries: ${bbLowerSeries}
+    //     M15 ATR:  ${atr}`);
 
     if (!m15Candles || !Array.isArray(m15Candles) || m15Candles.length < 20) return null;
     if (!Array.isArray(rsiSeries) || !Array.isArray(bbUpperSeries) || !Array.isArray(bbLowerSeries)) return null;
     if (typeof atr !== "number") return null;
 
-    const n = m15Candles.length;
-    const lastIdx = n - 1;
-    const last = m15Candles[lastIdx];
-    const lastRsi = rsiSeries[lastIdx];
-    const lastUpper = bbUpperSeries[lastIdx];
-    const lastLower = bbLowerSeries[lastIdx];
-
+    const last = m15Candles[m15Candles.length - 1];
+    const lastRsi = rsiSeries.length ? rsiSeries[rsiSeries.length - 1] : null;
+    const lastUpper = bbUpperSeries.length ? bbUpperSeries[bbUpperSeries.length - 1] : null;
+    let lastLower = bbLowerSeries.length ? bbLowerSeries[bbLowerSeries.length - 1] : null;
+    lastLower.toFixed(5);
     if (lastRsi == null || lastUpper == null || lastLower == null) return null;
 
+    console.log(lastRsi, last.close, lastLower, atr);
     // Mean reversion buy: RSI oversold and price below lower Bollinger Band, ATR sufficient
-    if (lastRsi < 30 && last.close < lastLower && atr > 0) {
-        return "BUY";
-    }
-
+    if (proposedSignal === "BUY" && lastRsi < 30 && last.close < lastLower && atr > 0) return "BUY";
     // Mean reversion sell: RSI overbought and price above upper Bollinger Band, ATR sufficient
-    if (lastRsi > 70 && last.close > lastUpper && atr > 0) {
-        return "SELL";
-    }
+    if (proposedSignal === "SELL" && lastRsi > 70 && last.close > lastUpper && atr > 0) return "SELL";
 
     return null;
 };
@@ -169,26 +208,34 @@ export const greenRedCandlePattern = (trend, prev, last) => {
 };
 
 // scoring strategy
-export const scoring = (candles, indicators) => {
+export const checkScoring = (candles, indicators) => {
+    if (!candles || candles.length < 2) return { signal: null, reason: "not_enough_candles" };
+
+    const prev = candles[candles.length - 2];
+    const last = candles[candles.length - 1];
+
     const ema9h1 = indicators.h1.ema9;
     const emaFastH1 = indicators.h1.emaFast;
     const emaSlowH1 = indicators.h1.emaSlow;
     const fixedH1Adx = Number(indicators.h1.adx.adx.toFixed(2));
     const fixedM15Adx = Number(indicators.m15.adx.adx.toFixed(2));
     const fixedM15Atr = Number(indicators.m15.atr.toFixed(4));
+
+    // Pattern direction based on trend & candles
+    const h1Trend = emaFastH1 > emaSlowH1 ? "bullish" : "bearish";
     const patternDir = greenRedCandlePattern(h1Trend, prev, last);
-    const getClose = (c) => c.close;
-    const lastClose = getClose(last);
+
+    const lastClose = last.close;
 
     const buyConditions = [
-        patternDir === "bullish",
+        // patternDir === "bullish",
         emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
         ema9h1 != null ? lastClose > ema9h1 : false,
         indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram > 0 : false,
     ];
 
     const sellConditions = [
-        patternDir === "bearish",
+        // patternDir === "bearish",
         emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
         ema9h1 != null ? lastClose < ema9h1 : false,
         indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram < 0 : false,
@@ -197,15 +244,15 @@ export const scoring = (candles, indicators) => {
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
 
-    logger.info(`[Signal Analysis] ${symbol}
-        Pattern: ${patternDir}
+    // Pattern: ${patternDir}
+    logger.info(`
         RequiredScore: ${REQUIRED_SCORE}
         BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
         SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
         M15 MACD hist: ${indicators.m15.macd.histogram}
         M15 RSI: ${indicators.m15.rsi}
-        M15 ADX: ${fixedM15Adx}
         M15 ATR: ${fixedM15Atr}
+        M15 ADX: ${fixedM15Adx}
         H1 ADX: ${fixedH1Adx}
     `);
 
@@ -215,140 +262,14 @@ export const scoring = (candles, indicators) => {
     let signal = null;
     let reason = null;
 
-    if (longOK && !shortOK) {
-        signal = "BUY";
-    } else if (shortOK && !longOK) {
-        signal = "SELL";
-    } else if (longOK && shortOK) {
-        if (patternDir === "bullish") signal = "BUY";
-        else if (patternDir === "bearish") signal = "SELL";
-        else reason = "both_sides_ok";
-    } else {
-        reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
-    }
+    if (longOK && !shortOK) signal = "BUY";
+    else if (shortOK && !longOK) signal = "SELL";
+    else if (longOK && shortOK) reason = "both_sides_ok";
+    else reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
     if (!signal) return { signal: null, reason };
-    if (fixedM15Atr < 0.0005) {
-        logger.info(`[Signal] ${symbol}: ATR too low, skipping signal.`);
-        return { signal: null, reason: "low_volatility" };
-    }
+    // if (fixedM15Atr < 0.0005) {
+    //     logger.info(`ATR too low, skipping signal.`);
+    //     return { signal: null, reason: "low_volatility" };
+    // }
     return { signal, reason: "rules" };
-};
-export const checkCalmRiver = (m5Candles, ema20, ema30, opts = {}) => {
-    if (!m5Candles || !Array.isArray(m5Candles) || m5Candles.length < 30) return null;
-
-    const {
-        ema20Series,
-        ema30Series,
-        ema20Prev,
-        ema30Prev,
-        h1Ema20,
-        h1Ema30,
-        atr,
-        macd,
-        maxInside = 3,
-        lookbackInside = 10,
-        crossLimit = 1,
-        triggerWindow = 3,
-        minWidthAtrFrac = 0.3,
-        requireSlope = true,
-    } = opts;
-
-    const n = m5Candles.length;
-    const lastIdx = n - 1;
-    const last = m5Candles[lastIdx];
-    const lastClose = last.close;
-
-    // slope checks (optional)
-    const upSlope = typeof ema20Prev === "number" && typeof ema30Prev === "number" ? ema20 > ema20Prev && ema30 > ema30Prev : true;
-    const downSlope = typeof ema20Prev === "number" && typeof ema30Prev === "number" ? ema20 < ema20Prev && ema30 < ema30Prev : true;
-    if (requireSlope && !upSlope && !downSlope) return null;
-
-    // helper to read series values safely
-    const emaAt = (series, idx, fallback) => {
-        if (Array.isArray(series) && series.length === n) return series[idx];
-        return fallback;
-    };
-
-    // 1) Count closes inside the EMA channel in the last lookbackInside bars (excluding the last bar)
-    let insideCount = 0;
-    const start = Math.max(0, n - 1 - lookbackInside);
-    for (let i = start; i < lastIdx; i++) {
-        const e20 = emaAt(ema20Series, i, ema20);
-        const e30 = emaAt(ema30Series, i, ema30);
-        const hi = Math.max(e20, e30);
-        const lo = Math.min(e20, e30);
-        const c = m5Candles[i].close;
-        if (c > lo && c < hi) insideCount++;
-    }
-    if (insideCount > maxInside) return null; // too congested
-
-    // 2) Check EMA crosses over a recent window to ensure "calm river"
-    if (Array.isArray(ema20Series) && Array.isArray(ema30Series) && ema20Series.length === n && ema30Series.length === n) {
-        let crosses = 0;
-        const crossStart = Math.max(1, n - 20);
-        for (let i = crossStart; i < n; i++) {
-            const prevDiff = ema20Series[i - 1] - ema30Series[i - 1];
-            const currDiff = ema20Series[i] - ema30Series[i];
-            if ((prevDiff <= 0 && currDiff > 0) || (prevDiff >= 0 && currDiff < 0)) crosses++;
-        }
-        if (crosses > crossLimit) return null;
-    }
-
-    // 3) Channel width vs ATR
-    if (atr && Array.isArray(ema20Series) && Array.isArray(ema30Series) && ema20Series.length === n && ema30Series.length === n) {
-        const widthArr = [];
-        const wStart = Math.max(0, n - 10);
-        for (let i = wStart; i < n; i++) widthArr.push(Math.abs(ema20Series[i] - ema30Series[i]));
-        const avgWidth = widthArr.length ? widthArr.reduce((a, b) => a + b, 0) / widthArr.length : Math.abs(ema20 - ema30);
-        if (avgWidth < atr * minWidthAtrFrac) return null;
-    }
-
-    // 4) Pullback detection: within the 3 bars before current, price must have touched the band
-    let touchedIndex = -1;
-    for (let i = n - 4; i <= n - 2; i++) {
-        if (i < 0) continue;
-        const bar = m5Candles[i];
-        const e20 = emaAt(ema20Series, i, ema20);
-        const e30 = emaAt(ema30Series, i, ema30);
-        const hi = Math.max(e20, e30);
-        const lo = Math.min(e20, e30);
-        if (bar.low <= hi && bar.high >= lo) {
-            touchedIndex = i;
-            break;
-        }
-    }
-    if (touchedIndex === -1) return null;
-
-    // 5) Trigger: within triggerWindow bars after touch (including the candle after touch), a candle must close beyond EMA20
-    let triggered = null; // "BUY" or "SELL"
-    for (let k = 1; k <= triggerWindow; k++) {
-        const idx = touchedIndex + k;
-        if (idx <= 0 || idx >= n) continue;
-        const bar = m5Candles[idx];
-        const e20 = emaAt(ema20Series, idx, ema20);
-        if (!bar || typeof e20 !== "number") continue;
-        if (bar.close > e20 && ema20 > ema30 && upSlope) {
-            triggered = "BUY";
-            break;
-        }
-        if (bar.close < e20 && ema20 < ema30 && downSlope) {
-            triggered = "SELL";
-            break;
-        }
-    }
-    if (!triggered) return null;
-
-    // 6) MACD histogram validation (if provided)
-    if (macd) {
-        if (triggered === "BUY" && macd.histogram <= 0) return null;
-        if (triggered === "SELL" && macd.histogram >= 0) return null;
-    }
-
-    // 7) Higher timeframe alignment: require H1 EMA20 > EMA30 for BUY, EMA20 < EMA30 for SELL
-    if (triggered === "BUY" && !(h1Ema20 > h1Ema30)) return null;
-    if (triggered === "SELL" && !(h1Ema20 < h1Ema30)) return null;
-
-    // Final sanity checks: avoid entries when ADX low or ATR tiny can be checked in opts (caller should pass m5Indicators)
-    // return detected signal
-    return triggered;
 };

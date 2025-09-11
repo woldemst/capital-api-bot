@@ -3,7 +3,7 @@ import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, get
 import logger from "../utils/logger.js";
 import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
-import { greenRedCandlePattern, checkCalmRiver, checkBreakout, checkMeanReversion, checkPullbackHybrid } from "../strategies/strategies.js";
+import { applyFilter, checkScoring } from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
 
@@ -33,49 +33,15 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal({ symbol, strategy, indicators, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
+    generateSignal({ symbol, strategy, indicators, m1Candles, m5Candles, m15Candles, h1Candles }) {
         if (!symbol || !m1Candles || !m5Candles || !m15Candles || !h1Candles) return { signal: null, reason: "missing_data" };
 
         console.log(`Analysing ${symbol} with ${strategy}`);
         try {
-            let triggered;
-            switch (strategy) {
-                case "checkPullbackHybrid":
-                    triggered = checkPullbackHybrid(
-                        m5Candles,
-                        indicators.m5.ema20SeriesTail,
-                        indicators.m5.ema30SeriesTail,
-                        indicators.h1.emaFast,
-                        indicators.h1.emaSlow,
-                        indicators.m15.adx?.adx,
-                        indicators.m15.macd
-                    );
-                    break;
-                case "checkMeanReversion":
-                    triggered = checkMeanReversion(
-                        m15Candles,
-                        indicators.m15.rsiSeries,
-                        indicators.m15.bbUpperSeries,
-                        indicators.m15.bbLowerSeries,
-                        indicators.m15.atr
-                    );
-                    break;
-                case "checkBreakout":
-                default:
-                    triggered = checkBreakout(
-                        m15Candles,
-                        indicators.h1.emaFast,
-                        indicators.h1.emaSlow,
-                        indicators.m15.emaFast,
-                        indicators.m15.emaSlow,
-                        indicators.m15.atr,
-                        indicators.m15.macd
-                    );
-            }
-
+            // Always use scoring as main strategy
+            let triggered = checkScoring(m15Candles, indicators);
             if (triggered) {
-                logger.info(`${strategy} ${symbol}: ${triggered} signal`);
-                return { signal: triggered, reason: "signal" };
+                triggered = applyFilter(triggered, strategy, { m1: m1Candles, m5: m5Candles, m15: m15Candles, h1: h1Candles }, indicators);
             }
 
             return { signal: null, reason: "no_signal" };
