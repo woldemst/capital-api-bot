@@ -253,6 +253,7 @@ class TradingBot {
 
         // Determine strategy for current session
         const strategy = this.getStrategyForSession();
+        
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
         const bid = marketDetails?.snapshot?.bid;

@@ -36,27 +36,27 @@ class TradingService {
     generateSignal({ symbol, strategy, indicators, m1Candles, m5Candles, m15Candles, h1Candles, prev, last }) {
         if (!symbol || !m1Candles || !m5Candles || !m15Candles || !h1Candles) return { signal: null, reason: "missing_data" };
 
+        console.log(`Analysing ${symbol} with ${strategy}`);
         try {
             let triggered;
-
             switch (strategy) {
                 case "checkPullbackHybrid":
                     triggered = checkPullbackHybrid(
                         m5Candles,
-                        indicators.m5.ema20SeriesTail || [],
-                        indicators.m5.ema30SeriesTail || [],
+                        indicators.m5.ema20SeriesTail,
+                        indicators.m5.ema30SeriesTail,
                         indicators.h1.emaFast,
                         indicators.h1.emaSlow,
-                        indicators.m15.adx?.adx ?? 0,
+                        indicators.m15.adx?.adx,
                         indicators.m15.macd
                     );
                     break;
                 case "checkMeanReversion":
                     triggered = checkMeanReversion(
                         m15Candles,
-                        indicators.m15.rsiSeries || [],
-                        indicators.m15.bbUpperSeries || [],
-                        indicators.m15.bbLowerSeries || [],
+                        indicators.m15.rsiSeries,
+                        indicators.m15.bbUpperSeries,
+                        indicators.m15.bbLowerSeries,
                         indicators.m15.atr
                     );
                     break;
@@ -72,16 +72,6 @@ class TradingService {
                         indicators.m15.macd
                     );
             }
-
-            logger.info(`[${strategy}] [Signal Analysis] ${symbol}
-                    m5Candles: ${m5Candles.length}
-                    M5 EMA20: ${indicators.m5?.ema20}
-                    M5 EMA30: ${indicators.m5?.ema30}
-                    M5 MACD:  ${indicators.m5?.macd}
-
-                    H1 EMA20 ${indicators.h1.ema20}
-                    H1 EMA30 ${indicators.h1.ema30}
-                `);
 
             if (triggered) {
                 logger.info(`${strategy} ${symbol}: ${triggered} signal`);
@@ -347,7 +337,15 @@ class TradingService {
         const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
         if (!shouldUpdate) return;
         try {
-            await updateTrailingStop(dealId, currentPrice, entryPrice, takeProfit, direction.toUpperCase(), position.symbol || position.market, position.isTrailing || false);
+            await updateTrailingStop(
+                dealId,
+                currentPrice,
+                entryPrice,
+                takeProfit,
+                direction.toUpperCase(),
+                position.symbol || position.market,
+                position.isTrailing || false
+            );
             logger.info(`[TrailingStop] Updated trailing stop for ${dealId}: ${newStop}`);
         } catch (error) {
             logger.error(`[TrailingStop] Failed to update trailing stop for ${dealId}:`, error);
