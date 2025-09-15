@@ -3,7 +3,7 @@ import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, get
 import logger from "../utils/logger.js";
 import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
-import { applyFilter, checkScoring } from "../strategies/strategies.js";
+import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
 
@@ -38,15 +38,17 @@ class TradingService {
 
         console.log(`Analysing ${symbol} with ${strategy}`);
         try {
-            // Always use scoring as main strategy
-            let triggered = checkScoring(m15Candles, indicators);
-            if (triggered) {
-                triggered = applyFilter(triggered, strategy, { m1: m1Candles, m5: m5Candles, m15: m15Candles, h1: h1Candles }, indicators);
-            }
+            // Use scoring as main strategy
+            const scoringResult = checkScoring(m15Candles, indicators);
+            if (!scoringResult.signal) return scoringResult;
 
-            return { signal: null, reason: "no_signal" };
+            // Apply session-specific filter
+            const filterResult = applyFilter(scoringResult.signal, strategy, { m1: m1Candles, m5: m5Candles, m15: m15Candles, h1: h1Candles }, indicators);
+
+            return filterResult;
         } catch (e) {
             logger.warn(`${strategy} ${symbol}: check failed: ${e?.message || e}`);
+            return { signal: null, reason: "error" };
         }
     }
 
@@ -240,10 +242,10 @@ class TradingService {
     async processPrice(message) {
         const symbol = message?.symbol;
         try {
-            const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last } = message;
+            const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last, strategy } = message;
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
-
+            const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };
             //TODO
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
@@ -260,7 +262,7 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, reason } = this.generateSignal(message);
+            const { signal, reason } = Strategy.getSignal({ symbol, strategy, indicators, candles });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
