@@ -33,24 +33,6 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-    generateSignal({ symbol, strategy, indicators, m1Candles, m5Candles, m15Candles, h1Candles }) {
-        if (!symbol || !m1Candles || !m5Candles || !m15Candles || !h1Candles) return { signal: null, reason: "missing_data" };
-
-        console.log(`Analysing ${symbol} with ${strategy}`);
-        try {
-            // Use scoring as main strategy
-            const scoringResult = checkScoring(m15Candles, indicators);
-            if (!scoringResult.signal) return scoringResult;
-
-            // Apply session-specific filter
-            const filterResult = applyFilter(scoringResult.signal, strategy, { m1: m1Candles, m5: m5Candles, m15: m15Candles, h1: h1Candles }, indicators);
-
-            return filterResult;
-        } catch (e) {
-            logger.warn(`${strategy} ${symbol}: check failed: ${e?.message || e}`);
-            return { signal: null, reason: "error" };
-        }
-    }
 
     // --- Price rounding ---
     roundPrice(price, symbol, decimals) {

@@ -52,7 +52,7 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 2,
+    REQUIRED_SCORE: 3,
 };
 
 // Technical Analysis Configuration
