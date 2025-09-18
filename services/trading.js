@@ -224,7 +224,7 @@ class TradingService {
     async processPrice(message) {
         const symbol = message?.symbol;
         try {
-            const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, prev, last, strategy } = message;
+            const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, strategy } = message;
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
             const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };

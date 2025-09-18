@@ -230,9 +230,6 @@ class TradingBot {
         const m5Candles = this.candleHistory[symbol].M5;
         const m1Candles = this.candleHistory[symbol].M1;
 
-        const prev = m15Candles[m15Candles.length - 2];
-        const last = m15Candles[m15Candles.length - 1];
-
         if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(
                 `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
@@ -267,11 +264,9 @@ class TradingBot {
             m15Candles: m15Candles,
             m5Candles: m5Candles,
             m1Candles: m1Candles,
+            strategy,
             bid,
             ask,
-            prev,
-            last,
-            strategy,
         });
     }
 
