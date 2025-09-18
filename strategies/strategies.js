@@ -26,12 +26,27 @@ class Strategy {
             // Always start with scoring
             const scoringResult = this.checkScoring(scoringCandles, indicators);
             if (!scoringResult.signal) return scoringResult;
-
-            // Apply session-specific filter
+            
+            // run the filter
             const filterResult = this.applyFilter(scoringResult.signal, strategy, candles, indicators);
-            if (!filterResult) return { signal: null, reason: "error" };
 
-            return filterResult;
+            // if filter did not confirm, return a clear result with scores for debugging
+            if (!filterResult || !filterResult.signal) {
+                return {
+                    signal: null,
+                    reason: filterResult?.reason || "filter_failed",
+                    buyScore: scoringResult.buyScore,
+                    sellScore: scoringResult.sellScore,
+                };
+            }
+
+            // all good: pass signal upwards and include scores
+            return {
+                signal: filterResult.signal,
+                reason: filterResult.reason || "passed_filter",
+                buyScore: scoringResult.buyScore,
+                sellScore: scoringResult.sellScore,
+            };
         } catch (e) {
             logger.warn(`${strategy} ${symbol}: check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
@@ -41,9 +56,10 @@ class Strategy {
     applyFilter(signal, filterName, candles, indicators) {
         if (!signal) return { signal: null, reason: "no_signal" };
         let confirmed = true;
+        let res = null;
         switch (filterName) {
             case "checkBreakout":
-                confirmed = this.checkBreakout(
+                res = this.checkBreakout(
                     candles.m15,
                     indicators.h1.emaFast,
                     indicators.h1.emaSlow,
@@ -54,7 +70,7 @@ class Strategy {
                 );
                 break;
             case "checkMeanReversion":
-                confirmed = this.checkMeanReversion(
+                res = this.checkMeanReversion(
                     candles.m15,
                     indicators.m15.rsiSeries,
                     indicators.m15.bbUpperSeries,
@@ -64,7 +80,7 @@ class Strategy {
                 );
                 break;
             case "checkPullbackHybrid":
-                confirmed = this.checkPullbackHybrid(
+                res = this.checkPullbackHybrid(
                     candles.m5,
                     indicators.m5.ema20SeriesTail,
                     indicators.m5.ema30SeriesTail,
@@ -75,10 +91,21 @@ class Strategy {
                 );
                 break;
             default:
-                confirmed = true;
+                res = true;
         }
-        let trigger = confirmed ? signal : null;
-        return { signal: trigger, reason: "passed_trough_filter" };
+        // Normalize result: require either boolean true OR the same direction as `signal`
+        if (res === true) {
+            return { signal, reason: "filter_confirmed_boolean" };
+        }
+        if (typeof res === "string") {
+            if (res === signal) {
+                return { signal, reason: "filter_confirmed_direction" };
+            } else {
+                return { signal: null, reason: `filter_conflict: filterReturned=${res} expected=${signal}` };
+            }
+        }
+        // anything else (null/false) -> not confirmed
+        return { signal: null, reason: "filter_failed" };
     }
 
     checkBreakout(m15Candles, h1EmaFast, h1EmaSlow, m15EmaFast, m15EmaSlow, atr, macd) {
@@ -243,8 +270,8 @@ class Strategy {
         // M15 ADX: ${fixedM15Adx}
         // H1 ADX: ${fixedH1Adx}
 
-        const longOK = buyScore >= REQUIRED_SCORE && fixedH1Adx > 15.0;
-        const shortOK = sellScore >= REQUIRED_SCORE && fixedM15Adx > 15.0;
+        const longOK = buyScore >= REQUIRED_SCORE && fixedH1Adx > 10.0;
+        const shortOK = sellScore >= REQUIRED_SCORE && fixedM15Adx > 10.0;
 
         let signal = null;
         let reason = null;
