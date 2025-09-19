@@ -228,6 +228,7 @@ class TradingService {
 
             if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
             const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };
+            
             //TODO
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {

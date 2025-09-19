@@ -11,42 +11,37 @@ class Strategy {
         if (!symbol || !candles || !indicators) return { signal: null, reason: "missing_data" };
 
         try {
-            let scoringCandles;
-            switch (strategy) {
-                case "checkPullbackHybrid":
-                    scoringCandles = candles.m5;
-                    break;
-                case "checkBreakout":
-                case "checkMeanReversion":
-                default:
-                    scoringCandles = candles.m15;
-                    break;
-            }
-
-            // Always start with scoring
+            const scoringCandles = candles.m15;
             const scoringResult = this.checkScoring(scoringCandles, indicators);
-            if (!scoringResult.signal) return scoringResult;
-            
-            // run the filter
-            const filterResult = this.applyFilter(scoringResult.signal, strategy, candles, indicators);
 
-            // if filter did not confirm, return a clear result with scores for debugging
-            if (!filterResult || !filterResult.signal) {
-                return {
-                    signal: null,
-                    reason: filterResult?.reason || "filter_failed",
-                    buyScore: scoringResult.buyScore,
-                    sellScore: scoringResult.sellScore,
-                };
+            if (!scoringResult.signal) {
+                return { signal: null, reason: scoringResult.reason || "scoring_failed" };
             }
 
-            // all good: pass signal upwards and include scores
-            return {
-                signal: filterResult.signal,
-                reason: filterResult.reason || "passed_filter",
-                buyScore: scoringResult.buyScore,
-                sellScore: scoringResult.sellScore,
-            };
+            // 2. Green-Red Candle Pattern (always use H1 candles)
+            const h1Candles = candles.h1;
+            console.log(`h1Candles length: ${h1Candles?.length}`);
+
+            if (!h1Candles || h1Candles.length < 2) {
+                return { signal: null, reason: "not_enough_h1_candles" };
+            }
+
+            const prev = h1Candles[h1Candles.length - 2];
+            const last = h1Candles[h1Candles.length - 1];
+            const h1Trend = indicators.h1?.trend || null;
+
+            const patternDir = this.greenRedCandlePattern(h1Trend, prev, last);
+
+            if (!patternDir) {
+                return { signal: null, reason: "no_green_red_pattern" };
+            }
+
+            // Only return signal if scoring and pattern agree
+            if (scoringResult.signal === patternDir.toUpperCase()) {
+                return { signal: scoringResult.signal, reason: "scoring_and_pattern_agree" };
+            } else {
+                return { signal: null, reason: `scoring=${scoringResult.signal}, pattern=${patternDir}` };
+            }
         } catch (e) {
             logger.warn(`${strategy} ${symbol}: check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
@@ -55,7 +50,6 @@ class Strategy {
 
     applyFilter(signal, filterName, candles, indicators) {
         if (!signal) return { signal: null, reason: "no_signal" };
-        let confirmed = true;
         let res = null;
         switch (filterName) {
             case "checkBreakout":
@@ -163,6 +157,9 @@ class Strategy {
     }
 
     checkPullbackHybrid(m5Candles, ema20Series, ema30Series, h1EmaFast, h1EmaSlow, m15Adx, macd) {
+        console.log(
+            `m5Candles.length: ${m5Candles.length}, ema20Series.length: ${ema20Series.length}, ema30Series.length: ${ema30Series.length}, h1EmaFast: ${h1EmaFast}, h1EmaSlow: ${h1EmaSlow}, m15Adx: ${m15Adx}, macd: ${macd.histogram}`
+        );
         if (!m5Candles || !Array.isArray(m5Candles) || m5Candles.length < 10) return null;
         if (!Array.isArray(ema20Series) || !Array.isArray(ema30Series)) return null;
         if (typeof h1EmaFast !== "number" || typeof h1EmaSlow !== "number") return null;
@@ -174,11 +171,17 @@ class Strategy {
 
         const bullishTrend = h1EmaFast > h1EmaSlow;
         const bearishTrend = h1EmaFast < h1EmaSlow;
-        if (!bullishTrend && !bearishTrend) return null;
-        if (m15Adx < 20) return null;
+        if (!bullishTrend && !bearishTrend) {
+            logger.info(`[PullbackHybrid] No clear trend: h1EmaFast=${h1EmaFast}, h1EmaSlow=${h1EmaSlow}`);
+            return null;
+        }
+        if (m15Adx < 20) {
+            logger.info(`[PullbackHybrid] ADX too low: ${m15Adx}`);
+            return null;
+        }
 
         let touchedIndex = -1;
-        for (let i = n - 5; i <= n - 2; i++) {
+        for (let i = n - 60; i <= n - 2; i++) {
             if (i < 0) continue;
             const bar = m5Candles[i];
             const e20 = ema20Series[i];
@@ -188,10 +191,14 @@ class Strategy {
             const lo = Math.min(e20, e30);
             if (bar.low <= hi && bar.high >= lo) {
                 touchedIndex = i;
+                logger.info(`[PullbackHybrid] EMA touch at index ${i}: bar.low=${bar.low}, bar.high=${bar.high}, hi=${hi}, lo=${lo}`);
                 break;
             }
         }
-        if (touchedIndex === -1) return null;
+        if (touchedIndex === -1) {
+            logger.info(`[PullbackHybrid] No EMA touch found in recent candles`);
+            return null;
+        }
 
         let triggered = null;
         for (let k = 1; k <= 3; k++) {
@@ -202,14 +209,16 @@ class Strategy {
             if (!bar || typeof e20 !== "number") continue;
             if (bar.close > e20 && bullishTrend && macd.histogram > 0) {
                 triggered = "BUY";
+                logger.info(`[PullbackHybrid] BUY triggered at index ${idx}: bar.close=${bar.close}, e20=${e20}, MACD=${macd.histogram}`);
                 break;
             }
             if (bar.close < e20 && bearishTrend && macd.histogram < 0) {
                 triggered = "SELL";
+                logger.info(`[PullbackHybrid] SELL triggered at index ${idx}: bar.close=${bar.close}, e20=${e20}, MACD=${macd.histogram}`);
                 break;
             }
         }
-        if (!triggered) return null;
+        if (!triggered) logger.info(`[PullbackHybrid] No trigger found after EMA touch`);
         return triggered;
     }
 
@@ -259,16 +268,17 @@ class Strategy {
         ];
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
+
         logger.info(`
             RequiredScore: ${REQUIRED_SCORE}
             BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
             SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
+            M15 MACD hist: ${indicators.m15.macd.histogram}
+            M15 RSI: ${indicators.m15.rsi}
+            M15 ATR: ${fixedM15Atr}
+            M15 ADX: ${fixedM15Adx}
+            H1 ADX: ${fixedH1Adx}
             `);
-        // M15 MACD hist: ${indicators.m15.macd.histogram}
-        // M15 RSI: ${indicators.m15.rsi}
-        // M15 ATR: ${fixedM15Atr}
-        // M15 ADX: ${fixedM15Adx}
-        // H1 ADX: ${fixedH1Adx}
 
         const longOK = buyScore >= REQUIRED_SCORE && fixedH1Adx > 10.0;
         const shortOK = sellScore >= REQUIRED_SCORE && fixedM15Adx > 10.0;
