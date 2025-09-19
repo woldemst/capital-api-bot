@@ -2,7 +2,7 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositi
 import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import { calcIndicators, analyzeTrend } from "./indicators.js";
+import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
 

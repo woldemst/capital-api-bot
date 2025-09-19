@@ -11,39 +11,56 @@ class Strategy {
         if (!symbol || !candles || !indicators) return { signal: null, reason: "missing_data" };
 
         try {
-            const scoringCandles = candles.m15;
-            const scoringResult = this.checkScoring(scoringCandles, indicators);
+            let m15Pattern = null; // Define these variables at the start
+            let m1Pattern = null;
 
-            if (!scoringResult.signal) {
-                return { signal: null, reason: scoringResult.reason || "scoring_failed" };
+            // 1. Try M15 pattern with H1 trend first
+            const m15Candles = candles.m15;
+            const h1Trend = indicators.h1.trend;
+            logger.info(`${symbol} H1 Trend: ${h1Trend}`);
+
+            // Check M15 scoring first
+            const m15ScoringResult = this.checkScoring(m15Candles, indicators, "M15");
+
+            if (m15ScoringResult.signal) {
+                m15Pattern = this.greenRedCandlePattern(h1Trend, m15Candles[m15Candles.length - 2], m15Candles[m15Candles.length - 1]);
+
+                if (m15Pattern && m15Pattern.toUpperCase() === m15ScoringResult.signal) {
+                    return {
+                        signal: m15ScoringResult.signal,
+                        reason: "m15_pattern_and_score_confirmed",
+                    };
+                }
             }
 
-            // 2. Green-Red Candle Pattern (always use H1 candles)
-            const h1Candles = candles.h1;
-            console.log(`h1Candles length: ${h1Candles?.length}`);
+            // 2. If M15 didn't work, try M1 pattern with M5 trend
+            const m1Candles = candles.m1;
+            const m5Trend = indicators.m5.trend;
+            logger.info(`${symbol} M5 Trend: ${m5Trend}`);
 
-            if (!h1Candles || h1Candles.length < 2) {
-                return { signal: null, reason: "not_enough_h1_candles" };
+            // Check M1 scoring
+            const m1ScoringResult = this.checkScoring(m1Candles, indicators, "M1");
+
+            if (m1ScoringResult.signal) {
+                m1Pattern = this.greenRedCandlePattern(m5Trend, m1Candles[m1Candles.length - 2], m1Candles[m1Candles.length - 1]);
+
+                if (m1Pattern && m1Pattern.toUpperCase() === m1ScoringResult.signal) {
+                    return {
+                        signal: m1ScoringResult.signal,
+                        reason: "m1_pattern_and_score_confirmed",
+                    };
+                }
             }
 
-            const prev = h1Candles[h1Candles.length - 2];
-            const last = h1Candles[h1Candles.length - 1];
-            const h1Trend = indicators.h1?.trend || null;
-
-            const patternDir = this.greenRedCandlePattern(h1Trend, prev, last);
-
-            if (!patternDir) {
-                return { signal: null, reason: "no_green_red_pattern" };
-            }
-
-            // Only return signal if scoring and pattern agree
-            if (scoringResult.signal === patternDir.toUpperCase()) {
-                return { signal: scoringResult.signal, reason: "scoring_and_pattern_agree" };
-            } else {
-                return { signal: null, reason: `scoring=${scoringResult.signal}, pattern=${patternDir}` };
-            }
+            // 3. No pattern confirmed the scoring
+            return {
+                signal: null,
+                reason:
+                    `m15_score=${m15ScoringResult.signal}, m15_pattern=${m15Pattern || "none"}, ` +
+                    `m1_score=${m1ScoringResult.signal}, m1_pattern=${m1Pattern || "none"}`,
+            };
         } catch (e) {
-            logger.warn(`${strategy} ${symbol}: check failed: ${e?.message || e}`);
+            logger.warn(`${symbol}: Signal check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
         }
     }
@@ -223,65 +240,88 @@ class Strategy {
     }
 
     greenRedCandlePattern(trend, prev, last) {
-        if (!prev || !last || !trend) return false;
-        const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
-        const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
-        if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) {
+        if (!prev || !last || !trend) {
+            logger.info(`[Pattern] Missing data: prev=${!!prev}, last=${!!last}, trend=${trend}`);
             return false;
         }
+
+        // Support both {open, close} and {o, c}
+        const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
+        const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
+
+        if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) {
+            logger.info(`[Pattern] Null values in candles`);
+            return false;
+        }
+
         const isBullish = (c) => getClose(c) > getOpen(c);
         const isBearish = (c) => getClose(c) < getOpen(c);
+
+        // Log actual candle properties
+        logger.info(`[Pattern] Previous candle: ${isBullish(prev) ? 'bullish' : 'bearish'} (O:${getOpen(prev)} C:${getClose(prev)})`);
+        logger.info(`[Pattern] Last candle: ${isBullish(last) ? 'bullish' : 'bearish'} (O:${getOpen(last)} C:${getClose(last)})`);
+
         const trendDirection = String(trend).toLowerCase();
+
+        // Pattern logic with detailed logging
         if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
-            return "bullish";
+            logger.info(`[Pattern] Found bullish pattern: red->green in bullish trend`);
+            return "BUY";  // Changed from "bullish" to "BUY"
         }
         if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) {
-            return "bearish";
+            logger.info(`[Pattern] Found bearish pattern: green->red in bearish trend`);
+            return "SELL";  // Changed from "bearish" to "SELL"
         }
+
+        logger.info(`[Pattern] No valid pattern found for ${trendDirection} trend`);
         return false;
     }
 
-    checkScoring(candles, indicators) {
+    checkScoring(candles, indicators, timeframe = "M15") {
         if (!candles || candles.length < 2) return { signal: null, reason: "not_enough_candles" };
 
         const prev = candles[candles.length - 2];
         const last = candles[candles.length - 1];
-        // const patternDir = this.greenRedCandlePattern(h1Trend, prev, last);
 
-        const ema9h1 = indicators.h1.ema9;
-        const emaFastH1 = indicators.h1.emaFast;
-        const emaSlowH1 = indicators.h1.emaSlow;
-        const fixedH1Adx = Number(indicators.h1.adx.adx.toFixed(2));
-        const fixedM15Adx = Number(indicators.m15.adx.adx.toFixed(2));
-        const fixedM15Atr = Number(indicators.m15.atr.toFixed(4));
+        // Select indicators based on timeframe
+        const trendTimeframe = timeframe === "M15" ? "h1" : "m5";
+        const priceTimeframe = timeframe.toLowerCase();
+
+        const ema9 = indicators[trendTimeframe].ema9;
+        const emaFast = indicators[trendTimeframe].emaFast;
+        const emaSlow = indicators[trendTimeframe].emaSlow;
+        const fixedAdx = Number(indicators[trendTimeframe].adx.adx.toFixed(2));
+        const fixedAtr = Number(indicators[priceTimeframe].atr.toFixed(4));
         const lastClose = last.close;
 
         const buyConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : false,
-            ema9h1 != null ? lastClose > ema9h1 : false,
-            indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram > 0 : false,
+            emaFast != null && emaSlow != null ? emaFast > emaSlow : false,
+            ema9 != null ? lastClose > ema9 : false,
+            indicators[priceTimeframe].macd.histogram != null ? indicators[priceTimeframe].macd.histogram > 0 : false,
         ];
+
         const sellConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : false,
-            ema9h1 != null ? lastClose < ema9h1 : false,
-            indicators.m15.macd.histogram != null ? indicators.m15.macd.histogram < 0 : false,
+            emaFast != null && emaSlow != null ? emaFast < emaSlow : false,
+            ema9 != null ? lastClose < ema9 : false,
+            indicators[priceTimeframe].macd.histogram != null ? indicators[priceTimeframe].macd.histogram < 0 : false,
         ];
+
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
         logger.info(`
+            Timeframe: ${timeframe} with ${trendTimeframe.toUpperCase()} trend
             RequiredScore: ${REQUIRED_SCORE}
             BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
             SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-            M15 MACD hist: ${indicators.m15.macd.histogram}
-            M15 RSI: ${indicators.m15.rsi}
-            M15 ATR: ${fixedM15Atr}
-            M15 ADX: ${fixedM15Adx}
-            H1 ADX: ${fixedH1Adx}
-            `);
+            ${priceTimeframe.toUpperCase()} MACD hist: ${indicators[priceTimeframe].macd.histogram}
+            ${priceTimeframe.toUpperCase()} RSI: ${indicators[priceTimeframe].rsi}
+            ${priceTimeframe.toUpperCase()} ATR: ${fixedAtr}
+            ${trendTimeframe.toUpperCase()} ADX: ${fixedAdx}
+        `);
 
-        const longOK = buyScore >= REQUIRED_SCORE && fixedH1Adx > 10.0;
-        const shortOK = sellScore >= REQUIRED_SCORE && fixedM15Adx > 10.0;
+        const longOK = buyScore >= REQUIRED_SCORE && fixedAdx > 10.0;
+        const shortOK = sellScore >= REQUIRED_SCORE && fixedAdx > 10.0;
 
         let signal = null;
         let reason = null;
@@ -290,6 +330,7 @@ class Strategy {
         else if (shortOK && !longOK) signal = "SELL";
         else if (longOK && shortOK) reason = "both_sides_ok";
         else reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
+
         if (!signal) return { signal: null, reason };
         return { signal, reason: "rules" };
     }

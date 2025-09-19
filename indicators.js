@@ -1,8 +1,9 @@
-import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR, ema } from "technicalindicators";
+import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
+import logger from "./utils/logger.js";
 
-export async function calcIndicators(bars) {
+export async function calcIndicators(bars, symbol, timeframe) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
-        return {};
+        return null;
     }
 
     const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
@@ -31,12 +32,29 @@ export async function calcIndicators(bars) {
     const rsiSeries = RSI.calculate({ period: 14, values: closes });
     // Bollinger Bands series for Mean Reversion
     const bbSeries = BollingerBands.calculate({ period: 20, stdDev: 2, values: closes });
-    const bbUpperSeries = bbSeries.map(b => b.upper);
-    const bbLowerSeries = bbSeries.map(b => b.lower);
+    const bbUpperSeries = bbSeries.map((b) => b.upper);
+    const bbLowerSeries = bbSeries.map((b) => b.lower);
+
+    // Calculate EMAs for trend
+    const emaFastCurrent = EMA.calculate({ period: 12, values: closes }).pop();
+    const emaSlowCurrent = EMA.calculate({ period: 26, values: closes }).pop();
+    const emaFastPrev = EMA.calculate({ period: 12, values: closes.slice(0, -1) }).pop();
+
+    // Calculate ADX
+    const adxResult = ADX.calculate({
+        period: 14,
+        close: closes,
+        high: highs,
+        low: lows,
+    });
+    const currentADX = adxResult[adxResult.length - 1];
+
+    const maFast = SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop();
+    const maSlow = SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop();
 
     return {
-        maFast: SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop(),
-        maSlow: SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop(),
+        maFast,
+        maSlow,
         emaFast: EMA.calculate({ period: 12, values: closes }).pop(),
         emaSlow: EMA.calculate({ period: 26, values: closes }).pop(),
         ema5: EMA.calculate({ period: 5, values: closes }).pop(),
@@ -85,31 +103,13 @@ export async function calcIndicators(bars) {
         bbSeries,
         bbUpperSeries,
         bbLowerSeries,
+        trend: maFast > maSlow ? "bullish" : maFast < maSlow ? "bearish" : "neutral",
+        trendStrength: currentADX,
+        trendDetails: {
+            adx: currentADX,
+            emaFast: emaFastCurrent,
+            emaSlow: emaSlowCurrent,
+            emaFastSlope: emaFastCurrent - emaFastPrev,
+        },
     };
- }
-
-// Analyze trend on higher timeframes
-export async function analyzeTrend(symbol, getHistorical) {
-    try {
-        const h1Data = await getHistorical(symbol, "HOUR", 70);
-
-        if (!h1Data?.prices) {
-            console.error("Missing prices in historical data");
-            return { overallTrend: "unknown" };
-        }
-
-        // Calculate indicators for h1 timeframe
-        const h1Indicators = await calcIndicators(h1Data.prices);
-
-        // Determine trend direction only by H4
-        const h1Trend = h1Indicators.maFast > h1Indicators.maSlow ? "bullish" : "bearish";
-
-        console.log(`${symbol} H1 Trend: ${h1Trend}`);
-
-        return h1Trend;
-    } catch (error) {
-        console.error(`Error analyzing trend for ${symbol}:`, error);
-        return { overallTrend: "unknown" };
-    }
 }
-
