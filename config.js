@@ -9,6 +9,27 @@ export const API = {
     WS_URL: process.env.WS_BASE_URL,
 };
 
+export const backtestSymbols = [
+    "EURUSD",
+    "GBPUSD",
+    "EURGBP",
+    "USDCHF",
+    "EURJPY",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "USDCAD",
+    "AUDUSD",
+    "NZDUSD",
+    "AUDJPY",
+    "NZDJPY",
+    "USDJPY",
+    "EURJPY",
+    "AUDJPY",
+    "AUDUSD",
+    "NZDUSD",
+];
+
 // Trading Sessions (UTC times)
 export const SESSIONS = {
     LONDON: {
@@ -83,8 +104,8 @@ export const ANALYSIS = {
 
     BACKTESTING: {
         ENABLED: false,
-        START_DATE: "2023-01-01",
-        END_DATE: "2023-12-31",
+        START_DATE: "2024-01-01",
+        END_DATE: "2025-12-31",
     },
 };
 
