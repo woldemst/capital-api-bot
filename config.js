@@ -35,14 +35,16 @@ export const SESSIONS = {
     LONDON: {
         START: "08:00",
         END: "17:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"], // "EURJPY"
-        STRATEGY: "checkPullbackHybrid",
+        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+        STRATEGY: "sessionStart", // Changed to new strategy
+        PRE_SESSION_MINUTES: 30,  // Minutes before session to calculate range
     },
     NY: {
         START: "13:00",
         END: "21:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"], // "GOLD"
-        STRATEGY: "checkBreakout",
+        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+        STRATEGY: "sessionStart",
+        PRE_SESSION_MINUTES: 30,
     },
     SYDNEY: {
         START: "22:00",
@@ -97,7 +99,7 @@ export const ANALYSIS = {
     RSI: {
         PERIOD: 14,
         OVERBOUGHT: 70,
-        OVERSOLD: 30,
+            OVERSOLD: 30,
         EXIT_OVERBOUGHT: 65, // Earlier exit
         EXIT_OVERSOLD: 35,
     },
@@ -125,5 +127,20 @@ export const PROD = {
     // INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
     INTERVAL: 60 * 1000, // 60 seconds between analyses
 };
+
 // For convenience in error messages and logging
 export const VERSION = "1.0.0";
+
+// Add strategy parameters
+export const STRATEGY_PARAMS = {
+    BREAKOUT: {
+        BUFFER_PIPS: 2,
+        RANGE_MINUTES: 30,
+        RR_RATIO: 1.5,
+    },
+    SCALPING: {
+        SL_PIPS: 5,
+        TP_PIPS: 10,
+        ATR_THRESHOLD: 0.0003,
+    }
+};

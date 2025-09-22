@@ -1,6 +1,6 @@
 // strategies.js
 import logger from "../utils/logger.js";
-import { RISK } from "../config.js";
+import { RISK, STRATEGY_PARAMS, SESSIONS } from "../config.js";
 
 const { REQUIRED_SCORE } = RISK;
 
@@ -8,57 +8,69 @@ class Strategy {
     constructor() {}
 
     getSignal({ symbol, strategy, indicators, candles }) {
-        if (!symbol || !candles || !indicators) return { signal: null, reason: "missing_data" };
+        if (!symbol || !candles || !indicators) {
+            return { signal: null, reason: "missing_data" };
+        }
 
         try {
-            let m15Pattern = null; // Define these variables at the start
-            let m1Pattern = null;
+            // Get current time
+            const currentTime = new Date();
+            
+            // Determine active session based on current time
+            const hour = Number(currentTime.toLocaleString("en-US", { 
+                hour: "2-digit", 
+                hour12: false, 
+                timeZone: "Europe/Berlin" 
+            }));
 
-            // 1. Try M15 pattern with H1 trend first
-            const m15Candles = candles.m15;
-            const h1Trend = indicators.h1.trend;
-            logger.info(`${symbol} H1 Trend: ${h1Trend}`);
-
-            // Check M15 scoring first
-            const m15ScoringResult = this.checkScoring(m15Candles, indicators, "M15");
-
-            if (m15ScoringResult.signal) {
-                m15Pattern = this.greenRedCandlePattern(h1Trend, m15Candles[m15Candles.length - 2], m15Candles[m15Candles.length - 1]);
-
-                if (m15Pattern && m15Pattern.toUpperCase() === m15ScoringResult.signal) {
-                    return {
-                        signal: m15ScoringResult.signal,
-                        reason: "m15_pattern_and_score_confirmed",
-                    };
-                }
+            // Find active session from config
+            let activeSession = null;
+            if (hour >= 8 && hour < 17 && SESSIONS.LONDON.SYMBOLS.includes(symbol)) {
+                activeSession = { ...SESSIONS.LONDON, name: "LONDON" };
+            } else if (hour >= 13 && hour < 21 && SESSIONS.NY.SYMBOLS.includes(symbol)) {
+                activeSession = { ...SESSIONS.NY, name: "NY" };
+            } else if ((hour >= 22 || hour < 7) && SESSIONS.SYDNEY.SYMBOLS.includes(symbol)) {
+                activeSession = { ...SESSIONS.SYDNEY, name: "SYDNEY" };
+            } else if (hour < 9 && SESSIONS.TOKYO.SYMBOLS.includes(symbol)) {
+                activeSession = { ...SESSIONS.TOKYO, name: "TOKYO" };
             }
 
-            // 2. If M15 didn't work, try M1 pattern with M5 trend
-            const m1Candles = candles.m1;
-            const m5Trend = indicators.m5.trend;
-            logger.info(`${symbol} M5 Trend: ${m5Trend}`);
-
-            // Check M1 scoring
-            const m1ScoringResult = this.checkScoring(m1Candles, indicators, "M1");
-
-            if (m1ScoringResult.signal) {
-                m1Pattern = this.greenRedCandlePattern(m5Trend, m1Candles[m1Candles.length - 2], m1Candles[m1Candles.length - 1]);
-
-                if (m1Pattern && m1Pattern.toUpperCase() === m1ScoringResult.signal) {
-                    return {
-                        signal: m1ScoringResult.signal,
-                        reason: "m1_pattern_and_score_confirmed",
-                    };
-                }
+            if (!activeSession) {
+                return { signal: null, reason: "no_active_session" };
             }
 
-            // 3. No pattern confirmed the scoring
+            // 1. Check for session start breakout or scalping signal
+            const sessionResult = this.checkSessionStart(candles, activeSession, currentTime, indicators);
+            
+            if (sessionResult) {
+                logger.info(`[${symbol}] Session strategy signal: ${sessionResult.signal} (${activeSession.name})`);
+                return {
+                    signal: sessionResult.signal,
+                    stopLoss: sessionResult.stopLoss,
+                    takeProfit: sessionResult.takeProfit,
+                    reason: `session_${hour - parseInt(activeSession.START) <= 1 ? 'breakout' : 'scalping'}`
+                };
+            }
+
+            // 2. If no session signal, try scalping strategy
+            const scalpingResult = this.checkScalping(candles.m5, indicators);
+            
+            if (scalpingResult) {
+                logger.info(`[${symbol}] Scalping signal: ${scalpingResult.signal}`);
+                return {
+                    signal: scalpingResult.signal,
+                    stopLoss: scalpingResult.stopLoss,
+                    takeProfit: scalpingResult.takeProfit,
+                    reason: "scalping"
+                };
+            }
+
+            // 3. No valid signals found
             return {
                 signal: null,
-                reason:
-                    `m15_score=${m15ScoringResult.signal}, m15_pattern=${m15Pattern || "none"}, ` +
-                    `m1_score=${m1ScoringResult.signal}, m1_pattern=${m1Pattern || "none"}`,
+                reason: "no_session_or_scalping_signals"
             };
+
         } catch (e) {
             logger.warn(`${symbol}: Signal check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
@@ -333,6 +345,91 @@ class Strategy {
 
         if (!signal) return { signal: null, reason };
         return { signal, reason: "rules" };
+    }
+
+    checkSessionStart(candles, session, currentTime, indicators) {
+        if (!candles?.m5 || !candles?.m15) return null;
+
+        const sessionStart = new Date(currentTime);
+        sessionStart.setHours(parseInt(session.START.split(':')[0]));
+        sessionStart.setMinutes(parseInt(session.START.split(':')[1]));
+
+        const now = new Date(currentTime);
+        const timeSinceStart = (now - sessionStart) / (1000 * 60); // minutes
+
+        // Only apply breakout strategy in first hour of session
+        if (timeSinceStart > 60) {
+            return this.checkScalping(candles.m5, indicators);
+        }
+
+        // Calculate pre-session range
+        const rangeEnd = sessionStart;
+        const rangeStart = new Date(sessionStart - session.PRE_SESSION_MINUTES * 60 * 1000);
+
+        const rangeCandles = candles.m5.filter(c => {
+            const candleTime = new Date(c.timestamp);
+            return candleTime >= rangeStart && candleTime <= rangeEnd;
+        });
+
+        if (rangeCandles.length < 5) return null;
+
+        const highRange = Math.max(...rangeCandles.map(c => c.high));
+        const lowRange = Math.min(...rangeCandles.map(c => c.low));
+        const buffer = STRATEGY_PARAMS.BREAKOUT.BUFFER_PIPS * (candles.m5[0].symbol.includes('JPY') ? 0.01 : 0.0001);
+
+        const currentPrice = candles.m5[candles.m5.length - 1].close;
+
+        // Check ATR filter
+        const atr = indicators.m30.atr;
+        if (atr < STRATEGY_PARAMS.SCALPING.ATR_THRESHOLD) {
+            logger.info(`[SessionStart] ATR ${atr} below threshold, skipping breakout`);
+            return null;
+        }
+
+        if (currentPrice > highRange + buffer) {
+            return {
+                signal: "BUY",
+                stopLoss: lowRange - buffer,
+                takeProfit: highRange + (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO
+            };
+        }
+
+        if (currentPrice < lowRange - buffer) {
+            return {
+                signal: "SELL",
+                stopLoss: highRange + buffer,
+                takeProfit: lowRange - (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO
+            };
+        }
+
+        return null;
+    }
+
+    checkScalping(m5Candles, indicators) {
+        if (!m5Candles || m5Candles.length < 10) return null;
+
+        const ema5 = indicators.m5.ema5;
+        const ema10 = indicators.m5.ema10;
+        const macd = indicators.m5.macd;
+        const momentum = macd.histogram;
+
+        if (ema5 > ema10 && momentum > 0) {
+            return {
+                signal: "BUY",
+                stopLoss: m5Candles[m5Candles.length - 1].low - STRATEGY_PARAMS.SCALPING.SL_PIPS * 0.0001,
+                takeProfit: m5Candles[m5Candles.length - 1].close + STRATEGY_PARAMS.SCALPING.TP_PIPS * 0.0001
+            };
+        }
+
+        if (ema5 < ema10 && momentum < 0) {
+            return {
+                signal: "SELL",
+                stopLoss: m5Candles[m5Candles.length - 1].high + STRATEGY_PARAMS.SCALPING.SL_PIPS * 0.0001,
+                takeProfit: m5Candles[m5Candles.length - 1].close - STRATEGY_PARAMS.SCALPING.TP_PIPS * 0.0001
+            };
+        }
+
+        return null;
     }
 }
 
