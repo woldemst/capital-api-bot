@@ -59,6 +59,7 @@ export async function calcIndicators(bars, symbol, timeframe) {
         emaSlow: EMA.calculate({ period: 26, values: closes }).pop(),
         ema5: EMA.calculate({ period: 5, values: closes }).pop(),
         ema9: EMA.calculate({ period: 9, values: closes }).pop(),
+        ema10: EMA.calculate({ period: 10, values: closes }).pop(),
         ema20: ema20Val,
         ema21: EMA.calculate({ period: 21, values: closes }).pop(),
         ema30: ema30Val,
