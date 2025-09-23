@@ -41,19 +41,6 @@ class Strategy {
                 return { signal: null, reason: "no_active_session" };
             }
 
-            // 1. Check for session start breakout or scalping signal
-            // const sessionResult = this.checkSessionStart(candles, activeSession, currentTime, indicators);
-
-            // if (sessionResult) {
-            //     logger.info(`[${symbol}] Session strategy signal: ${sessionResult.signal} (${activeSession.name})`);
-            //     return {
-            //         signal: sessionResult.signal,
-            //         stopLoss: sessionResult.stopLoss,
-            //         takeProfit: sessionResult.takeProfit,
-            //         reason: `session_${hour - parseInt(activeSession.START) <= 1 ? 'breakout' : 'scalping'}`
-            //     };
-            // }
-
             // 2. If no session signal, try scalping strategy
             const scalpingResult = this.checkScalping(candles.m5, indicators);
 
@@ -80,37 +67,16 @@ class Strategy {
         if (!signal) return { signal: null, reason: "no_signal" };
         let res = null;
         switch (filterName) {
-            case "checkBreakout":
-                res = this.checkBreakout(
-                    candles.m15,
-                    indicators.h1.emaFast,
-                    indicators.h1.emaSlow,
-                    indicators.m15.emaFast,
-                    indicators.m15.emaSlow,
-                    indicators.m15.atr,
-                    indicators.m15.macd
-                );
+            case "1":
+                res; //some strategy will be called here
                 break;
-            case "checkMeanReversion":
-                res = this.checkMeanReversion(
-                    candles.m15,
-                    indicators.m15.rsiSeries,
-                    indicators.m15.bbUpperSeries,
-                    indicators.m15.bbLowerSeries,
-                    indicators.m15.atr,
-                    signal
-                );
+            case "2":
+                res; //some strategy will be called here
+
                 break;
-            case "checkPullbackHybrid":
-                res = this.checkPullbackHybrid(
-                    candles.m5,
-                    indicators.m5.ema20SeriesTail,
-                    indicators.m5.ema30SeriesTail,
-                    indicators.h1.emaFast,
-                    indicators.h1.emaSlow,
-                    indicators.m15.adx?.adx,
-                    indicators.m15.macd
-                );
+            case "3":
+                res; //some strategy will be called here
+
                 break;
             default:
                 res = true;
@@ -128,126 +94,6 @@ class Strategy {
         }
         // anything else (null/false) -> not confirmed
         return { signal: null, reason: "filter_failed" };
-    }
-
-    checkBreakout(m15Candles, h1EmaFast, h1EmaSlow, m15EmaFast, m15EmaSlow, atr, macd) {
-        if (!m15Candles || !Array.isArray(m15Candles) || m15Candles.length < 20) return null;
-        if (typeof h1EmaFast !== "number" || typeof h1EmaSlow !== "number" || typeof m15EmaFast !== "number" || typeof m15EmaSlow !== "number") return null;
-        if (typeof atr !== "number" || !macd) return null;
-
-        console.log(`
-                m15Candles length: ${m15Candles.length}
-                h1EmaFast: ${h1EmaFast}
-                h1EmaSlow: ${h1EmaSlow}
-                m15EmaFast: ${m15EmaFast}
-                m15EmaSlow: ${m15EmaSlow}
-                atr: ${atr}
-                macd histogram: ${macd.histogram}
-
-            `);
-
-        const lastIdx = m15Candles.length - 1;
-        const last = m15Candles[lastIdx];
-
-        const bullishTrend = h1EmaFast > h1EmaSlow && m15EmaFast > m15EmaSlow;
-        const bearishTrend = h1EmaFast < h1EmaSlow && m15EmaFast < m15EmaSlow;
-        if (!bullishTrend && !bearishTrend) return null;
-
-        const lookback = 32;
-        const highs = m15Candles.slice(lastIdx - lookback + 1, lastIdx + 1).map((c) => c.high);
-        const lows = m15Candles.slice(lastIdx - lookback + 1, lastIdx + 1).map((c) => c.low);
-
-        const prevHigh = Math.max(...highs.slice(0, highs.length - 1));
-        const prevLow = Math.min(...lows.slice(0, lows.length - 1));
-
-        const breakoutUp = last.close > prevHigh && bullishTrend && macd.histogram > 0 && atr > 0;
-        const breakoutDown = last.close < prevLow && bearishTrend && macd.histogram < 0 && atr > 0;
-
-        if (breakoutUp) return "BUY";
-        if (breakoutDown) return "SELL";
-        return null;
-    }
-
-    checkMeanReversion(m15Candles, rsiSeries, bbUpperSeries, bbLowerSeries, atr, proposedSignal) {
-        if (!m15Candles || !Array.isArray(m15Candles) || m15Candles.length < 20) return null;
-        if (!Array.isArray(rsiSeries) || !Array.isArray(bbUpperSeries) || !Array.isArray(bbLowerSeries)) return null;
-        if (typeof atr !== "number") return null;
-
-        const last = m15Candles[m15Candles.length - 1];
-        const lastRsi = rsiSeries.length ? rsiSeries[rsiSeries.length - 1] : null;
-        const lastUpper = bbUpperSeries.length ? bbUpperSeries[bbUpperSeries.length - 1] : null;
-        let lastLower = bbLowerSeries.length ? bbLowerSeries[bbLowerSeries.length - 1] : null;
-        if (lastRsi == null || lastUpper == null || lastLower == null) return null;
-
-        if (proposedSignal === "BUY" && lastRsi < 30 && last.close < lastLower && atr > 0) return "BUY";
-        if (proposedSignal === "SELL" && lastRsi > 70 && last.close > lastUpper && atr > 0) return "SELL";
-        return null;
-    }
-
-    checkPullbackHybrid(m5Candles, ema20Series, ema30Series, h1EmaFast, h1EmaSlow, m15Adx, macd) {
-        console.log(
-            `m5Candles.length: ${m5Candles.length}, ema20Series.length: ${ema20Series.length}, ema30Series.length: ${ema30Series.length}, h1EmaFast: ${h1EmaFast}, h1EmaSlow: ${h1EmaSlow}, m15Adx: ${m15Adx}, macd: ${macd.histogram}`
-        );
-        if (!m5Candles || !Array.isArray(m5Candles) || m5Candles.length < 10) return null;
-        if (!Array.isArray(ema20Series) || !Array.isArray(ema30Series)) return null;
-        if (typeof h1EmaFast !== "number" || typeof h1EmaSlow !== "number") return null;
-        if (typeof m15Adx !== "number" || !macd) return null;
-
-        const n = m5Candles.length;
-        const lastIdx = n - 1;
-        const last = m5Candles[lastIdx];
-
-        const bullishTrend = h1EmaFast > h1EmaSlow;
-        const bearishTrend = h1EmaFast < h1EmaSlow;
-        if (!bullishTrend && !bearishTrend) {
-            logger.info(`[PullbackHybrid] No clear trend: h1EmaFast=${h1EmaFast}, h1EmaSlow=${h1EmaSlow}`);
-            return null;
-        }
-        if (m15Adx < 20) {
-            logger.info(`[PullbackHybrid] ADX too low: ${m15Adx}`);
-            return null;
-        }
-
-        let touchedIndex = -1;
-        for (let i = n - 60; i <= n - 2; i++) {
-            if (i < 0) continue;
-            const bar = m5Candles[i];
-            const e20 = ema20Series[i];
-            const e30 = ema30Series[i];
-            if (e20 == null || e30 == null) continue;
-            const hi = Math.max(e20, e30);
-            const lo = Math.min(e20, e30);
-            if (bar.low <= hi && bar.high >= lo) {
-                touchedIndex = i;
-                logger.info(`[PullbackHybrid] EMA touch at index ${i}: bar.low=${bar.low}, bar.high=${bar.high}, hi=${hi}, lo=${lo}`);
-                break;
-            }
-        }
-        if (touchedIndex === -1) {
-            logger.info(`[PullbackHybrid] No EMA touch found in recent candles`);
-            return null;
-        }
-
-        let triggered = null;
-        for (let k = 1; k <= 3; k++) {
-            const idx = touchedIndex + k;
-            if (idx <= 0 || idx >= n) continue;
-            const bar = m5Candles[idx];
-            const e20 = ema20Series[idx];
-            if (!bar || typeof e20 !== "number") continue;
-            if (bar.close > e20 && bullishTrend && macd.histogram > 0) {
-                triggered = "BUY";
-                logger.info(`[PullbackHybrid] BUY triggered at index ${idx}: bar.close=${bar.close}, e20=${e20}, MACD=${macd.histogram}`);
-                break;
-            }
-            if (bar.close < e20 && bearishTrend && macd.histogram < 0) {
-                triggered = "SELL";
-                logger.info(`[PullbackHybrid] SELL triggered at index ${idx}: bar.close=${bar.close}, e20=${e20}, MACD=${macd.histogram}`);
-                break;
-            }
-        }
-        if (!triggered) logger.info(`[PullbackHybrid] No trigger found after EMA touch`);
-        return triggered;
     }
 
     greenRedCandlePattern(trend, prev, last) {
@@ -346,120 +192,50 @@ class Strategy {
         return { signal, reason: "rules" };
     }
 
-    checkSessionStart(candles, session, currentTime, indicators) {
-        if (!candles?.m5 || !candles?.m15) return null;
-
-        const sessionStart = new Date(currentTime);
-        sessionStart.setHours(parseInt(session.START.split(":")[0]));
-        sessionStart.setMinutes(parseInt(session.START.split(":")[1]));
-
-        const now = new Date(currentTime);
-        const timeSinceStart = (now - sessionStart) / (1000 * 60); // minutes
-
-        // Only apply breakout strategy in first hour of session
-        if (timeSinceStart > 60) {
-            return this.checkScalping(candles.m5, indicators);
-        }
-
-        // Calculate pre-session range
-        const rangeEnd = sessionStart;
-        const rangeStart = new Date(sessionStart - session.PRE_SESSION_MINUTES * 60 * 1000);
-
-        const rangeCandles = candles.m5.filter((c) => {
-            const candleTime = new Date(c.timestamp);
-            return candleTime >= rangeStart && candleTime <= rangeEnd;
-        });
-
-        if (rangeCandles.length < 5) return null;
-
-        const highRange = Math.max(...rangeCandles.map((c) => c.high));
-        const lowRange = Math.min(...rangeCandles.map((c) => c.low));
-        const buffer = STRATEGY_PARAMS.BREAKOUT.BUFFER_PIPS * (candles.m5[0].symbol.includes("JPY") ? 0.01 : 0.0001);
-
-        const currentPrice = candles.m5[candles.m5.length - 1].close;
-
-        // Check ATR filter
-        const atr = indicators.m30.atr;
-        if (atr < STRATEGY_PARAMS.SCALPING.ATR_THRESHOLD) {
-            logger.info(`[SessionStart] ATR ${atr} below threshold, skipping breakout`);
-            return null;
-        }
-
-        if (currentPrice > highRange + buffer) {
-            return {
-                signal: "BUY",
-                stopLoss: lowRange - buffer,
-                takeProfit: highRange + (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO,
-            };
-        }
-
-        if (currentPrice < lowRange - buffer) {
-            return {
-                signal: "SELL",
-                stopLoss: highRange + buffer,
-                takeProfit: lowRange - (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO,
-            };
-        }
-
-        return null;
-    }
-
     checkScalping(m5Candles, indicators) {
         if (!m5Candles || m5Candles.length < 10) return null;
 
         const last = m5Candles[m5Candles.length - 1];
         const prev = m5Candles[m5Candles.length - 2];
 
-        // 1. Volatility Check
-        const atr = indicators.m5.atr;
-        if (atr < STRATEGY_PARAMS.SCALPING.ATR_THRESHOLD) {
-            logger.info(`[Scalping] ATR ${atr} below threshold, skipping`);
+        // --- Trend filter on H1 ---
+        const h1Ema20 = indicators.h1.ema20;
+        const h1Ema50 = indicators.h1.ema50;
+        if (typeof h1Ema20 !== "number" || typeof h1Ema50 !== "number") return null;
+        const bullishTrend = h1Ema20 > h1Ema50;
+        const bearishTrend = h1Ema20 < h1Ema50;
+        if (!bullishTrend && !bearishTrend) {
+            logger.info("[Scalping] No clear H1 trend, skipping");
             return null;
         }
 
-        // 2. Trend Check (multiple timeframes)
-        const m5Trend = indicators.m5.ema20 > indicators.m5.ema50;
-        const m15Trend = indicators.m15.ema20 > indicators.m15.ema50;
+        // --- Volatility filter (ATR on M5) ---
+        const atr = indicators.m5.atr;
+        if (typeof atr !== "number" || atr < 0.0003) {
+            // adjust threshold depending on symbol
+            logger.info(`[Scalping] ATR ${atr} too low, skipping`);
+            return null;
+        }
 
-
-        // 3. Check MACD and RSI
-        const macd = indicators.m5.macd;
+        // --- Oscillator confirmation ---
         const rsi = indicators.m5.rsi;
-        const momentum = macd.histogram;
-        // 5. Check for BUY signal
-        if (
-            m5Trend &&
-            m15Trend &&
-            indicators.m5.ema5 > indicators.m5.ema10 &&
-            momentum > 0 &&
-            momentum > macd.signal &&
-            rsi < 70 &&
-            rsi > 40 &&
-            last.close > last.open
-        ) {
-            return {
-                signal: "BUY",
-                reason: "scalping_buy",
-            };
+        const macd = indicators.m5.macd;
+        if (!macd || typeof macd.histogram !== "number" || typeof rsi !== "number") return null;
+
+        // --- Price action filter: breakout of prev candle ---
+        let signal = null;
+        if (bullishTrend && indicators.m5.ema5 > indicators.m5.ema10 && macd.histogram > 0 && rsi > 40 && rsi < 70 && last.close > prev.high) {
+            signal = "BUY";
+        } else if (bearishTrend && indicators.m5.ema5 < indicators.m5.ema10 && macd.histogram < 0 && rsi < 60 && rsi > 30 && last.close < prev.low) {
+            signal = "SELL";
         }
 
-        // 6. Check for SELL signal
-        if (
-            !m5Trend &&
-            !m15Trend &&
-            indicators.m5.ema5 < indicators.m5.ema10 &&
-            momentum < 0 &&
-            momentum < macd.signal &&
-            rsi > 30 &&
-            rsi < 60 &&
-            last.close < last.open
-        ) {
-            return {
-                signal: "SELL",
-                reason: "scalping_sell",
-            };
+        if (signal) {
+            logger.info(`[Scalping] ${signal} signal confirmed (trend+oscillator+PA)`);
+            return { signal, reason: "scalping_combined" };
         }
 
+        logger.info("[Scalping] No valid scalping signal found");
         return null;
     }
 }
