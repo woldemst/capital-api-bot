@@ -15,13 +15,15 @@ class Strategy {
         try {
             // Get current time
             const currentTime = new Date();
-            
+
             // Determine active session based on current time
-            const hour = Number(currentTime.toLocaleString("en-US", { 
-                hour: "2-digit", 
-                hour12: false, 
-                timeZone: "Europe/Berlin" 
-            }));
+            const hour = Number(
+                currentTime.toLocaleString("en-US", {
+                    hour: "2-digit",
+                    hour12: false,
+                    timeZone: "Europe/Berlin",
+                })
+            );
 
             // Find active session from config
             let activeSession = null;
@@ -40,37 +42,34 @@ class Strategy {
             }
 
             // 1. Check for session start breakout or scalping signal
-            const sessionResult = this.checkSessionStart(candles, activeSession, currentTime, indicators);
-            
-            if (sessionResult) {
-                logger.info(`[${symbol}] Session strategy signal: ${sessionResult.signal} (${activeSession.name})`);
-                return {
-                    signal: sessionResult.signal,
-                    stopLoss: sessionResult.stopLoss,
-                    takeProfit: sessionResult.takeProfit,
-                    reason: `session_${hour - parseInt(activeSession.START) <= 1 ? 'breakout' : 'scalping'}`
-                };
-            }
+            // const sessionResult = this.checkSessionStart(candles, activeSession, currentTime, indicators);
+
+            // if (sessionResult) {
+            //     logger.info(`[${symbol}] Session strategy signal: ${sessionResult.signal} (${activeSession.name})`);
+            //     return {
+            //         signal: sessionResult.signal,
+            //         stopLoss: sessionResult.stopLoss,
+            //         takeProfit: sessionResult.takeProfit,
+            //         reason: `session_${hour - parseInt(activeSession.START) <= 1 ? 'breakout' : 'scalping'}`
+            //     };
+            // }
 
             // 2. If no session signal, try scalping strategy
             const scalpingResult = this.checkScalping(candles.m5, indicators);
-            
+
             if (scalpingResult) {
                 logger.info(`[${symbol}] Scalping signal: ${scalpingResult.signal}`);
                 return {
                     signal: scalpingResult.signal,
-                    stopLoss: scalpingResult.stopLoss,
-                    takeProfit: scalpingResult.takeProfit,
-                    reason: "scalping"
+                    reason: "scalping",
                 };
             }
 
             // 3. No valid signals found
             return {
                 signal: null,
-                reason: "no_session_or_scalping_signals"
+                reason: "no_scalping_signals",
             };
-
         } catch (e) {
             logger.warn(`${symbol}: Signal check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
@@ -270,19 +269,19 @@ class Strategy {
         const isBearish = (c) => getClose(c) < getOpen(c);
 
         // Log actual candle properties
-        logger.info(`[Pattern] Previous candle: ${isBullish(prev) ? 'bullish' : 'bearish'} (O:${getOpen(prev)} C:${getClose(prev)})`);
-        logger.info(`[Pattern] Last candle: ${isBullish(last) ? 'bullish' : 'bearish'} (O:${getOpen(last)} C:${getClose(last)})`);
+        logger.info(`[Pattern] Previous candle: ${isBullish(prev) ? "bullish" : "bearish"} (O:${getOpen(prev)} C:${getClose(prev)})`);
+        logger.info(`[Pattern] Last candle: ${isBullish(last) ? "bullish" : "bearish"} (O:${getOpen(last)} C:${getClose(last)})`);
 
         const trendDirection = String(trend).toLowerCase();
 
         // Pattern logic with detailed logging
         if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) {
             logger.info(`[Pattern] Found bullish pattern: red->green in bullish trend`);
-            return "BUY";  // Changed from "bullish" to "BUY"
+            return "BUY"; // Changed from "bullish" to "BUY"
         }
         if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) {
             logger.info(`[Pattern] Found bearish pattern: green->red in bearish trend`);
-            return "SELL";  // Changed from "bearish" to "SELL"
+            return "SELL"; // Changed from "bearish" to "SELL"
         }
 
         logger.info(`[Pattern] No valid pattern found for ${trendDirection} trend`);
@@ -351,8 +350,8 @@ class Strategy {
         if (!candles?.m5 || !candles?.m15) return null;
 
         const sessionStart = new Date(currentTime);
-        sessionStart.setHours(parseInt(session.START.split(':')[0]));
-        sessionStart.setMinutes(parseInt(session.START.split(':')[1]));
+        sessionStart.setHours(parseInt(session.START.split(":")[0]));
+        sessionStart.setMinutes(parseInt(session.START.split(":")[1]));
 
         const now = new Date(currentTime);
         const timeSinceStart = (now - sessionStart) / (1000 * 60); // minutes
@@ -366,16 +365,16 @@ class Strategy {
         const rangeEnd = sessionStart;
         const rangeStart = new Date(sessionStart - session.PRE_SESSION_MINUTES * 60 * 1000);
 
-        const rangeCandles = candles.m5.filter(c => {
+        const rangeCandles = candles.m5.filter((c) => {
             const candleTime = new Date(c.timestamp);
             return candleTime >= rangeStart && candleTime <= rangeEnd;
         });
 
         if (rangeCandles.length < 5) return null;
 
-        const highRange = Math.max(...rangeCandles.map(c => c.high));
-        const lowRange = Math.min(...rangeCandles.map(c => c.low));
-        const buffer = STRATEGY_PARAMS.BREAKOUT.BUFFER_PIPS * (candles.m5[0].symbol.includes('JPY') ? 0.01 : 0.0001);
+        const highRange = Math.max(...rangeCandles.map((c) => c.high));
+        const lowRange = Math.min(...rangeCandles.map((c) => c.low));
+        const buffer = STRATEGY_PARAMS.BREAKOUT.BUFFER_PIPS * (candles.m5[0].symbol.includes("JPY") ? 0.01 : 0.0001);
 
         const currentPrice = candles.m5[candles.m5.length - 1].close;
 
@@ -390,7 +389,7 @@ class Strategy {
             return {
                 signal: "BUY",
                 stopLoss: lowRange - buffer,
-                takeProfit: highRange + (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO
+                takeProfit: highRange + (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO,
             };
         }
 
@@ -398,7 +397,7 @@ class Strategy {
             return {
                 signal: "SELL",
                 stopLoss: highRange + buffer,
-                takeProfit: lowRange - (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO
+                takeProfit: lowRange - (highRange - lowRange) * STRATEGY_PARAMS.BREAKOUT.RR_RATIO,
             };
         }
 
@@ -408,24 +407,56 @@ class Strategy {
     checkScalping(m5Candles, indicators) {
         if (!m5Candles || m5Candles.length < 10) return null;
 
-        const ema5 = indicators.m5.ema5;
-        const ema10 = indicators.m5.ema10;
-        const macd = indicators.m5.macd;
-        const momentum = macd.histogram;
+        const last = m5Candles[m5Candles.length - 1];
+        const prev = m5Candles[m5Candles.length - 2];
 
-        if (ema5 > ema10 && momentum > 0) {
+        // 1. Volatility Check
+        const atr = indicators.m5.atr;
+        if (atr < STRATEGY_PARAMS.SCALPING.ATR_THRESHOLD) {
+            logger.info(`[Scalping] ATR ${atr} below threshold, skipping`);
+            return null;
+        }
+
+        // 2. Trend Check (multiple timeframes)
+        const m5Trend = indicators.m5.ema20 > indicators.m5.ema50;
+        const m15Trend = indicators.m15.ema20 > indicators.m15.ema50;
+
+
+        // 3. Check MACD and RSI
+        const macd = indicators.m5.macd;
+        const rsi = indicators.m5.rsi;
+        const momentum = macd.histogram;
+        // 5. Check for BUY signal
+        if (
+            m5Trend &&
+            m15Trend &&
+            indicators.m5.ema5 > indicators.m5.ema10 &&
+            momentum > 0 &&
+            momentum > macd.signal &&
+            rsi < 70 &&
+            rsi > 40 &&
+            last.close > last.open
+        ) {
             return {
                 signal: "BUY",
-                stopLoss: m5Candles[m5Candles.length - 1].low - STRATEGY_PARAMS.SCALPING.SL_PIPS * 0.0001,
-                takeProfit: m5Candles[m5Candles.length - 1].close + STRATEGY_PARAMS.SCALPING.TP_PIPS * 0.0001
+                reason: "scalping_buy",
             };
         }
 
-        if (ema5 < ema10 && momentum < 0) {
+        // 6. Check for SELL signal
+        if (
+            !m5Trend &&
+            !m15Trend &&
+            indicators.m5.ema5 < indicators.m5.ema10 &&
+            momentum < 0 &&
+            momentum < macd.signal &&
+            rsi > 30 &&
+            rsi < 60 &&
+            last.close < last.open
+        ) {
             return {
                 signal: "SELL",
-                stopLoss: m5Candles[m5Candles.length - 1].high + STRATEGY_PARAMS.SCALPING.SL_PIPS * 0.0001,
-                takeProfit: m5Candles[m5Candles.length - 1].close - STRATEGY_PARAMS.SCALPING.TP_PIPS * 0.0001
+                reason: "scalping_sell",
             };
         }
 
