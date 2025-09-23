@@ -33,7 +33,6 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
-
     // --- Price rounding ---
     roundPrice(price, symbol, decimals) {
         const d = typeof decimals === "number" ? decimals : symbol.includes("JPY") ? 3 : 5;
@@ -41,31 +40,26 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, m1Candles) {
+    async calculateTradeParameters(signal, symbol, bid, ask, context = {}) {
         try {
             const price = signal === "BUY" ? ask : bid;
 
-            // Use previous M1 candle for SL
-            const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
-            if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
-
-            // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
+            const prevLow = context.prevLow;
+            const prevHigh = context.prevHigh;
             const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
 
             let stopLossPrice, slDistance, takeProfitPrice;
 
-            if (signal === "BUY") {
-                // For BUY: SL below previous candle low
-                stopLossPrice = prevCandle.low - buffer;
+            if (signal === "BUY" && prevLow) {
+                stopLossPrice = prevLow - buffer;
                 slDistance = price - stopLossPrice;
-                // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
                 takeProfitPrice = price + slDistance * 1.8;
-            } else {
-                // For SELL: SL above previous candle high
-                stopLossPrice = prevCandle.high + buffer;
+            } else if (signal === "SELL" && prevHigh) {
+                stopLossPrice = prevHigh + buffer;
                 slDistance = stopLossPrice - price;
-                // TP = entry - (1.8 × SL distance)
                 takeProfitPrice = price - slDistance * 1.8;
+            } else {
+                throw new Error("Missing prev candle data for SL/TP calculation");
             }
 
             // Ensure minimum SL distance to avoid excessively tight SLs
@@ -174,9 +168,9 @@ class TradingService {
         return { SL: newSL, TP: newTP };
     }
 
-    async executeTrade(symbol, signal, bid, ask, m1Candles, indicators = {}) {
+    async executeTrade(symbol, signal, bid, ask, indicators = {}, context = {}) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, m1Candles);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -226,9 +220,8 @@ class TradingService {
         try {
             const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, strategy } = message;
 
-            if (!symbol || !indicators || !h1Candles || !m15Candles || !m5Candles || !m1Candles || bid == null || ask == null) return;
             const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };
-            
+
             //TODO
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
@@ -245,11 +238,11 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, reason } = Strategy.getSignal({ symbol, strategy, indicators, candles });
+            const { signal, context, reason } = Strategy.getSignal({ symbol, indicators, candles });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
-                await this.processSignal(symbol, signal, bid, ask, m1Candles, indicators);
+                await this.processSignal(symbol, signal, bid, ask, indicators, context);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal found for reason: ${reason}`);
             }
@@ -259,9 +252,9 @@ class TradingService {
     }
 
     // --- Signal processing ---
-    async processSignal(symbol, signal, bid, ask, m1Candles, indicators = {}) {
+    async processSignal(symbol, signal, bid, ask, indicators = {}, constext = {}) {
         try {
-            await this.executeTrade(symbol, signal, bid, ask, m1Candles, indicators);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, constext);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             // Check if the error message contains 'Not placed'

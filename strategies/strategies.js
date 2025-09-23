@@ -7,7 +7,7 @@ const { REQUIRED_SCORE } = RISK;
 class Strategy {
     constructor() {}
 
-    getSignal({ symbol, strategy, indicators, candles }) {
+    getSignal({ symbol, indicators, candles }) {
         if (!symbol || !candles || !indicators) {
             return { signal: null, reason: "missing_data" };
         }
@@ -48,6 +48,7 @@ class Strategy {
                 logger.info(`[${symbol}] Scalping signal: ${scalpingResult.signal}`);
                 return {
                     signal: scalpingResult.signal,
+                    context: scalpingResult.context,
                     reason: "scalping",
                 };
             }
@@ -232,7 +233,16 @@ class Strategy {
 
         if (signal) {
             logger.info(`[Scalping] ${signal} signal confirmed (trend+oscillator+PA)`);
-            return { signal, reason: "scalping_combined" };
+            return {
+                signal,
+                reason: "scalping_combined",
+                context: {
+                    prevHigh: prev.high,
+                    prevLow: prev.low,
+                    prevOpen: prev.open,
+                    prevClose: prev.close,
+                },
+            };
         }
 
         logger.info("[Scalping] No valid scalping signal found");
