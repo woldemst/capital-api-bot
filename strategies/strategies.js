@@ -43,7 +43,7 @@ class Strategy {
 
             // 2. If no session signal, try scalping strategy
             const scalpingResult = this.checkScalping(candles.m5, indicators);
-
+            
             if (scalpingResult) {
                 logger.info(`[${symbol}] Scalping signal: ${scalpingResult.signal}`);
                 return {

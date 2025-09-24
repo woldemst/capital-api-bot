@@ -43,59 +43,55 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask, context = {}) {
         try {
             const price = signal === "BUY" ? ask : bid;
-
-            const prevLow = context.prevLow;
-            const prevHigh = context.prevHigh;
-            const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
+            
+            // Extract prev candle data from context
+            const { prevHigh, prevLow } = context;
+            if (!prevHigh || !prevLow) {
+                throw new Error("Missing previous candle data for SL/TP calculation");
+            }
 
             let stopLossPrice, slDistance, takeProfitPrice;
+            const buffer = symbol.includes("JPY") ? 0.02 : 0.0002; // Small buffer for SL
 
-            if (signal === "BUY" && prevLow) {
+            // Calculate SL and TP based on prev candle
+            if (signal === "BUY") {
                 stopLossPrice = prevLow - buffer;
                 slDistance = price - stopLossPrice;
-                takeProfitPrice = price + slDistance * 1.8;
-            } else if (signal === "SELL" && prevHigh) {
+                takeProfitPrice = price + (slDistance * 2); // 1:2 risk/reward
+            } else if (signal === "SELL") {
                 stopLossPrice = prevHigh + buffer;
                 slDistance = stopLossPrice - price;
-                takeProfitPrice = price - slDistance * 1.8;
-            } else {
-                throw new Error("Missing prev candle data for SL/TP calculation");
+                takeProfitPrice = price - (slDistance * 2); // 1:2 risk/reward
             }
 
-            // Ensure minimum SL distance to avoid excessively tight SLs
+            // Ensure minimum SL distance
             const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-
-            const minSlPips = symbol.includes("JPY") ? 12 : 10;
-
+            const minSlPips = symbol.includes("JPY") ? 5 : 3; // Reduced minimum SL
             const minSl = minSlPips * pip;
+
             if (Math.abs(slDistance) < minSl) {
+                logger.info(`[Trade Parameters] SL distance ${slDistance} less than minimum ${minSl}, adjusting...`);
                 if (signal === "BUY") {
                     stopLossPrice = price - minSl;
-                    slDistance = price - stopLossPrice;
-                    takeProfitPrice = price + slDistance * 1.8;
+                    takeProfitPrice = price + (minSl * 2);
                 } else {
                     stopLossPrice = price + minSl;
-                    slDistance = stopLossPrice - price;
-                    takeProfitPrice = price - slDistance * 1.8;
+                    takeProfitPrice = price - (minSl * 2);
                 }
+                slDistance = minSl;
             }
 
-            // Ensure minimum SL distance to avoid excessively tight SLs
-            // ... (existing code above unchanged)
-
-            // Fetch allowed decimals and use for rounding
+            // Fetch allowed decimals
             const allowed = await getAllowedTPRange(symbol);
             const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
 
-            // Round prices to appropriate decimals
+            // Round prices
             stopLossPrice = this.roundPrice(stopLossPrice, symbol, decimals);
             takeProfitPrice = this.roundPrice(takeProfitPrice, symbol, decimals);
 
-            // Calculate position size based on risk
+            // Calculate position size
             const maxSimultaneousTrades = MAX_POSITIONS;
             const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-
-            // For FX, pipValue = pip / price
             const pipValue = pip / price;
             let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
             if (size < 100) size = 100; // Minimum size
@@ -104,7 +100,9 @@ class TradingService {
             Entry: ${price}
             SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
             TP: ${takeProfitPrice}
-            Size: ${size}`);
+            Size: ${size}
+            Prev Candle High: ${prevHigh}
+            Prev Candle Low: ${prevLow}`);
 
             return {
                 size,
@@ -239,7 +237,7 @@ class TradingService {
                 return;
             }
             const { signal, context, reason } = Strategy.getSignal({ symbol, indicators, candles });
-
+            
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
                 await this.processSignal(symbol, signal, bid, ask, indicators, context);
