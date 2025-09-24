@@ -43,7 +43,7 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask, context = {}) {
         try {
             const price = signal === "BUY" ? ask : bid;
-            
+
             // Extract prev candle data from context
             const { prevHigh, prevLow } = context;
             if (!prevHigh || !prevLow) {
@@ -57,11 +57,11 @@ class TradingService {
             if (signal === "BUY") {
                 stopLossPrice = prevLow - buffer;
                 slDistance = price - stopLossPrice;
-                takeProfitPrice = price + (slDistance * 2); // 1:2 risk/reward
+                takeProfitPrice = price + slDistance * 2; // 1:2 risk/reward
             } else if (signal === "SELL") {
                 stopLossPrice = prevHigh + buffer;
                 slDistance = stopLossPrice - price;
-                takeProfitPrice = price - (slDistance * 2); // 1:2 risk/reward
+                takeProfitPrice = price - slDistance * 2; // 1:2 risk/reward
             }
 
             // Ensure minimum SL distance
@@ -73,10 +73,10 @@ class TradingService {
                 logger.info(`[Trade Parameters] SL distance ${slDistance} less than minimum ${minSl}, adjusting...`);
                 if (signal === "BUY") {
                     stopLossPrice = price - minSl;
-                    takeProfitPrice = price + (minSl * 2);
+                    takeProfitPrice = price + minSl * 2;
                 } else {
                     stopLossPrice = price + minSl;
-                    takeProfitPrice = price - (minSl * 2);
+                    takeProfitPrice = price - minSl * 2;
                 }
                 slDistance = minSl;
             }
@@ -213,14 +213,9 @@ class TradingService {
     }
 
     //  Main price processing ---
-    async processPrice(message) {
-        const symbol = message?.symbol;
+    async processPrice({symbol, indicators, candles, bid, ask }) {
         try {
-            const { indicators, h1Candles, m15Candles, m5Candles, m1Candles, bid, ask, strategy } = message;
-
-            const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };
-
-            //TODO
+            // TODO !!
             // Check trading conditions
             // if (this.dailyLoss <= -this.accountBalance * this.dailyLossLimitPct) {
             //     logger.warn(`[Risk] Daily loss limit (${this.dailyLossLimitPct * 100}%) hit. Skip all new trades today.`);
@@ -237,7 +232,7 @@ class TradingService {
                 return;
             }
             const { signal, context, reason } = Strategy.getSignal({ symbol, indicators, candles });
-            
+
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
                 await this.processSignal(symbol, signal, bid, ask, indicators, context);

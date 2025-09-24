@@ -1,5 +1,4 @@
 import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
-import logger from "./utils/logger.js";
 
 export async function calcIndicators(bars, symbol, timeframe) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
@@ -60,10 +59,10 @@ export async function calcIndicators(bars, symbol, timeframe) {
         ema5: EMA.calculate({ period: 5, values: closes }).pop(),
         ema9: EMA.calculate({ period: 9, values: closes }).pop(),
         ema10: EMA.calculate({ period: 10, values: closes }).pop(),
-        ema20: ema20Val,
+        ema20: EMA.calculate({ period: 20, values: closes }).pop(),
         ema21: EMA.calculate({ period: 21, values: closes }).pop(),
-        ema30: ema30Val,
-        ema50: ema50Val,
+        ema30: EMA.calculate({ period: 30, values: closes }).pop(),
+        ema50: EMA.calculate({ period: 50, values: closes }).pop(),
         ema100: EMA.calculate({ period: 100, values: closes }).pop(),
         ema200: EMA.calculate({ period: 200, values: closes }).pop(),
         // Extras for strategies

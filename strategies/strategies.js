@@ -13,50 +13,34 @@ class Strategy {
         }
 
         try {
-            // Get current time
-            const currentTime = new Date();
-
-            // Determine active session based on current time
-            const hour = Number(
-                currentTime.toLocaleString("en-US", {
-                    hour: "2-digit",
-                    hour12: false,
-                    timeZone: "Europe/Berlin",
-                })
-            );
-
-            // Find active session from config
-            let activeSession = null;
-            if (hour >= 8 && hour < 17 && SESSIONS.LONDON.SYMBOLS.includes(symbol)) {
-                activeSession = { ...SESSIONS.LONDON, name: "LONDON" };
-            } else if (hour >= 13 && hour < 21 && SESSIONS.NY.SYMBOLS.includes(symbol)) {
-                activeSession = { ...SESSIONS.NY, name: "NY" };
-            } else if ((hour >= 22 || hour < 7) && SESSIONS.SYDNEY.SYMBOLS.includes(symbol)) {
-                activeSession = { ...SESSIONS.SYDNEY, name: "SYDNEY" };
-            } else if (hour < 9 && SESSIONS.TOKYO.SYMBOLS.includes(symbol)) {
-                activeSession = { ...SESSIONS.TOKYO, name: "TOKYO" };
+            // 1. Main scoring system
+            const scoring = this.checkScoring(candles.m5, indicators, "M5");
+            logger.info(`[Debug] Scoring result: ${JSON.stringify(scoring)}`);
+            if (!scoring.signal) {
+                return { signal: null, reason: `scoring_failed: ${scoring.reason}` };
             }
 
-            if (!activeSession) {
-                return { signal: null, reason: "no_active_session" };
+            // 2. Scalping strategy confirmation
+            const scalping = this.checkScalping(candles.m5, indicators);
+            logger.info(`[Debug] Scalping result: ${JSON.stringify(scalping)}`);
+            if (!scalping || scalping.signal !== scoring.signal) {
+                return { signal: null, reason: "scalping_failed_or_conflict" };
             }
 
-            // 2. If no session signal, try scalping strategy
-            const scalpingResult = this.checkScalping(candles.m5, indicators);
-            
-            if (scalpingResult) {
-                logger.info(`[${symbol}] Scalping signal: ${scalpingResult.signal}`);
-                return {
-                    signal: scalpingResult.signal,
-                    context: scalpingResult.context,
-                    reason: "scalping",
-                };
+            // 3. Price action pattern confirmation
+            const prev = candles.m5[candles.m5.length - 2];
+            const last = candles.m5[candles.m5.length - 1];
+            const paSignal = this.greenRedCandlePattern(scoring.signal === "BUY" ? "bullish" : "bearish", prev, last);
+            logger.info(`[Debug] Price action pattern result: ${paSignal}`);
+            if (paSignal !== scoring.signal) {
+                return { signal: null, reason: "price_action_pattern_failed" };
             }
 
-            // 3. No valid signals found
+            // All filters passed
             return {
-                signal: null,
-                reason: "no_scalping_signals",
+                signal: scoring.signal,
+                context: scalping.context,
+                reason: "all_filters_passed",
             };
         } catch (e) {
             logger.warn(`${symbol}: Signal check failed: ${e?.message || e}`);
@@ -135,9 +119,9 @@ class Strategy {
         return false;
     }
 
-    checkScoring(candles, indicators, timeframe = "M15") {
+    checkScoring(candles, indicators, timeframe = "M5") {
         if (!candles || candles.length < 2) return { signal: null, reason: "not_enough_candles" };
-
+        const { m1, m5, m15, h1 } = indicators || {};
         const prev = candles[candles.length - 2];
         const last = candles[candles.length - 1];
 
@@ -145,37 +129,44 @@ class Strategy {
         const trendTimeframe = timeframe === "M15" ? "h1" : "m5";
         const priceTimeframe = timeframe.toLowerCase();
 
-        const ema9 = indicators[trendTimeframe].ema9;
-        const emaFast = indicators[trendTimeframe].emaFast;
-        const emaSlow = indicators[trendTimeframe].emaSlow;
-        const fixedAdx = Number(indicators[trendTimeframe].adx.adx.toFixed(2));
-        const fixedAtr = Number(indicators[priceTimeframe].atr.toFixed(4));
+        const ema9h1 = h1.ema9;
+        const ema21h1 = h1.ema21;
+        const emaFastH1 = h1.emaFast;
+        const emaSlowH1 = h1.emaSlow;
+
         const lastClose = last.close;
 
+        // Build conditions explicitly
         const buyConditions = [
-            emaFast != null && emaSlow != null ? emaFast > emaSlow : false,
-            ema9 != null ? lastClose > ema9 : false,
-            indicators[priceTimeframe].macd.histogram != null ? indicators[priceTimeframe].macd.histogram > 0 : false,
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
+            ema9h1 != null ? lastClose > ema9h1 : true,
+            // m15.rsi != null ? m15.rsi > m15.adaptiveRSI : true,
+            m15.macd.histogram != null ? m15.macd.histogram > 0 : true,
+            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
         ];
 
         const sellConditions = [
-            emaFast != null && emaSlow != null ? emaFast < emaSlow : false,
-            ema9 != null ? lastClose < ema9 : false,
-            indicators[priceTimeframe].macd.histogram != null ? indicators[priceTimeframe].macd.histogram < 0 : false,
+            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
+            ema9h1 != null ? lastClose < ema9h1 : true,
+            // m15.rsi != null ? m15.rsi < 100 - m15.adaptiveRSI : true,
+            m15.macd.histogram != null ? m15.macd.histogram < 0 : true,
+            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
+        const fixedAdx = Number(indicators[trendTimeframe].adx.adx.toFixed(2));
+        const fixedAtr = Number(indicators[priceTimeframe].atr.toFixed(4));
+
         logger.info(`
-            Timeframe: ${timeframe} with ${trendTimeframe.toUpperCase()} trend
             RequiredScore: ${REQUIRED_SCORE}
             BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
             SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-            ${priceTimeframe.toUpperCase()} MACD hist: ${indicators[priceTimeframe].macd.histogram}
-            ${priceTimeframe.toUpperCase()} RSI: ${indicators[priceTimeframe].rsi}
-            ${priceTimeframe.toUpperCase()} ATR: ${fixedAtr}
-            ${trendTimeframe.toUpperCase()} ADX: ${fixedAdx}
+            M15 RSI: ${m15.rsi}
+            M15 MACD hist: ${m15.macd.histogram}
+            M15 ADX: ${m15.adx.adx}
+            H1 ADX: ${h1.adx.adx}
         `);
 
         const longOK = buyScore >= REQUIRED_SCORE && fixedAdx > 10.0;
@@ -186,7 +177,6 @@ class Strategy {
 
         if (longOK && !shortOK) signal = "BUY";
         else if (shortOK && !longOK) signal = "SELL";
-        else if (longOK && shortOK) reason = "both_sides_ok";
         else reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
 
         if (!signal) return { signal: null, reason };

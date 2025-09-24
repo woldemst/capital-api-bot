@@ -216,7 +216,6 @@ class TradingBot {
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
             // D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
-            // H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
             H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
             M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
             M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
@@ -224,7 +223,6 @@ class TradingBot {
         };
 
         // const d1Candles = this.candleHistory[symbol].D1;
-        // const h4Candles = this.candleHistory[symbol].H4;
         const h1Candles = this.candleHistory[symbol].H1;
         const m15Candles = this.candleHistory[symbol].M15;
         const m5Candles = this.candleHistory[symbol].M5;
@@ -238,19 +236,19 @@ class TradingBot {
         }
 
         const indicators = {
-            // d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),j
-            // h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
+            // d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
             h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        // const h1Trend = await analyzeTrend(symbol, getHistorical);
+        const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };
 
+        // TODO !!
         // Determine strategy for current session
         const strategy = this.getStrategyForSession();
-        
+
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
         const bid = marketDetails?.snapshot?.bid;
@@ -260,11 +258,7 @@ class TradingBot {
         await tradingService.processPrice({
             symbol,
             indicators,
-            h1Candles: h1Candles,
-            m15Candles: m15Candles,
-            m5Candles: m5Candles,
-            m1Candles: m1Candles,
-            strategy,
+            candles,
             bid,
             ask,
         });
