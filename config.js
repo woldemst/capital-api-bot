@@ -25,7 +25,6 @@ export const backtestSymbols = [
     "NZDJPY",
     "USDJPY",
     "EURJPY",
-    "AUDJPY",
     "AUDUSD",
     "NZDUSD",
 ];
@@ -75,7 +74,7 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 3,
+    REQUIRED_SCORE: 2,
 };
 
 // Technical Analysis Configuration

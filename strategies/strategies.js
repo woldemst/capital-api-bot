@@ -13,72 +13,38 @@ class Strategy {
         }
 
         try {
-            // 1. Main scoring system
-            const scoring = this.checkScoring(candles.m5, indicators, "M5");
+            // const scalping = this.checkScalping(candles.m5, indicators);
+            // logger.info(`[Debug] Scalping result: ${JSON.stringify(scalping)}`);
+            // if (!scalping) return { signal: null, reason: "scalping_failed" };
+
+            const scoring = this.checkScoring(candles.m5, indicators);
             logger.info(`[Debug] Scoring result: ${JSON.stringify(scoring)}`);
-            if (!scoring.signal) {
-                return { signal: null, reason: `scoring_failed: ${scoring.reason}` };
-            }
+            if (!scoring.signal) return { signal: null, reason: `scoring_failed: ${scoring.reason}` };
 
-            // 2. Scalping strategy confirmation
-            const scalping = this.checkScalping(candles.m5, indicators);
-            logger.info(`[Debug] Scalping result: ${JSON.stringify(scalping)}`);
-            if (!scalping || scalping.signal !== scoring.signal) {
-                return { signal: null, reason: "scalping_failed_or_conflict" };
-            }
+            // if (scalping.signal !== scoring.signal) return { signal: null, reason: "scalping_and_scoring_conflict" };
 
-            // 3. Price action pattern confirmation
             const prev = candles.m5[candles.m5.length - 2];
             const last = candles.m5[candles.m5.length - 1];
+
             const paSignal = this.greenRedCandlePattern(scoring.signal === "BUY" ? "bullish" : "bearish", prev, last);
             logger.info(`[Debug] Price action pattern result: ${paSignal}`);
-            if (paSignal !== scoring.signal) {
-                return { signal: null, reason: "price_action_pattern_failed" };
-            }
+            if (paSignal !== scoring.signal) return { signal: null, reason: "price_action_pattern_failed" };
 
-            // All filters passed
             return {
                 signal: scoring.signal,
                 context: scalping.context,
                 reason: "all_filters_passed",
+                context: {
+                    prevHigh: prev.high,
+                    prevLow: prev.low,
+                    prevOpen: prev.open,
+                    prevClose: prev.close,
+                },
             };
         } catch (e) {
             logger.warn(`${symbol}: Signal check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
         }
-    }
-
-    applyFilter(signal, filterName, candles, indicators) {
-        if (!signal) return { signal: null, reason: "no_signal" };
-        let res = null;
-        switch (filterName) {
-            case "1":
-                res; //some strategy will be called here
-                break;
-            case "2":
-                res; //some strategy will be called here
-
-                break;
-            case "3":
-                res; //some strategy will be called here
-
-                break;
-            default:
-                res = true;
-        }
-        // Normalize result: require either boolean true OR the same direction as `signal`
-        if (res === true) {
-            return { signal, reason: "filter_confirmed_boolean" };
-        }
-        if (typeof res === "string") {
-            if (res === signal) {
-                return { signal, reason: "filter_confirmed_direction" };
-            } else {
-                return { signal: null, reason: `filter_conflict: filterReturned=${res} expected=${signal}` };
-            }
-        }
-        // anything else (null/false) -> not confirmed
-        return { signal: null, reason: "filter_failed" };
     }
 
     greenRedCandlePattern(trend, prev, last) {
@@ -119,15 +85,11 @@ class Strategy {
         return false;
     }
 
-    checkScoring(candles, indicators, timeframe = "M5") {
+    checkScoring(candles, indicators) {
         if (!candles || candles.length < 2) return { signal: null, reason: "not_enough_candles" };
-        const { m1, m5, m15, h1 } = indicators || {};
+        const { m1, m5, m15, h1 } = indicators;
         const prev = candles[candles.length - 2];
         const last = candles[candles.length - 1];
-
-        // Select indicators based on timeframe
-        const trendTimeframe = timeframe === "M15" ? "h1" : "m5";
-        const priceTimeframe = timeframe.toLowerCase();
 
         const ema9h1 = h1.ema9;
         const ema21h1 = h1.ema21;
@@ -139,7 +101,7 @@ class Strategy {
         // Build conditions explicitly
         const buyConditions = [
             emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
-            ema9h1 != null ? lastClose > ema9h1 : true,
+            // ema9h1 != null ? lastClose > ema9h1 : true,
             // m15.rsi != null ? m15.rsi > m15.adaptiveRSI : true,
             m15.macd.histogram != null ? m15.macd.histogram > 0 : true,
             // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
@@ -147,7 +109,7 @@ class Strategy {
 
         const sellConditions = [
             emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
-            ema9h1 != null ? lastClose < ema9h1 : true,
+            // ema9h1 != null ? lastClose < ema9h1 : true,
             // m15.rsi != null ? m15.rsi < 100 - m15.adaptiveRSI : true,
             m15.macd.histogram != null ? m15.macd.histogram < 0 : true,
             // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
@@ -156,8 +118,7 @@ class Strategy {
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
-        const fixedAdx = Number(indicators[trendTimeframe].adx.adx.toFixed(2));
-        const fixedAtr = Number(indicators[priceTimeframe].atr.toFixed(4));
+        const fixedAdx = Number(indicators.m5.adx.adx.toFixed(2));
 
         logger.info(`
             RequiredScore: ${REQUIRED_SCORE}
@@ -169,8 +130,8 @@ class Strategy {
             H1 ADX: ${h1.adx.adx}
         `);
 
-        const longOK = buyScore >= REQUIRED_SCORE && fixedAdx > 10.0;
-        const shortOK = sellScore >= REQUIRED_SCORE && fixedAdx > 10.0;
+        const longOK = buyScore >= REQUIRED_SCORE;
+        const shortOK = sellScore >= REQUIRED_SCORE;
 
         let signal = null;
         let reason = null;
