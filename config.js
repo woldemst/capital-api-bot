@@ -123,7 +123,7 @@ export const DEV = {
 };
 
 export const PROD = {
-    INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
+    INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 3000,
     // INTERVAL: 60 * 1000, // 60 seconds between analyses
 };
 
