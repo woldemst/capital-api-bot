@@ -44,41 +44,33 @@ class TradingService {
         try {
             const price = signal === "BUY" ? ask : bid;
 
-            // Extract prev candle data from context
-            const { prevHigh, prevLow } = context;
-            if (!prevHigh || !prevLow) {
+            // Extract prev and signal candle data from context
+            const { prevHigh, prevLow, prevOpen, prevClose } = context;
+            if (
+                prevHigh == null ||
+                prevLow == null ||
+                prevOpen == null ||
+                prevClose == null
+            ) {
                 throw new Error("Missing previous candle data for SL/TP calculation");
             }
 
-            let stopLossPrice, slDistance, takeProfitPrice;
+            // Calculate the body of the signal candle (last closed candle)
+            const signalBody = Math.abs(prevClose - prevOpen);
+
+            let stopLossPrice, takeProfitPrice;
             const buffer = symbol.includes("JPY") ? 0.02 : 0.0002; // Small buffer for SL
 
-            // Calculate SL and TP based on prev candle
             if (signal === "BUY") {
+                // SL just under previous candle's low
                 stopLossPrice = prevLow - buffer;
-                slDistance = price - stopLossPrice;
-                takeProfitPrice = price + slDistance * 2; // 1:2 risk/reward
+                // TP = entry + 2 * body of signal candle
+                takeProfitPrice = price + 2 * signalBody;
             } else if (signal === "SELL") {
+                // SL just above previous candle's high
                 stopLossPrice = prevHigh + buffer;
-                slDistance = stopLossPrice - price;
-                takeProfitPrice = price - slDistance * 2; // 1:2 risk/reward
-            }
-
-            // Ensure minimum SL distance
-            const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-            const minSlPips = symbol.includes("JPY") ? 5 : 3; // Reduced minimum SL
-            const minSl = minSlPips * pip;
-
-            if (Math.abs(slDistance) < minSl) {
-                logger.info(`[Trade Parameters] SL distance ${slDistance} less than minimum ${minSl}, adjusting...`);
-                if (signal === "BUY") {
-                    stopLossPrice = price - minSl;
-                    takeProfitPrice = price + minSl * 2;
-                } else {
-                    stopLossPrice = price + minSl;
-                    takeProfitPrice = price - minSl * 2;
-                }
-                slDistance = minSl;
+                // TP = entry - 2 * body of signal candle
+                takeProfitPrice = price - 2 * signalBody;
             }
 
             // Fetch allowed decimals
@@ -89,20 +81,25 @@ class TradingService {
             stopLossPrice = this.roundPrice(stopLossPrice, symbol, decimals);
             takeProfitPrice = this.roundPrice(takeProfitPrice, symbol, decimals);
 
-            // Calculate position size
+            // Calculate position size (unchanged)
+            const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
             const maxSimultaneousTrades = MAX_POSITIONS;
             const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+            const slDistance = Math.abs(price - stopLossPrice);
             const pipValue = pip / price;
             let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
             if (size < 100) size = 100; // Minimum size
 
             logger.info(`[Trade Parameters] ${symbol} ${signal}:
             Entry: ${price}
-            SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
+            SL: ${stopLossPrice}
             TP: ${takeProfitPrice}
             Size: ${size}
             Prev Candle High: ${prevHigh}
-            Prev Candle Low: ${prevLow}`);
+            Prev Candle Low: ${prevLow}
+            Prev Candle Open: ${prevOpen}
+            Prev Candle Close: ${prevClose}
+            Signal Candle Body: ${signalBody}`);
 
             return {
                 size,
@@ -130,8 +127,6 @@ class TradingService {
         // Normalize direction to uppercase
         const dir = direction.toUpperCase();
 
-        // Berechne tatsächlichen Abstand
-        const slDistance = Math.abs(entryPrice - stopLossPrice);
         const minSLDistance = allowed?.minSLDistancePrice || 0;
         const minTPDistance = allowed?.minTPDistancePrice || 0;
 

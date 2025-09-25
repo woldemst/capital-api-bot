@@ -97,21 +97,21 @@ class Strategy {
 
     checkScoring(candles, indicators) {
         if (!candles || candles.length < 2) return { signal: null, reason: "not_enough_candles" };
-        const { m15, h1 } = indicators;
+        const { m5, m15, h1 } = indicators;
 
         // Build conditions explicitly
         const buyConditions = [
-            h1.ema20 > h1.ema50 ? true : false,
-            m15.macd.histogram != null ? m15.macd.histogram > 0 : true,
-            m15.rsi != null ? m15.rsi > 50 : true,
-            m15.adx.adx != null ? m15.adx.adx > 20 : true,
+            // h1.ema20 > h1.ema50 ? true : false,
+            m5.macd.histogram != null ? m5.macd.histogram > 0 : true,
+            m5.rsi != null ? m5.rsi > 50 : true,
+            m5.adx.adx != null ? m5.adx.adx > 20 : true,
         ];
 
         const sellConditions = [
-            h1.ema20 < h1.ema50 ? false : true, // Only consider sell if H1 is not bullish
-            m15.macd.histogram != null ? m15.macd.histogram < 0 : true,
-            m15.rsi != null ? m15.rsi < 50 : true,
-            m15.adx.adx != null ? m15.adx.adx > 20 : true,
+            // h1.ema20 < h1.ema50 ? false : true, // Only consider sell if H1 is not bullish
+            m5.macd.histogram != null ? m5.macd.histogram < 0 : true,
+            m5.rsi != null ? m5.rsi < 50 : true,
+            m5.adx.adx != null ? m5.adx.adx > 20 : true,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
@@ -121,9 +121,9 @@ class Strategy {
             RequiredScore: ${REQUIRED_SCORE}
             BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
             SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-            M15 MACD hist: ${m15.macd.histogram}
-            M15 RSI: ${m15.rsi}
-            M15 ADX: ${m15.adx.adx}
+            M5 MACD hist: ${m5.macd.histogram}
+            M5 RSI: ${m5.rsi}
+            M5 ADX: ${m5.adx.adx}
         `);
 
         const longOK = buyScore >= REQUIRED_SCORE;
