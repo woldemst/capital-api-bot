@@ -35,27 +35,23 @@ export const SESSIONS = {
         START: "08:00",
         END: "17:00",
         SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-        STRATEGY: "sessionStart", // Changed to new strategy
-        PRE_SESSION_MINUTES: 30,  // Minutes before session to calculate range
+        PRE_SESSION_MINUTES: 30, // Minutes before session to calculate range
     },
     NY: {
         START: "13:00",
         END: "21:00",
         SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
-        STRATEGY: "sessionStart",
         PRE_SESSION_MINUTES: 30,
     },
     SYDNEY: {
         START: "22:00",
         END: "07:00",
         SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
-        STRATEGY: "checkMeanReversion",
     },
     TOKYO: {
         START: "00:00",
         END: "09:00",
         SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
-        STRATEGY: "checkMeanReversion",
     },
     CRYPTO: ["BTC/USD", "ETH/USD"],
     STOCKS: ["AAPL", "TSLA"],
@@ -68,13 +64,13 @@ export const RISK = {
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     BUFFER_PIPS: 1, // Buffer for SL calculation
     REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 10, // Maximum hold time in minutes
+    MAX_HOLD_TIME: 20, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 3,
+    REQUIRED_SCORE: 5,
 };
 
 // Technical Analysis Configuration
@@ -98,7 +94,7 @@ export const ANALYSIS = {
     RSI: {
         PERIOD: 14,
         OVERBOUGHT: 70,
-            OVERSOLD: 30,
+        OVERSOLD: 30,
         EXIT_OVERBOUGHT: 65, // Earlier exit
         EXIT_OVERSOLD: 35,
     },
@@ -118,8 +114,8 @@ export const HISTORY = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 5 seconds between analyses (was 1 min)
-    MODE: true,
+    INTERVAL: 15 * 1000, // 15 seconds between analyses (was 1 min)
+    MODE: false,
 };
 
 export const PROD = {
@@ -141,5 +137,5 @@ export const STRATEGY_PARAMS = {
         SL_PIPS: 5,
         TP_PIPS: 10,
         ATR_THRESHOLD: 0.0003,
-    }
+    },
 };

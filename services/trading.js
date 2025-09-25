@@ -46,20 +46,12 @@ class TradingService {
 
             // Extract prev and signal candle data from context
             const { prevHigh, prevLow, prevOpen, prevClose } = context;
-            if (
-                prevHigh == null ||
-                prevLow == null ||
-                prevOpen == null ||
-                prevClose == null
-            ) {
-                throw new Error("Missing previous candle data for SL/TP calculation");
-            }
 
             // Calculate the body of the signal candle (last closed candle)
             const signalBody = Math.abs(prevClose - prevOpen);
+            const buffer = symbol.includes("JPY") ? 0.03 : 0.0003; // Small buffer for SL
 
             let stopLossPrice, takeProfitPrice;
-            const buffer = symbol.includes("JPY") ? 0.02 : 0.0002; // Small buffer for SL
 
             if (signal === "BUY") {
                 // SL just under previous candle's low
@@ -91,22 +83,17 @@ class TradingService {
             if (size < 100) size = 100; // Minimum size
 
             logger.info(`[Trade Parameters] ${symbol} ${signal}:
-            Entry: ${price}
-            SL: ${stopLossPrice}
-            TP: ${takeProfitPrice}
-            Size: ${size}
-            Prev Candle High: ${prevHigh}
-            Prev Candle Low: ${prevLow}
-            Prev Candle Open: ${prevOpen}
-            Prev Candle Close: ${prevClose}
-            Signal Candle Body: ${signalBody}`);
+                Entry: ${price}
+                SL: ${stopLossPrice}
+                TP: ${takeProfitPrice}
+                Size: ${size}
+                Prev Candle High: ${prevHigh}
+                Prev Candle Low: ${prevLow}
+                Prev Candle Open: ${prevOpen}
+                Prev Candle Close: ${prevClose}
+                Signal Candle Body: ${signalBody}`);
 
-            return {
-                size,
-                price,
-                stopLossPrice,
-                takeProfitPrice,
-            };
+            return { size, price, stopLossPrice, takeProfitPrice };
         } catch (error) {
             logger.error(`[trading.js][calculateTradeParameters] Error calculating trade parameters for ${symbol}:`, error);
             throw error;
@@ -208,7 +195,7 @@ class TradingService {
     }
 
     //  Main price processing ---
-    async processPrice({symbol, indicators, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
             // TODO !!
             // Check trading conditions
@@ -256,31 +243,88 @@ class TradingService {
 
     // --- Trailing stop logic (unchanged) ---
     async updateTrailingStopIfNeeded(position) {
-        const { dealId, direction, entryPrice, takeProfit, stopLoss, currentPrice } = position;
+        const { 
+            dealId, 
+            direction, 
+            entryPrice, 
+            takeProfit, 
+            stopLoss, 
+            currentPrice,
+            size 
+        } = position;
+
+        if (!dealId) {
+            logger.warn(`[TrailingStop] No dealId for position, skipping update.`);
+            return;
+        }
 
         const tpDistance = Math.abs(takeProfit - entryPrice);
+        
+        // Calculate profit targets
+        const tp50 = direction === "BUY" 
+            ? entryPrice + tpDistance * 0.5 
+            : entryPrice - tpDistance * 0.5;
+            
+        const tp80 = direction === "BUY" 
+            ? entryPrice + tpDistance * 0.8 
+            : entryPrice - tpDistance * 0.8;
 
-        const tp80 = direction === "BUY" ? entryPrice + tpDistance * 0.8 : entryPrice - tpDistance * 0.8;
+        // Check if price reached 50% of target
+        const reached50TP = direction === "BUY" 
+            ? currentPrice >= tp50 
+            : currentPrice <= tp50;
 
-        const reached80TP = direction === "BUY" ? currentPrice >= tp80 : currentPrice <= tp80;
-        if (!reached80TP) return;
-        const trailingBuffer = tpDistance * 0.1;
-        const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
-        const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
-        if (!shouldUpdate) return;
+        // Check if price reached 80% of target
+        const reached80TP = direction === "BUY" 
+            ? currentPrice >= tp80 
+            : currentPrice <= tp80;
+
         try {
-            await updateTrailingStop(
-                dealId,
-                currentPrice,
-                entryPrice,
-                takeProfit,
-                direction.toUpperCase(),
-                position.symbol || position.market,
-                position.isTrailing || false
-            );
-            logger.info(`[TrailingStop] Updated trailing stop for ${dealId}: ${newStop}`);
+            // First target: Close 50% at 1:1 R:R
+            if (reached50TP && size > 100) {
+                const partialSize = Math.floor(size / 2 / 100) * 100;
+                if (partialSize >= 100) {
+                    await this.closePartialPosition(dealId, partialSize);
+                    logger.info(`[PartialTP] Closed ${partialSize} units at 50% target for ${dealId}`);
+                }
+            }
+
+            // Second target: Trail remaining with tighter stop
+            if (reached80TP) {
+                const trailingBuffer = tpDistance * 0.1; // 10% of original TP distance
+                const newStop = direction === "BUY" 
+                    ? currentPrice - trailingBuffer 
+                    : currentPrice + trailingBuffer;
+
+                const shouldUpdate = direction === "BUY" 
+                    ? newStop > stopLoss 
+                    : newStop < stopLoss;
+
+                if (shouldUpdate) {
+                    await updateTrailingStop(
+                        dealId,
+                        currentPrice,
+                        entryPrice,
+                        takeProfit,
+                        direction.toUpperCase(),
+                        position.symbol || position.market,
+                        true // enable trailing
+                    );
+                    logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);
+                }
+            }
         } catch (error) {
-            logger.error(`[TrailingStop] Failed to update trailing stop for ${dealId}:`, error);
+            logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
+        }
+    }
+
+    async closePartialPosition(dealId, size) {
+        try {
+            // Add your broker's API call to close partial position
+            await apiClosePosition(dealId, size);
+            logger.info(`[PartialTP] Successfully closed ${size} units for ${dealId}`);
+        } catch (error) {
+            logger.error(`[PartialTP] Failed to close partial position for ${dealId}:`, error);
         }
     }
 

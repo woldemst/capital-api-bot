@@ -101,17 +101,19 @@ class Strategy {
 
         // Build conditions explicitly
         const buyConditions = [
-            // h1.ema20 > h1.ema50 ? true : false,
-            m5.macd.histogram != null ? m5.macd.histogram > 0 : true,
-            m5.rsi != null ? m5.rsi > 50 : true,
-            m5.adx.adx != null ? m5.adx.adx > 20 : true,
+            m5.ema20 > m5.ema50,
+            h1.ema20 > h1.ema50, // Add H1 trend alignment
+            m5.macd.histogram > 0,
+            m5.rsi > 40 && m5.rsi < 70, // Avoid overbought
+            m5.adx.adx > 25, // Stronger trend required
         ];
 
         const sellConditions = [
-            // h1.ema20 < h1.ema50 ? false : true, // Only consider sell if H1 is not bullish
-            m5.macd.histogram != null ? m5.macd.histogram < 0 : true,
-            m5.rsi != null ? m5.rsi < 50 : true,
-            m5.adx.adx != null ? m5.adx.adx > 20 : true,
+            m5.ema20 < m5.ema50,
+            h1.ema20 < h1.ema50,
+            m5.macd.histogram < 0,
+            m5.rsi < 60 && m5.rsi > 30,
+            m5.adx.adx > 25, // Stronger trend required
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
