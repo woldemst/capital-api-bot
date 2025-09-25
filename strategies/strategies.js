@@ -28,7 +28,10 @@ class Strategy {
             if (!m5 || m5.length < 2) return { signal: null, reason: "not_enough_m5_candles" };
             const prev = m5[m5.length - 2];
             const last = m5[m5.length - 1];
-            const paSignal = this.greenRedCandlePattern(trend, prev, last);
+            const paSignal =
+                this.greenRedCandlePattern(trend, prev, last) ||
+                this.engulfingPattern(prev, last) ||
+                this.pinBarPattern(last);
             if (!paSignal) return { signal: null, reason: "price_action_pattern_failed" };
 
             // --- 3. Scoring filter ---
@@ -93,6 +96,48 @@ class Strategy {
 
         logger.info(`[Pattern] No valid pattern found for ${trendDirection} trend`);
         return false;
+    }
+
+    engulfingPattern(prev, last) {
+        const getOpen = (c) => c.o ?? c.open;
+        const getClose = (c) => c.c ?? c.close;
+
+        if (!prev || !last) return null;
+
+        const prevOpen = getOpen(prev), prevClose = getClose(prev);
+        const lastOpen = getOpen(last), lastClose = getClose(last);
+
+        // Bullish engulfing
+        if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) {
+            return "BUY";
+        }
+
+        // Bearish engulfing
+        if (lastClose < lastOpen && prevClose > prevOpen && lastClose < prevOpen && lastOpen > prevClose) {
+            return "SELL";
+        }
+
+        return null;
+    }
+
+    pinBarPattern(last) {
+        if (!last) return null;
+        const open = last.o ?? last.open;
+        const close = last.c ?? last.close;
+        const high = last.h ?? last.high;
+        const low = last.l ?? last.low;
+
+        const body = Math.abs(close - open);
+        const upperWick = high - Math.max(open, close);
+        const lowerWick = Math.min(open, close) - low;
+
+        // Bullish pin bar: long lower wick (≥2× body)
+        if (lowerWick > body * 2) return "BUY";
+
+        // Bearish pin bar: long upper wick (≥2× body)
+        if (upperWick > body * 2) return "SELL";
+
+        return null;
     }
 
     checkScoring(candles, indicators) {
