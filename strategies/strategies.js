@@ -13,26 +13,36 @@ class Strategy {
         }
 
         try {
+            // --- 1. Determine M5 trend direction ---
+            if (!indicators.m5 || typeof indicators.m5.ema20 !== "number" || typeof indicators.m5.ema50 !== "number") {
+                return { signal: null, reason: "missing_m5_emas" };
+            }
+            let trend = null;
+            if (indicators.m5.ema20 > indicators.m5.ema50) trend = "bullish";
+            else if (indicators.m5.ema20 < indicators.m5.ema50) trend = "bearish";
+            else return { signal: null, reason: "no_clear_m5_trend" };
+            logger.info(`[Debug] m5 trend determined as: ${trend}`);
+
+            // --- 2. Price action pattern filter (green/red candle) ---
+            const m5 = candles.m5;
+            if (!m5 || m5.length < 2) return { signal: null, reason: "not_enough_m5_candles" };
+            const prev = m5[m5.length - 2];
+            const last = m5[m5.length - 1];
+            const paSignal = this.greenRedCandlePattern(trend, prev, last);
+            if (!paSignal) return { signal: null, reason: "price_action_pattern_failed" };
+
+            // --- 3. Scoring filter ---
+            const scoring = this.checkScoring(m5, indicators);
+            if (!scoring.signal || scoring.signal !== paSignal) {
+                return { signal: null, reason: `scoring_failed_or_conflict: ${scoring.reason}` };
+            }
+
             // const scalping = this.checkScalping(candles.m5, indicators);
             // logger.info(`[Debug] Scalping result: ${JSON.stringify(scalping)}`);
             // if (!scalping) return { signal: null, reason: "scalping_failed" };
 
-            const scoring = this.checkScoring(candles.m5, indicators);
-            logger.info(`[Debug] Scoring result: ${JSON.stringify(scoring)}`);
-            if (!scoring.signal) return { signal: null, reason: `scoring_failed: ${scoring.reason}` };
-
-            // if (scalping.signal !== scoring.signal) return { signal: null, reason: "scalping_and_scoring_conflict" };
-
-            const prev = candles.m5[candles.m5.length - 2];
-            const last = candles.m5[candles.m5.length - 1];
-
-            const paSignal = this.greenRedCandlePattern(scoring.signal === "BUY" ? "bullish" : "bearish", prev, last);
-            logger.info(`[Debug] Price action pattern result: ${paSignal}`);
-            if (paSignal !== scoring.signal) return { signal: null, reason: "price_action_pattern_failed" };
-
             return {
                 signal: scoring.signal,
-                context: scalping.context,
                 reason: "all_filters_passed",
                 context: {
                     prevHigh: prev.high,
@@ -66,8 +76,8 @@ class Strategy {
         const isBearish = (c) => getClose(c) < getOpen(c);
 
         // Log actual candle properties
-        logger.info(`[Pattern] Previous candle: ${isBullish(prev) ? "bullish" : "bearish"} (O:${getOpen(prev)} C:${getClose(prev)})`);
-        logger.info(`[Pattern] Last candle: ${isBullish(last) ? "bullish" : "bearish"} (O:${getOpen(last)} C:${getClose(last)})`);
+        logger.info(`[Pattern] Previous candle is: ${isBullish(prev) ? "bullish" : "bearish"})`);
+        logger.info(`[Pattern] Last candle is: ${isBullish(last) ? "bullish" : "bearish"}`);
 
         const trendDirection = String(trend).toLowerCase();
 
@@ -87,47 +97,33 @@ class Strategy {
 
     checkScoring(candles, indicators) {
         if (!candles || candles.length < 2) return { signal: null, reason: "not_enough_candles" };
-        const { m1, m5, m15, h1 } = indicators;
-        const prev = candles[candles.length - 2];
-        const last = candles[candles.length - 1];
-
-        const ema9h1 = h1.ema9;
-        const ema21h1 = h1.ema21;
-        const emaFastH1 = h1.emaFast;
-        const emaSlowH1 = h1.emaSlow;
-
-        const lastClose = last.close;
+        const { m15, h1 } = indicators;
 
         // Build conditions explicitly
         const buyConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
-            // ema9h1 != null ? lastClose > ema9h1 : true,
-            // m15.rsi != null ? m15.rsi > m15.adaptiveRSI : true,
+            h1.ema20 > h1.ema50 ? true : false,
             m15.macd.histogram != null ? m15.macd.histogram > 0 : true,
-            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
+            m15.rsi != null ? m15.rsi > 50 : true,
+            m15.adx.adx != null ? m15.adx.adx > 20 : true,
         ];
 
         const sellConditions = [
-            emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
-            // ema9h1 != null ? lastClose < ema9h1 : true,
-            // m15.rsi != null ? m15.rsi < 100 - m15.adaptiveRSI : true,
+            h1.ema20 < h1.ema50 ? false : true, // Only consider sell if H1 is not bullish
             m15.macd.histogram != null ? m15.macd.histogram < 0 : true,
-            // m15.adx.adx != null ? m15.adx.adx > m15.adaptiveADX : true,
+            m15.rsi != null ? m15.rsi < 50 : true,
+            m15.adx.adx != null ? m15.adx.adx > 20 : true,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
-        const fixedAdx = Number(indicators.m5.adx.adx.toFixed(2));
-
         logger.info(`
             RequiredScore: ${REQUIRED_SCORE}
             BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
             SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-            M15 RSI: ${m15.rsi}
             M15 MACD hist: ${m15.macd.histogram}
+            M15 RSI: ${m15.rsi}
             M15 ADX: ${m15.adx.adx}
-            H1 ADX: ${h1.adx.adx}
         `);
 
         const longOK = buyScore >= REQUIRED_SCORE;

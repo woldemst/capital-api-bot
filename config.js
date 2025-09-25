@@ -74,7 +74,7 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 2,
+    REQUIRED_SCORE: 4,
 };
 
 // Technical Analysis Configuration
@@ -123,8 +123,8 @@ export const DEV = {
 };
 
 export const PROD = {
-    // INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
-    INTERVAL: 15 * 1000, // 60 seconds between analyses
+    INTERVAL: (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000 - new Date().getMilliseconds() + 5000,
+    // INTERVAL: 60 * 1000, // 60 seconds between analyses
 };
 
 // For convenience in error messages and logging
