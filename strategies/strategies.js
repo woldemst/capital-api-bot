@@ -13,30 +13,33 @@ class Strategy {
         }
 
         try {
-            // --- 1. Determine M5 trend direction ---
-            if (!indicators.m5 || typeof indicators.m5.ema20 !== "number" || typeof indicators.m5.ema50 !== "number") {
-                return { signal: null, reason: "missing_m5_emas" };
-            }
+            const h1TrendBullish = indicators.h1.ema20 > indicators.h1.ema50;
+            const m5TrendBullish = indicators.m5.ema20 > indicators.m5.ema50;
+            const m15TrendBullish = indicators.m15.ema20 > indicators.m15.ema50;
+
             let trend = null;
             if (indicators.m5.ema20 > indicators.m5.ema50) trend = "bullish";
             else if (indicators.m5.ema20 < indicators.m5.ema50) trend = "bearish";
             else return { signal: null, reason: "no_clear_m5_trend" };
             logger.info(`[Debug] m5 trend determined as: ${trend}`);
+            // if (h1TrendBullish !== m5TrendBullish) {
+            //     return { signal: null, reason: "trend_mismatch" };
+            // }
+            // if (!this.isSessionTime(tradeTime)) {
+            //     return { signal: null, reason: "outside_session" };
+            // }
 
-            // --- 2. Price action pattern filter (green/red candle) ---
             const m5 = candles.m5;
             if (!m5 || m5.length < 2) return { signal: null, reason: "not_enough_m5_candles" };
+            
             const prev = m5[m5.length - 2];
             const last = m5[m5.length - 1];
-            const paSignal =
-                this.greenRedCandlePattern(trend, prev, last) ||
-                this.engulfingPattern(prev, last) ||
-                this.pinBarPattern(last);
-            if (!paSignal) return { signal: null, reason: "price_action_pattern_failed" };
+            const patternSignal = this.greenRedCandlePattern(trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
+            if (!patternSignal) return { signal: null, reason: "price_action_pattern_failed" };
 
             // --- 3. Scoring filter ---
             const scoring = this.checkScoring(m5, indicators);
-            if (!scoring.signal || scoring.signal !== paSignal) {
+            if (!scoring.signal || scoring.signal !== patternSignal) {
                 return { signal: null, reason: `scoring_failed_or_conflict: ${scoring.reason}` };
             }
 
@@ -78,10 +81,6 @@ class Strategy {
         const isBullish = (c) => getClose(c) > getOpen(c);
         const isBearish = (c) => getClose(c) < getOpen(c);
 
-        // Log actual candle properties
-        logger.info(`[Pattern] Previous candle is: ${isBullish(prev) ? "bullish" : "bearish"})`);
-        logger.info(`[Pattern] Last candle is: ${isBullish(last) ? "bullish" : "bearish"}`);
-
         const trendDirection = String(trend).toLowerCase();
 
         // Pattern logic with detailed logging
@@ -104,8 +103,10 @@ class Strategy {
 
         if (!prev || !last) return null;
 
-        const prevOpen = getOpen(prev), prevClose = getClose(prev);
-        const lastOpen = getOpen(last), lastClose = getClose(last);
+        const prevOpen = getOpen(prev),
+            prevClose = getClose(prev);
+        const lastOpen = getOpen(last),
+            lastClose = getClose(last);
 
         // Bullish engulfing
         if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) {
@@ -122,10 +123,10 @@ class Strategy {
 
     pinBarPattern(last) {
         if (!last) return null;
-        const open = last.o ?? last.open;
-        const close = last.c ?? last.close;
-        const high = last.h ?? last.high;
-        const low = last.l ?? last.low;
+        const open = last.open;
+        const close = last.close;
+        const high = last.high;
+        const low = last.low;
 
         const body = Math.abs(close - open);
         const upperWick = high - Math.max(open, close);
@@ -146,16 +147,16 @@ class Strategy {
 
         // Build conditions explicitly
         const buyConditions = [
-            m5.ema20 > m5.ema50,
             h1.ema20 > h1.ema50, // Add H1 trend alignment
+            m5.ema20 > m5.ema50,
             m5.macd.histogram > 0,
             m5.rsi > 40 && m5.rsi < 70, // Avoid overbought
             m5.adx.adx > 25, // Stronger trend required
         ];
 
         const sellConditions = [
-            m5.ema20 < m5.ema50,
             h1.ema20 < h1.ema50,
+            m5.ema20 < m5.ema50,
             m5.macd.histogram < 0,
             m5.rsi < 60 && m5.rsi > 30,
             m5.adx.adx > 25, // Stronger trend required
@@ -168,23 +169,13 @@ class Strategy {
             RequiredScore: ${REQUIRED_SCORE}
             BuyScore:  ${buyScore}/${buyConditions.length} | [${buyConditions.map(Boolean)}]
             SellScore: ${sellScore}/${sellConditions.length} | [${sellConditions.map(Boolean)}]
-            M5 MACD hist: ${m5.macd.histogram}
-            M5 RSI: ${m5.rsi}
-            M5 ADX: ${m5.adx.adx}
         `);
 
-        const longOK = buyScore >= REQUIRED_SCORE;
-        const shortOK = sellScore >= REQUIRED_SCORE;
+        if (buyScore >= REQUIRED_SCORE && sellScore < REQUIRED_SCORE) return { signal: "BUY" };
+        if (sellScore >= REQUIRED_SCORE && buyScore < REQUIRED_SCORE) return { signal: "SELL" };
 
-        let signal = null;
-        let reason = null;
-
-        if (longOK && !shortOK) signal = "BUY";
-        else if (shortOK && !longOK) signal = "SELL";
-        else reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
-
-        if (!signal) return { signal: null, reason };
-        return { signal, reason: "rules" };
+        const reason = `score_too_low: buy ${buyScore}/${REQUIRED_SCORE}, sell ${sellScore}/${REQUIRED_SCORE}`;
+        return { signal: null, reason };
     }
 
     checkScalping(m5Candles, indicators) {
@@ -242,6 +233,17 @@ class Strategy {
         logger.info("[Scalping] No valid scalping signal found");
         return null;
     }
+    // isSessionTime(now) {
+    //     const hour = now.getHours();
+    //     const minute = now.getMinutes();
+
+    //     // Example: block 00–15 & 20–24 for all sessions
+    //     if (minute < 15 || minute > 44) return false;
+
+    //     // Keep logic simple: just let it run during any session; you can extend
+    //     // to block specific session windows if you want.
+    //     return true;
+    // }
 }
 
 export default new Strategy();

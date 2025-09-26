@@ -40,9 +40,13 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, context = {}) {
+    async calculateTradeParameters(signal, symbol, bid, ask, context = {}, indicators = {}) {
         try {
             const price = signal === "BUY" ? ask : bid;
+
+            // ATR-based SL calculation
+            const atr = indicators.m5.atr;
+            const atrMuliplier = 1.8;
 
             // Extract prev and signal candle data from context
             const { prevHigh, prevLow, prevOpen, prevClose } = context;
@@ -52,17 +56,21 @@ class TradingService {
             const buffer = symbol.includes("JPY") ? 0.03 : 0.0003; // Small buffer for SL
 
             let stopLossPrice, takeProfitPrice;
-
+            const rr = 2; // Reward-to-risk ratio
             if (signal === "BUY") {
-                // SL just under previous candle's low
-                stopLossPrice = prevLow - buffer;
-                // TP = entry + 2 * body of signal candle
-                takeProfitPrice = price + 2 * signalBody;
+                stopLossPrice = prevLow - atrMuliplier * atr;
+                takeProfitPrice = price + rr * (price - stopLossPrice);
+                // // SL just under previous candle's low
+                // stopLossPrice = prevLow - buffer;
+                // // TP = entry + 2 * body of signal candle
+                // takeProfitPrice = price + 2 * signalBody;
             } else if (signal === "SELL") {
-                // SL just above previous candle's high
-                stopLossPrice = prevHigh + buffer;
-                // TP = entry - 2 * body of signal candle
-                takeProfitPrice = price - 2 * signalBody;
+                stopLossPrice = prevHigh + atrMult * atr;
+                takeProfitPrice = price + rr * (stopLossPrice - price);
+                // // SL just above previous candle's high
+                // stopLossPrice = prevHigh + buffer;
+                // // TP = entry - 2 * body of signal candle
+                // takeProfitPrice = price - 2 * signalBody;
             }
 
             // Fetch allowed decimals
@@ -75,8 +83,7 @@ class TradingService {
 
             // Calculate position size (unchanged)
             const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-            const maxSimultaneousTrades = MAX_POSITIONS;
-            const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+            const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
             const slDistance = Math.abs(price - stopLossPrice);
             const pipValue = pip / price;
             let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
@@ -87,10 +94,7 @@ class TradingService {
                 SL: ${stopLossPrice}
                 TP: ${takeProfitPrice}
                 Size: ${size}
-                Prev Candle High: ${prevHigh}
-                Prev Candle Low: ${prevLow}
-                Prev Candle Open: ${prevOpen}
-                Prev Candle Close: ${prevClose}
+                ATR: ${atr}
                 Signal Candle Body: ${signalBody}`);
 
             return { size, price, stopLossPrice, takeProfitPrice };
@@ -150,7 +154,7 @@ class TradingService {
 
     async executeTrade(symbol, signal, bid, ask, indicators = {}, context = {}) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context, indicators);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -243,15 +247,7 @@ class TradingService {
 
     // --- Trailing stop logic (unchanged) ---
     async updateTrailingStopIfNeeded(position) {
-        const { 
-            dealId, 
-            direction, 
-            entryPrice, 
-            takeProfit, 
-            stopLoss, 
-            currentPrice,
-            size 
-        } = position;
+        const { dealId, direction, entryPrice, takeProfit, stopLoss, currentPrice, size } = position;
 
         if (!dealId) {
             logger.warn(`[TrailingStop] No dealId for position, skipping update.`);
@@ -259,25 +255,17 @@ class TradingService {
         }
 
         const tpDistance = Math.abs(takeProfit - entryPrice);
-        
+
         // Calculate profit targets
-        const tp50 = direction === "BUY" 
-            ? entryPrice + tpDistance * 0.5 
-            : entryPrice - tpDistance * 0.5;
-            
-        const tp80 = direction === "BUY" 
-            ? entryPrice + tpDistance * 0.8 
-            : entryPrice - tpDistance * 0.8;
+        const tp50 = direction === "BUY" ? entryPrice + tpDistance * 0.5 : entryPrice - tpDistance * 0.5;
+
+        const tp80 = direction === "BUY" ? entryPrice + tpDistance * 0.8 : entryPrice - tpDistance * 0.8;
 
         // Check if price reached 50% of target
-        const reached50TP = direction === "BUY" 
-            ? currentPrice >= tp50 
-            : currentPrice <= tp50;
+        const reached50TP = direction === "BUY" ? currentPrice >= tp50 : currentPrice <= tp50;
 
         // Check if price reached 80% of target
-        const reached80TP = direction === "BUY" 
-            ? currentPrice >= tp80 
-            : currentPrice <= tp80;
+        const reached80TP = direction === "BUY" ? currentPrice >= tp80 : currentPrice <= tp80;
 
         try {
             // First target: Close 50% at 1:1 R:R
@@ -292,13 +280,9 @@ class TradingService {
             // Second target: Trail remaining with tighter stop
             if (reached80TP) {
                 const trailingBuffer = tpDistance * 0.1; // 10% of original TP distance
-                const newStop = direction === "BUY" 
-                    ? currentPrice - trailingBuffer 
-                    : currentPrice + trailingBuffer;
+                const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
 
-                const shouldUpdate = direction === "BUY" 
-                    ? newStop > stopLoss 
-                    : newStop < stopLoss;
+                const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
 
                 if (shouldUpdate) {
                     await updateTrailingStop(

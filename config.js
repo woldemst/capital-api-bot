@@ -71,6 +71,8 @@ export const RISK = {
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
     REQUIRED_SCORE: 5,
+    ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
+    RISK_REWARD: 2, // Reward-to-risk ratio
 };
 
 // Technical Analysis Configuration
@@ -115,7 +117,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 15 seconds between analyses (was 1 min)
-    MODE: false,
+    MODE: true,
 };
 
 export const PROD = {
