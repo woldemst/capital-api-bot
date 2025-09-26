@@ -2,7 +2,7 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositi
 import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import { calcIndicators } from "./indicators.js";
+import { calcIndicators, analyzeTrend } from "./indicators.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
 
@@ -243,11 +243,12 @@ class TradingBot {
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        const candles = { h1: h1Candles, m15: m15Candles, m5: m5Candles, m1: m1Candles };
+        const candles = { h1Candles, m15Candles, m5Candles, m1Candles };
 
         // TODO !!
         // Determine strategy for current session
-        const strategy = this.getStrategyForSession();
+
+        const trendAnalysis = await analyzeTrend(symbol, getHistorical);
 
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
@@ -256,9 +257,10 @@ class TradingBot {
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
-            symbol,
+            trendAnalysis,
             indicators,
             candles,
+            symbol,
             bid,
             ask,
         });

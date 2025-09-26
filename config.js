@@ -35,13 +35,11 @@ export const SESSIONS = {
         START: "08:00",
         END: "17:00",
         SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-        PRE_SESSION_MINUTES: 30, // Minutes before session to calculate range
     },
     NY: {
         START: "13:00",
         END: "21:00",
         SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
-        PRE_SESSION_MINUTES: 30,
     },
     SYDNEY: {
         START: "22:00",
@@ -64,13 +62,13 @@ export const RISK = {
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     BUFFER_PIPS: 1, // Buffer for SL calculation
     REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 20, // Maximum hold time in minutes
+    MAX_HOLD_TIME: 60, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 5,
+    REQUIRED_SCORE: 3,
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
 };

@@ -1,6 +1,6 @@
 import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
 
-export async function calcIndicators(bars, symbol, timeframe) {
+export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
         return null;
     }
@@ -112,4 +112,42 @@ export async function calcIndicators(bars, symbol, timeframe) {
             emaFastSlope: emaFastCurrent - emaFastPrev,
         },
     };
+
+
+    
+}
+
+// Analyze trend on higher timeframes
+export async function analyzeTrend(symbol, getHistorical) {
+    if (!symbol || typeof getHistorical !== "function") {
+        console.error("Invalid parameters for analyzeTrend");
+        return { overallTrend: "unknown" };
+    }
+
+    try {
+        const h1Data = await getHistorical(symbol, "HOUR", 50);
+
+        if (!h1Data?.prices) {
+            console.error("Missing prices in historical data");
+            return { overallTrend: "unknown" };
+        }
+
+        // Calculate indicators for h1 timeframe
+        const h1Indicators = await calcIndicators(h1Data.prices);
+
+        // Determine trend direction only by H4
+        const h1Trend = h1Indicators.maFast > h1Indicators.maSlow ? "bullish" : "bearish";
+
+        console.log(`${symbol} H1 Trend: ${h1Trend}`);
+
+        // Return trend analysis (overallTrend = h1Trend)
+        return {
+            h1Trend,
+            h1Indicators,
+            overallTrend: h1Trend,
+        };
+    } catch (error) {
+        console.error(`Error analyzing trend for ${symbol}:`, error);
+        return { overallTrend: "unknown" };
+    }
 }

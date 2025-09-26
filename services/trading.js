@@ -40,121 +40,112 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, context = {}, indicators = {}) {
-        try {
-            const price = signal === "BUY" ? ask : bid;
+    async calculateTradeParameters(signal, symbol, bid, ask, candles) {
+        const price = signal === "BUY" ? ask : bid;
+        const { m1Candles } = candles;
+        // Use previous M1 candle for SL
+        const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
+        if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-            // ATR-based SL calculation
-            const atr = indicators.m5.atr;
-            const atrMuliplier = 1.8;
+        // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
+        const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
 
-            // Extract prev and signal candle data from context
-            const { prevHigh, prevLow, prevOpen, prevClose } = context;
+        let stopLossPrice, slDistance, takeProfitPrice;
 
-            // Calculate the body of the signal candle (last closed candle)
-            const signalBody = Math.abs(prevClose - prevOpen);
-            const buffer = symbol.includes("JPY") ? 0.03 : 0.0003; // Small buffer for SL
-
-            let stopLossPrice, takeProfitPrice;
-            const rr = 2; // Reward-to-risk ratio
-            if (signal === "BUY") {
-                stopLossPrice = prevLow - atrMuliplier * atr;
-                takeProfitPrice = price + rr * (price - stopLossPrice);
-                // // SL just under previous candle's low
-                // stopLossPrice = prevLow - buffer;
-                // // TP = entry + 2 * body of signal candle
-                // takeProfitPrice = price + 2 * signalBody;
-            } else if (signal === "SELL") {
-                stopLossPrice = prevHigh + atrMult * atr;
-                takeProfitPrice = price + rr * (stopLossPrice - price);
-                // // SL just above previous candle's high
-                // stopLossPrice = prevHigh + buffer;
-                // // TP = entry - 2 * body of signal candle
-                // takeProfitPrice = price - 2 * signalBody;
-            }
-
-            // Fetch allowed decimals
-            const allowed = await getAllowedTPRange(symbol);
-            const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
-
-            // Round prices
-            stopLossPrice = this.roundPrice(stopLossPrice, symbol, decimals);
-            takeProfitPrice = this.roundPrice(takeProfitPrice, symbol, decimals);
-
-            // Calculate position size (unchanged)
-            const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-            const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
-            const slDistance = Math.abs(price - stopLossPrice);
-            const pipValue = pip / price;
-            let size = Math.floor(riskAmount / ((slDistance / pip) * pipValue) / 100) * 100;
-            if (size < 100) size = 100; // Minimum size
-
-            logger.info(`[Trade Parameters] ${symbol} ${signal}:
-                Entry: ${price}
-                SL: ${stopLossPrice}
-                TP: ${takeProfitPrice}
-                Size: ${size}
-                ATR: ${atr}
-                Signal Candle Body: ${signalBody}`);
-
-            return { size, price, stopLossPrice, takeProfitPrice };
-        } catch (error) {
-            logger.error(`[trading.js][calculateTradeParameters] Error calculating trade parameters for ${symbol}:`, error);
-            throw error;
+        if (signal === "BUY") {
+            // For BUY: SL below previous candle low
+            stopLossPrice = prevCandle.low - buffer;
+            slDistance = price - stopLossPrice;
+            // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
+            takeProfitPrice = price + slDistance * 1.8;
+        } else {
+            // For SELL: SL above previous candle high
+            stopLossPrice = prevCandle.high + buffer;
+            slDistance = stopLossPrice - price;
+            // TP = entry - (1.8 × SL distance)
+            takeProfitPrice = price - slDistance * 1.8;
         }
-    }
 
+        // Ensure minimum SL distance to avoid excessively tight SLs
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const minSlPips = symbol.includes("JPY") ? 12 : 10;
+        const minSl = minSlPips * pip;
+        if (Math.abs(slDistance) < minSl) {
+            if (signal === "BUY") {
+                stopLossPrice = price - minSl;
+                slDistance = price - stopLossPrice;
+                takeProfitPrice = price + slDistance * 1.8;
+            } else {
+                stopLossPrice = price + minSl;
+                slDistance = stopLossPrice - price;
+                takeProfitPrice = price - slDistance * 1.8;
+            }
+        }
+
+        // Round prices to appropriate decimals
+        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+
+        // --- FIX: Normalize SL distance for JPY pairs ---
+        let normalizedSlDistance = slDistance;
+        if (symbol.includes("JPY")) {
+            normalizedSlDistance = slDistance / pip; // Convert to pips for JPY pairs
+        }
+
+        // Calculate position size based on risk
+        const maxSimultaneousTrades = MAX_POSITIONS;
+        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+        let size = riskAmount / Math.abs(normalizedSlDistance);
+        size = Math.floor(size / 100) * 100; // Round to nearest 100
+        if (size < 100) size = 100; // Minimum size
+
+        logger.info(`[Trade Parameters] ${symbol} ${signal}:
+            Entry: ${price}
+            SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
+            TP: ${takeProfitPrice}
+            Size: ${size}`);
+
+        return {
+            size,
+            price,
+            stopLossPrice,
+            takeProfitPrice,
+        };
+    }
     // --- TP/SL validation (unchanged) ---
     async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
         logger.info(`[TP/SL Validation] Symbol: ${symbol}, Direction: ${direction}`);
         logger.info(`[TP/SL Validation] Entry: ${entryPrice}, SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
 
         const allowed = await getAllowedTPRange(symbol);
-        const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
 
         let newTP = takeProfitPrice;
         let newSL = stopLossPrice;
 
-        // Normalize direction to uppercase
-        const dir = direction.toUpperCase();
+        // Berechne tatsächlichen Abstand
+        const slDistance = Math.abs(entryPrice - stopLossPrice);
+        const minSLDistance = allowed?.minStopDistance || 0;
 
-        const minSLDistance = allowed?.minSLDistancePrice || 0;
-        const minTPDistance = allowed?.minTPDistancePrice || 0;
-
-        // Add explicit SL side check and adjust if invalid or too close
-        if (dir === "BUY") {
-            if (newSL >= entryPrice) {
+        // Wenn SL zu nah, passe ihn an
+        if (slDistance < minSLDistance) {
+            if (direction === "BUY") {
                 newSL = entryPrice - minSLDistance;
-            }
-            if (Math.abs(entryPrice - newSL) < minSLDistance) {
-                newSL = entryPrice - minSLDistance;
-            }
-            if (Math.abs(newTP - entryPrice) < minTPDistance) {
-                newTP = entryPrice + minTPDistance;
-            }
-        } else if (dir === "SELL") {
-            if (newSL <= entryPrice) {
+            } else {
                 newSL = entryPrice + minSLDistance;
-            }
-            if (Math.abs(entryPrice - newSL) < minSLDistance) {
-                newSL = entryPrice + minSLDistance;
-            }
-            if (Math.abs(entryPrice - newTP) < minTPDistance) {
-                newTP = entryPrice - minTPDistance;
             }
         }
 
         // Runde Preise ggf. auf die erlaubte Tickgröße
-        newSL = this.roundPrice(newSL, symbol, decimals);
-        newTP = this.roundPrice(newTP, symbol, decimals);
+        newSL = this.roundPrice(newSL, symbol);
+        newTP = this.roundPrice(newTP, symbol);
 
         logger.info(`[TP/SL Validation] Final SL: ${newSL}, Final TP: ${newTP}`);
         return { SL: newSL, TP: newTP };
     }
 
-    async executeTrade(symbol, signal, bid, ask, indicators = {}, context = {}) {
+    async executeTrade(symbol, signal, bid, ask, candles, indicators = {}) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context, indicators);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -199,7 +190,7 @@ class TradingService {
     }
 
     //  Main price processing ---
-    async processPrice({ symbol, indicators, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, candles, trendAnalysis, bid, ask }) {
         try {
             // TODO !!
             // Check trading conditions
@@ -217,11 +208,11 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, context, reason } = Strategy.getSignal({ symbol, indicators, candles });
+            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
-                await this.processSignal(symbol, signal, bid, ask, indicators, context);
+                await this.processSignal(symbol, signal, bid, ask, candles, indicators);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal found for reason: ${reason}`);
             }
@@ -231,9 +222,9 @@ class TradingService {
     }
 
     // --- Signal processing ---
-    async processSignal(symbol, signal, bid, ask, indicators = {}, constext = {}) {
+    async processSignal(symbol, signal, bid, ask, candles, indicators = {}) {
         try {
-            await this.executeTrade(symbol, signal, bid, ask, indicators, constext);
+            await this.executeTrade(symbol, signal, bid, ask, candles, indicators);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             // Check if the error message contains 'Not placed'
