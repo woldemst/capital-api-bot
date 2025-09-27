@@ -34,9 +34,9 @@ class TradingService {
     }
 
     // --- Price rounding ---
-    roundPrice(price, symbol, decimals) {
-        const d = typeof decimals === "number" ? decimals : symbol.includes("JPY") ? 3 : 5;
-        return Number(Number(price).toFixed(d));
+    roundPrice(price, symbol) {
+        const decimals = symbol.includes("JPY") ? 3 : 5;
+        return Number(price).toFixed(decimals) * 1;
     }
 
     // --- Position size + achievable SL/TP for M1 ---
@@ -105,12 +105,7 @@ class TradingService {
             TP: ${takeProfitPrice}
             Size: ${size}`);
 
-        return {
-            size,
-            price,
-            stopLossPrice,
-            takeProfitPrice,
-        };
+        return size, price, stopLossPrice, takeProfitPrice;
     }
     // --- TP/SL validation (unchanged) ---
     async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {

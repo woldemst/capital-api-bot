@@ -60,7 +60,7 @@ class TradingBot {
         }
     }
 
-    // WebSocket connection is just for 1 5, 5, 1 minute candles
+    // WebSocket connection is just for  5, 1 minute candles
     // setupWebSocket(tokens) {
     //     webSocketService.connect(tokens, DAY_SYMBOLS, (data) => {
     //         try {
@@ -96,15 +96,14 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                // if (!this.isTradingAllowed()) {
-                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                //     return;
-                // }
+                if (!this.isTradingAllowed()) {
+                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                    return;
+                }
 
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                // Don't need for that strategy
                 await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
