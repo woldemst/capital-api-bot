@@ -105,7 +105,7 @@ class TradingService {
             TP: ${takeProfitPrice}
             Size: ${size}`);
 
-        return size, price, stopLossPrice, takeProfitPrice;
+        return { size, price, stopLossPrice, takeProfitPrice };
     }
     // --- TP/SL validation (unchanged) ---
     async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
