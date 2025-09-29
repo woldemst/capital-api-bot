@@ -308,6 +308,27 @@ class TradingService {
             logger.error(`[trading.js][API] Failed to close position for dealId: ${dealId}`, error);
         }
     }
+
+    // --- Close all positions before weekend ---
+    async closeAllPositionsBeforeWeekend(getOpenPositions) {
+        const now = new Date();
+        const day = now.getDay(); // 5 = Friday, 6 = Saturday, 0 = Sunday
+        const hour = now.getHours();
+
+        // If it's Friday after 20:00 (8pm), close all positions
+        if (day === 5 && hour >= 20) {
+            logger.info("[Weekend] Closing all positions before weekend.");
+            try {
+                const openPositions = await getOpenPositions();
+                for (const pos of openPositions) {
+                    await this.closePosition(pos.dealId);
+                }
+                logger.info("[Weekend] All positions closed before weekend.");
+            } catch (error) {
+                logger.error("[Weekend] Error closing positions before weekend:", error);
+            }
+        }
+    }
 }
 
 export default new TradingService();
