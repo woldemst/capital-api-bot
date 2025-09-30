@@ -1,6 +1,6 @@
 // strategies.js
 import logger from "../utils/logger.js";
-import { RISK, STRATEGY_PARAMS, SESSIONS } from "../config.js";
+import { RISK, SESSIONS } from "../config.js";
 
 const { REQUIRED_SCORE } = RISK;
 

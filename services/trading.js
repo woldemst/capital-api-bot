@@ -231,7 +231,7 @@ class TradingService {
         }
     }
 
-    // --- Trailing stop logic (unchanged) ---
+    // --- Improved trailing stop logic ---
     async updateTrailingStopIfNeeded(position) {
         const { dealId, direction, entryPrice, takeProfit, stopLoss, currentPrice, size } = position;
 
@@ -240,51 +240,38 @@ class TradingService {
             return;
         }
 
-        const tpDistance = Math.abs(takeProfit - entryPrice);
+        const slDistance = Math.abs(entryPrice - stopLoss);
 
-        // Calculate profit targets
-        const tp50 = direction === "BUY" ? entryPrice + tpDistance * 0.5 : entryPrice - tpDistance * 0.5;
+        // Activate trailing once price moves +0.5× SL distance in profit
+        const activationLevel = direction === "BUY" ? entryPrice + slDistance * 0.5 : entryPrice - slDistance * 0.5;
+        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
-        const tp80 = direction === "BUY" ? entryPrice + tpDistance * 0.8 : entryPrice - tpDistance * 0.8;
+        if (!reachedActivation) {
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached trailing activation level.`);
+            return;
+        }
 
-        // Check if price reached 50% of target
-        const reached50TP = direction === "BUY" ? currentPrice >= tp50 : currentPrice <= tp50;
+        // Dynamic trailing: use 0.5× SL distance as buffer
+        const trailingBuffer = slDistance * 0.5;
+        const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
 
-        // Check if price reached 80% of target
-        const reached80TP = direction === "BUY" ? currentPrice >= tp80 : currentPrice <= tp80;
+        const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
 
-        try {
-            // First target: Close 50% at 1:1 R:R
-            if (reached50TP && size > 100) {
-                const partialSize = Math.floor(size / 2 / 100) * 100;
-                if (partialSize >= 100) {
-                    await this.closePartialPosition(dealId, partialSize);
-                    logger.info(`[PartialTP] Closed ${partialSize} units at 50% target for ${dealId}`);
-                }
+        if (shouldUpdate) {
+            try {
+                await updateTrailingStop(
+                    dealId,
+                    currentPrice,
+                    entryPrice,
+                    takeProfit,
+                    direction.toUpperCase(),
+                    position.symbol || position.market,
+                    true // enable trailing
+                );
+                logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);
+            } catch (error) {
+                logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
             }
-
-            // Second target: Trail remaining with tighter stop
-            if (reached80TP) {
-                const trailingBuffer = tpDistance * 0.1; // 10% of original TP distance
-                const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
-
-                const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
-
-                if (shouldUpdate) {
-                    await updateTrailingStop(
-                        dealId,
-                        currentPrice,
-                        entryPrice,
-                        takeProfit,
-                        direction.toUpperCase(),
-                        position.symbol || position.market,
-                        true // enable trailing
-                    );
-                    logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);
-                }
-            }
-        } catch (error) {
-            logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
         }
     }
 
