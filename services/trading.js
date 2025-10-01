@@ -43,30 +43,31 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask, candles) {
         const price = signal === "BUY" ? ask : bid;
         const { m1Candles } = candles;
+
         // Use previous M1 candle for SL
         const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
         if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-        // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
+        // Add slightly larger buffer to reduce early stop-outs (≈ 0.8–1 pip)
         const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
 
         let stopLossPrice, slDistance, takeProfitPrice;
 
         if (signal === "BUY") {
-            // For BUY: SL below previous candle low
+            // SL below previous candle low
             stopLossPrice = prevCandle.low - buffer;
             slDistance = price - stopLossPrice;
-            // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
+            // TP = entry + (1.8 × SL distance)
             takeProfitPrice = price + slDistance * 1.8;
         } else {
-            // For SELL: SL above previous candle high
+            // SL above previous candle high
             stopLossPrice = prevCandle.high + buffer;
             slDistance = stopLossPrice - price;
             // TP = entry - (1.8 × SL distance)
             takeProfitPrice = price - slDistance * 1.8;
         }
 
-        // Ensure minimum SL distance to avoid excessively tight SLs
+        // Ensure minimum SL distance
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
         const minSlPips = symbol.includes("JPY") ? 12 : 10;
         const minSl = minSlPips * pip;
@@ -82,28 +83,27 @@ class TradingService {
             }
         }
 
-        // Round prices to appropriate decimals
+        // Round SL/TP to valid decimals
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // --- FIX: Normalize SL distance for JPY pairs ---
-        let normalizedSlDistance = slDistance;
-        if (symbol.includes("JPY")) {
-            normalizedSlDistance = slDistance / pip; // Convert to pips for JPY pairs
-        }
+        // --- FIXED: Proper pip-based sizing for all symbols ---
+        const slPips = Math.abs(slDistance / pip); // SL distance in pips
+        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
 
-        // Calculate position size based on risk
         const maxSimultaneousTrades = MAX_POSITIONS;
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-        let size = riskAmount / Math.abs(normalizedSlDistance);
-        size = Math.floor(size / 100) * 100; // Round to nearest 100
-        if (size < 100) size = 100; // Minimum size
+
+        let size = riskAmount / (slPips * pipValuePerUnit);
+        size = Math.floor(size / 100) * 100; // round down to nearest 100
+        if (size < 100) size = 100; // enforce minimum
 
         logger.info(`[Trade Parameters] ${symbol} ${signal}:
-            Entry: ${price}
-            SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
-            TP: ${takeProfitPrice}
-            Size: ${size}`);
+        Entry: ${price}
+        SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
+        TP: ${takeProfitPrice}
+        Size: ${size}
+        PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
