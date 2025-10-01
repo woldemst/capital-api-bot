@@ -43,30 +43,31 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask, candles) {
         const price = signal === "BUY" ? ask : bid;
         const { m1Candles } = candles;
+
         // Use previous M1 candle for SL
         const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
         if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-        // Add slightly larger buffer to reduce early stop-outs (0.8-1 pip)
+        // Add slightly larger buffer to reduce early stop-outs (≈ 0.8–1 pip)
         const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
 
         let stopLossPrice, slDistance, takeProfitPrice;
 
         if (signal === "BUY") {
-            // For BUY: SL below previous candle low
+            // SL below previous candle low
             stopLossPrice = prevCandle.low - buffer;
             slDistance = price - stopLossPrice;
-            // TP = entry + (1.8 × SL distance) -> larger TP to avoid whipsaws
+            // TP = entry + (1.8 × SL distance)
             takeProfitPrice = price + slDistance * 1.8;
         } else {
-            // For SELL: SL above previous candle high
+            // SL above previous candle high
             stopLossPrice = prevCandle.high + buffer;
             slDistance = stopLossPrice - price;
             // TP = entry - (1.8 × SL distance)
             takeProfitPrice = price - slDistance * 1.8;
         }
 
-        // Ensure minimum SL distance to avoid excessively tight SLs
+        // Ensure minimum SL distance
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
         const minSlPips = symbol.includes("JPY") ? 12 : 10;
         const minSl = minSlPips * pip;
@@ -82,31 +83,31 @@ class TradingService {
             }
         }
 
-        // Round prices to appropriate decimals
+        // Round SL/TP to valid decimals
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // --- FIX: Normalize SL distance for JPY pairs ---
-        let normalizedSlDistance = slDistance;
-        if (symbol.includes("JPY")) {
-            normalizedSlDistance = slDistance / pip; // Convert to pips for JPY pairs
-        }
+        // --- FIXED: Proper pip-based sizing for all symbols ---
+        const slPips = Math.abs(slDistance / pip); // SL distance in pips
+        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
 
-        // Calculate position size based on risk
         const maxSimultaneousTrades = MAX_POSITIONS;
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-        let size = riskAmount / Math.abs(normalizedSlDistance);
-        size = Math.floor(size / 100) * 100; // Round to nearest 100
-        if (size < 100) size = 100; // Minimum size
+
+        let size = riskAmount / (slPips * pipValuePerUnit);
+        size = Math.floor(size / 100) * 100; // round down to nearest 100
+        if (size < 100) size = 100; // enforce minimum
 
         logger.info(`[Trade Parameters] ${symbol} ${signal}:
-            Entry: ${price}
-            SL: ${stopLossPrice} (${slDistance.toFixed(5)} points)
-            TP: ${takeProfitPrice}
-            Size: ${size}`);
+        Entry: ${price}
+        SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
+        TP: ${takeProfitPrice}
+        Size: ${size}
+        PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
 
-        return size, price, stopLossPrice, takeProfitPrice;
+        return { size, price, stopLossPrice, takeProfitPrice };
     }
+
     // --- TP/SL validation (unchanged) ---
     async validateTPandSL(symbol, direction, entryPrice, stopLossPrice, takeProfitPrice) {
         logger.info(`[TP/SL Validation] Symbol: ${symbol}, Direction: ${direction}`);
@@ -231,7 +232,7 @@ class TradingService {
         }
     }
 
-    // --- Trailing stop logic (unchanged) ---
+    // --- Improved trailing stop logic ---
     async updateTrailingStopIfNeeded(position) {
         const { dealId, direction, entryPrice, takeProfit, stopLoss, currentPrice, size } = position;
 
@@ -240,51 +241,38 @@ class TradingService {
             return;
         }
 
-        const tpDistance = Math.abs(takeProfit - entryPrice);
+        const slDistance = Math.abs(entryPrice - stopLoss);
 
-        // Calculate profit targets
-        const tp50 = direction === "BUY" ? entryPrice + tpDistance * 0.5 : entryPrice - tpDistance * 0.5;
+        // Activate trailing once price moves +0.5× SL distance in profit
+        const activationLevel = direction === "BUY" ? entryPrice + slDistance * 0.5 : entryPrice - slDistance * 0.5;
+        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
-        const tp80 = direction === "BUY" ? entryPrice + tpDistance * 0.8 : entryPrice - tpDistance * 0.8;
+        if (!reachedActivation) {
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached trailing activation level.`);
+            return;
+        }
 
-        // Check if price reached 50% of target
-        const reached50TP = direction === "BUY" ? currentPrice >= tp50 : currentPrice <= tp50;
+        // Dynamic trailing: use 0.5× SL distance as buffer
+        const trailingBuffer = slDistance * 0.5;
+        const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
 
-        // Check if price reached 80% of target
-        const reached80TP = direction === "BUY" ? currentPrice >= tp80 : currentPrice <= tp80;
+        const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
 
-        try {
-            // First target: Close 50% at 1:1 R:R
-            if (reached50TP && size > 100) {
-                const partialSize = Math.floor(size / 2 / 100) * 100;
-                if (partialSize >= 100) {
-                    await this.closePartialPosition(dealId, partialSize);
-                    logger.info(`[PartialTP] Closed ${partialSize} units at 50% target for ${dealId}`);
-                }
+        if (shouldUpdate) {
+            try {
+                await updateTrailingStop(
+                    dealId,
+                    currentPrice,
+                    entryPrice,
+                    takeProfit,
+                    direction.toUpperCase(),
+                    position.symbol || position.market,
+                    true // enable trailing
+                );
+                logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);
+            } catch (error) {
+                logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
             }
-
-            // Second target: Trail remaining with tighter stop
-            if (reached80TP) {
-                const trailingBuffer = tpDistance * 0.1; // 10% of original TP distance
-                const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
-
-                const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
-
-                if (shouldUpdate) {
-                    await updateTrailingStop(
-                        dealId,
-                        currentPrice,
-                        entryPrice,
-                        takeProfit,
-                        direction.toUpperCase(),
-                        position.symbol || position.market,
-                        true // enable trailing
-                    );
-                    logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);
-                }
-            }
-        } catch (error) {
-            logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
         }
     }
 
@@ -306,6 +294,27 @@ class TradingService {
             if (result) logTradeResult(dealId, result);
         } catch (error) {
             logger.error(`[trading.js][API] Failed to close position for dealId: ${dealId}`, error);
+        }
+    }
+
+    // --- Close all positions before weekend ---
+    async closeAllPositionsBeforeWeekend(getOpenPositions) {
+        const now = new Date();
+        const day = now.getDay(); // 5 = Friday, 6 = Saturday, 0 = Sunday
+        const hour = now.getHours();
+
+        // If it's Friday after 20:00 (8pm), close all positions
+        if (day === 5 && hour >= 20) {
+            logger.info("[Weekend] Closing all positions before weekend.");
+            try {
+                const openPositions = await getOpenPositions();
+                for (const pos of openPositions) {
+                    await this.closePosition(pos.dealId);
+                }
+                logger.info("[Weekend] All positions closed before weekend.");
+            } catch (error) {
+                logger.error("[Weekend] Error closing positions before weekend:", error);
+            }
         }
     }
 }
