@@ -19,7 +19,19 @@ class TradingBot {
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 120; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
-        this.tradingHours = { start: 1, end: 21 };
+
+        // Define allowed trading windows (UTC, Berlin time for example)
+        this.allowedTradingWindows = [
+            // London: 08:15–16:45
+            { start: 8 * 60 + 15, end: 16 * 60 + 45 },
+            // NY: 13:15–20:45
+            { start: 13 * 60 + 15, end: 20 * 60 + 45 },
+            // Sydney: 22:15–6:45 (overnight, so split into two ranges)
+            { start: 22 * 60 + 15, end: 23 * 60 + 59 },
+            { start: 0, end: 6 * 60 + 45 },
+            // Tokyo: 0:15–8:45
+            { start: 0 * 60 + 15, end: 8 * 60 + 45 },
+        ];
     }
 
     async initialize() {
@@ -414,18 +426,30 @@ class TradingBot {
     isTradingAllowed() {
         const now = new Date();
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday
-        const hour = now.getHours();
-
-        // Block weekends
         if (day === 0 || day === 6) {
             logger.info("[Bot] Trading blocked: Weekend.");
             return false;
         }
-        // Block outside trading hours (22:00 - 02:00)
-        // if (hour < this.tradingHours.start || hour >= this.tradingHours.end) {
-        //     logger.info(`[Bot] Trading blocked: Outside trading hours (${this.tradingHours.start}:00-${this.tradingHours.end}:00).`);
-        //     return false;
-        // }
+
+        // Get current time in minutes (Berlin time)
+        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+        const minute = Number(now.toLocaleString("en-US", { minute: "2-digit", timeZone: "Europe/Berlin" }));
+        const currentMinutes = hour * 60 + minute;
+
+        // Check if current time is inside any allowed window
+        const allowed = this.allowedTradingWindows.some(win => {
+            if (win.start <= win.end) {
+                return currentMinutes >= win.start && currentMinutes <= win.end;
+            } else {
+                // Overnight session (e.g. Sydney)
+                return currentMinutes >= win.start || currentMinutes <= win.end;
+            }
+        });
+
+        if (!allowed) {
+            logger.info("[Bot] Trading blocked: Not in allowed session window (first/last 15 min excluded).");
+            return false;
+        }
         return true;
     }
 

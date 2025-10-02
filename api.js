@@ -129,7 +129,7 @@ export const getOpenPositions = async () =>
     });
 
 export async function getHistorical(symbol, resolution, count) {
-    logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
+    // logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
     return {
         prices: response.data.prices.map((p) => ({

@@ -1,6 +1,6 @@
 // strategies.js
 import logger from "../utils/logger.js";
-import { RISK, STRATEGY_PARAMS, SESSIONS } from "../config.js";
+import { RISK, SESSIONS } from "../config.js";
 
 const { REQUIRED_SCORE } = RISK;
 
@@ -33,7 +33,8 @@ class Strategy {
             // const patternDir = this.greenRedCandlePattern(h1Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
             // if (!patternDir) return { signal: null, reason: "price_action_pattern_failed" };
 
-            const patternDir = this.greenRedCandlePattern(h1Trend, prev, last);
+            const patternDir = this.greenRedCandlePattern(h1Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
+            // const patternDir = this.greenRedCandlePattern(h1Trend, prev, last);
             if (!patternDir) {
                 logger.info(`[Signal Analysis] ${symbol}: No valid M15 pattern for H1 trend (${h1Trend}).`);
                 return { signal: null, reason: "no_valid_pattern" };

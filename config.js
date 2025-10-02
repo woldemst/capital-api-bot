@@ -122,20 +122,3 @@ export const PROD = {
     INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 3000,
     // INTERVAL: 60 * 1000, // 60 seconds between analyses
 };
-
-// For convenience in error messages and logging
-export const VERSION = "1.0.0";
-
-// Add strategy parameters
-export const STRATEGY_PARAMS = {
-    BREAKOUT: {
-        BUFFER_PIPS: 2,
-        RANGE_MINUTES: 30,
-        RR_RATIO: 1.5,
-    },
-    SCALPING: {
-        SL_PIPS: 5,
-        TP_PIPS: 10,
-        ATR_THRESHOLD: 0.0003,
-    },
-};
