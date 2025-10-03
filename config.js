@@ -86,11 +86,19 @@ export const ANALYSIS = {
     },
 
     // EMAs for trend and entry
+
     EMA: {
-        D1: { FAST: 20, SLOW: 50 },
-        H4: { FAST: 20, SLOW: 50 },
-        H1: { FAST: 9, SLOW: 21 },
-    }, // RSI settings
+        TREND: {
+            FAST: 50,
+            SLOW: 200,
+        },
+        ENTRY: {
+            FAST: 9,
+            SLOW: 21,
+        },
+    },
+
+    // RSI settings
     RSI: {
         PERIOD: 14,
         OVERBOUGHT: 70,
@@ -114,7 +122,7 @@ export const HISTORY = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 15 seconds between analyses (was 1 min)
+    INTERVAL: 60 * 1000, // 1 minute between analyses
     MODE: true,
 };
 

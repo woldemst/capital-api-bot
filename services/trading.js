@@ -40,37 +40,33 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, candles) {
-        const price = signal === "BUY" ? ask : bid;
+    async calculateTradeParameters(signal, symbol, bid, ask, indicators, candles) {
+        const atr = indicators.atr || 0.001; // fallback if ATR missing
         const { m1Candles } = candles;
+
+        const price = signal === "BUY" ? ask : bid;
 
         // Use previous M1 candle for SL
         const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
         if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
-        // Add slightly larger buffer to reduce early stop-outs (≈ 0.8–1 pip)
         const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
-
         let stopLossPrice, slDistance, takeProfitPrice;
 
         if (signal === "BUY") {
-            // SL below previous candle low
             stopLossPrice = prevCandle.low - buffer;
             slDistance = price - stopLossPrice;
-            // TP = entry + (1.8 × SL distance)
             takeProfitPrice = price + slDistance * 1.8;
         } else {
-            // SL above previous candle high
             stopLossPrice = prevCandle.high + buffer;
             slDistance = stopLossPrice - price;
-            // TP = entry - (1.8 × SL distance)
             takeProfitPrice = price - slDistance * 1.8;
         }
 
-        // Ensure minimum SL distance
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
         const minSlPips = symbol.includes("JPY") ? 12 : 10;
         const minSl = minSlPips * pip;
+
         if (Math.abs(slDistance) < minSl) {
             if (signal === "BUY") {
                 stopLossPrice = price - minSl;
@@ -83,27 +79,9 @@ class TradingService {
             }
         }
 
-        // Round SL/TP to valid decimals
-        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
-
-        // --- FIXED: Proper pip-based sizing for all symbols ---
-        const slPips = Math.abs(slDistance / pip); // SL distance in pips
-        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
-
-        const maxSimultaneousTrades = MAX_POSITIONS;
-        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-
-        let size = riskAmount / (slPips * pipValuePerUnit);
-        size = Math.floor(size / 100) * 100; // round down to nearest 100
-        if (size < 100) size = 100; // enforce minimum
-
-        logger.info(`[Trade Parameters] ${symbol} ${signal}:
-        Entry: ${price}
-        SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
-        TP: ${takeProfitPrice}
-        Size: ${size}
-        PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
+        let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
+        size = Math.floor(size / 100) * 100;
+        if (size < 100) size = 100;
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
@@ -139,9 +117,9 @@ class TradingService {
         return { SL: newSL, TP: newTP };
     }
 
-    async executeTrade(symbol, signal, bid, ask, candles, indicators = {}) {
+    async executeTrade(symbol, signal, bid, ask, indicators = {}, candles) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators, candles);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -205,12 +183,8 @@ class TradingService {
                 return;
             }
             // const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
-            const h4Indicators = indicators.h4;
-            const h1Indicators = indicators.h1;
-            const m15Indicators = indicators.m15;
 
-
-            const { signal, reason } = Strategy.legacyMultiTfStrategy({ h4Indicators, h1Indicators, m15Indicators, bid, ask });
+            const { signal, reason } = Strategy.legacyMultiTfStrategy({ indicators, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
@@ -226,7 +200,7 @@ class TradingService {
     // --- Signal processing ---
     async processSignal(symbol, signal, bid, ask, candles, indicators = {}) {
         try {
-            await this.executeTrade(symbol, signal, bid, ask, candles, indicators);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, candles);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             // Check if the error message contains 'Not placed'
@@ -239,18 +213,19 @@ class TradingService {
     }
 
     // --- Improved trailing stop logic ---
-    async updateTrailingStopIfNeeded(position) {
-        const { dealId, direction, entryPrice, takeProfit, stopLoss, currentPrice, size } = position;
+    async updateTrailingStopIfNeeded(position, indicators = {}) {
+        const { dealId, direction, entryPrice, stopLoss, currentPrice, symbol } = position;
 
         if (!dealId) {
             logger.warn(`[TrailingStop] No dealId for position, skipping update.`);
             return;
         }
 
-        const slDistance = Math.abs(entryPrice - stopLoss);
+        // Use ATR from indicators (fallback to SL distance if missing)
+        const atr = indicators.atr || Math.abs(entryPrice - stopLoss);
 
-        // Activate trailing once price moves +0.5× SL distance in profit
-        const activationLevel = direction === "BUY" ? entryPrice + slDistance * 0.5 : entryPrice - slDistance * 0.5;
+        // Activate trailing when price moves +1×ATR in profit
+        const activationLevel = direction === "BUY" ? entryPrice + atr : entryPrice - atr;
         const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
@@ -258,10 +233,10 @@ class TradingService {
             return;
         }
 
-        // Dynamic trailing: use 0.5× SL distance as buffer
-        const trailingBuffer = slDistance * 0.5;
-        const newStop = direction === "BUY" ? currentPrice - trailingBuffer : currentPrice + trailingBuffer;
+        // Trailing stop: set new stop at ATR distance from current price
+        const newStop = direction === "BUY" ? currentPrice - atr : currentPrice + atr;
 
+        // Only update if new stop is better than previous
         const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
 
         if (shouldUpdate) {
@@ -270,12 +245,12 @@ class TradingService {
                     dealId,
                     currentPrice,
                     entryPrice,
-                    takeProfit,
+                    null, // takeProfit not needed for trailing
                     direction.toUpperCase(),
-                    position.symbol,
+                    symbol,
                     true // enable trailing
                 );
-                logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);
+                logger.info(`[TrailingStop] Updated stop to ${newStop} (ATR: ${atr}) for ${dealId}`);
             } catch (error) {
                 logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
             }

@@ -15,9 +15,7 @@ class Strategy {
         try {
             // --- 1) Determine H1 trend (EMA fast vs slow or isBullishTrend if provided) ---
             let h1Trend = "neutral";
-            if (typeof h1.isBullishTrend === "boolean") {
-                h1Trend = h1.isBullishTrend ? "bullish" : "bearish";
-            } else if (typeof h1.emaFast === "number" && typeof h1.emaSlow === "number") {
+            if (typeof h1.emaFast === "number" && typeof h1.emaSlow === "number") {
                 h1Trend = h1.emaFast > h1.emaSlow ? "bullish" : "bearish";
             } else if (trendAnalysis && typeof trendAnalysis.h1Trend === "string") {
                 h1Trend = trendAnalysis.h1Trend.toLowerCase();
@@ -136,13 +134,17 @@ class Strategy {
         }
     }
 
-    legacyMultiTfStrategy({ h4Indicators, h1Indicators, m15Indicators }) {
+    legacyMultiTfStrategy({ indicators, bid, ask }) {
         const RSI_CONFIG = {
             OVERBOUGHT: 70,
             OVERSOLD: 30,
             EXIT_OVERBOUGHT: 65,
             EXIT_OVERSOLD: 35,
         };
+
+        const h4Indicators = indicators.h4;
+        const h1Indicators = indicators.h1;
+        const m15Indicators = indicators.m15;
 
         // --- Buy conditions ---
         const buyConditions = [
@@ -152,6 +154,7 @@ class Strategy {
             h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD,
             m15Indicators.isBullishCross,
             m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
+            bid <= m15Indicators.bb?.lower,
         ];
 
         // --- Sell conditions ---
@@ -162,16 +165,17 @@ class Strategy {
             h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
             m15Indicators.isBearishCross,
             m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
+            ask >= m15Indicators.bb?.upper,
         ];
 
         const buyScore = buyConditions.filter(Boolean).length;
         const sellScore = sellConditions.filter(Boolean).length;
 
         let signal = null;
-        if (buyScore >= REQUIRED_SCORE) signal = "BUY";
-        else if (sellScore >= REQUIRED_SCORE) signal = "SELL";
-        const reason = signal ? "all_filters_passed" : "score_too_low";
-        return { signal, buyScore, sellScore, reason };
+        if (buyScore >= 3) signal = "BUY";  // Only need 3 out of 7 conditions
+        else if (sellScore >= 3) signal = "SELL";
+        
+        return { signal, buyScore, sellScore, reason: signal ? "all_filters_passed" : "score_too_low" };
     }
 
     greenRedCandlePattern(trend, prev, last) {

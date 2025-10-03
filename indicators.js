@@ -1,4 +1,5 @@
 import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
+import { ANALYSIS } from "./config.js";
 
 export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
@@ -9,6 +10,10 @@ export async function calcIndicators(bars) {
     const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
     const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
 
+    // Add the essential trend EMAs from old version
+    const emaFastTrend = EMA.calculate({ period: ANALYSIS.EMA.TREND.FAST, values: closes });
+    const emaSlowTrend = EMA.calculate({ period: ANALYSIS.EMA.TREND.SLOW, values: closes });
+    
     // EMA series and helpers (needed for Calm River)
     const ema20Series = EMA.calculate({ period: 20, values: closes });
     const ema30Series = EMA.calculate({ period: 30, values: closes });
@@ -51,6 +56,16 @@ export async function calcIndicators(bars) {
     const maFast = SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop();
     const maSlow = SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop();
 
+    // Add ATR calculation from old version (more accurate)
+    const tr = [];
+    for (let i = 1; i < bars.length; i++) {
+        const hl = highs[i] - lows[i];
+        const hc = Math.abs(highs[i] - closes[i - 1]);
+        const lc = Math.abs(lows[i] - closes[i - 1]);
+        tr.push(Math.max(hl, hc, lc));
+    }
+    const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
+
     return {
         maFast,
         maSlow,
@@ -79,7 +94,7 @@ export async function calcIndicators(bars) {
         rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
         bb: bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
-        atr: ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop(),
+        atr: atr,
         adaptiveRSI: (() => {
             const baseRSI = 50;
             const atrVal = ATR.calculate({ period: 14, high: highs, low: lows, close: closes }).pop();
@@ -111,6 +126,30 @@ export async function calcIndicators(bars) {
             emaSlow: emaSlowCurrent,
             emaFastSlope: emaFastCurrent - emaFastPrev,
         },
+        // Add profitable version indicators
+        emaFastTrend: emaFastTrend.length ? emaFastTrend[emaFastTrend.length - 1] : null,
+        emaSlowTrend: emaSlowTrend.length ? emaSlowTrend[emaSlowTrend.length - 1] : null,
+        
+        // Add crossover detection from old version
+        isBullishCross: 
+            ema9.length > 1 &&
+            ema21.length > 1 &&
+            ema9[ema9.length - 1] > ema21[ema21.length - 1] &&
+            ema9[ema9.length - 2] <= ema21[ema21.length - 2],
+        
+        isBearishCross:
+            ema9.length > 1 &&
+            ema21.length > 1 &&
+            ema9[ema9.length - 1] < ema21[ema21.length - 1] &&
+            ema9[ema9.length - 2] >= ema21[ema21.length - 2],
+        
+        // Add bullish trend confirmation
+        isBullishTrend:
+            emaFastTrend.length &&
+            emaSlowTrend.length &&
+            emaFastTrend[emaFastTrend.length - 1] > emaSlowTrend[emaSlowTrend.length - 1] &&
+            closes[closes.length - 1] > emaFastTrend[emaFastTrend.length - 1],
+
     };
 
 
@@ -125,26 +164,35 @@ export async function analyzeTrend(symbol, getHistorical) {
     }
 
     try {
-        const h1Data = await getHistorical(symbol, "HOUR", 50);
+        // Add back D1 timeframe analysis
+        const [h4Data, d1Data] = await Promise.all([
+            getHistorical(symbol, ANALYSIS.TIMEFRAMES.TREND, 50),
+            getHistorical(symbol, "DAY", 30)
+        ]);
 
-        if (!h1Data?.prices) {
+        if (!h4Data?.prices || !d1Data?.prices) {
             console.error("Missing prices in historical data");
             return { overallTrend: "unknown" };
         }
 
-        // Calculate indicators for h1 timeframe
-        const h1Indicators = await calcIndicators(h1Data.prices);
+        const h4Indicators = await calcIndicators(h4Data.prices);
+        const d1Indicators = await calcIndicators(d1Data.prices);
 
-        // Determine trend direction only by H4
-        const h1Trend = h1Indicators.maFast > h1Indicators.maSlow ? "bullish" : "bearish";
+        // Use EMA crossover for trend determination
+        const h4Trend = h4Indicators.emaFastTrend > h4Indicators.emaSlowTrend ? "bullish" : "bearish";
+        const d1Trend = d1Indicators.emaFastTrend > d1Indicators.emaSlowTrend ? "bullish" : "bearish";
 
-        console.log(`${symbol} H1 Trend: ${h1Trend}`);
-
-        // Return trend analysis (overallTrend = h1Trend)
         return {
-            h1Trend,
-            h1Indicators,
-            overallTrend: h1Trend,
+            h4Trend,
+            d1Trend,
+            h4Indicators,
+            d1Indicators,
+            overallTrend:
+                h4Trend === "bullish" && d1Trend === "bullish" 
+                    ? "bullish" 
+                    : h4Trend === "bearish" && d1Trend === "bearish" 
+                        ? "bearish" 
+                        : "mixed",
         };
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);

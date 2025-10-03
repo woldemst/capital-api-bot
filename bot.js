@@ -116,7 +116,7 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                await this.startMonitorOpenTrades();
+                // await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -261,7 +261,7 @@ class TradingBot {
 
         const candles = { h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
-        // const trendAnalysis = await analyzeTrend(symbol, getHistorical);
+        const trendAnalysis = await analyzeTrend(symbol, getHistorical);
 
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
@@ -270,6 +270,7 @@ class TradingBot {
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
+            trendAnalysis,
             indicators,
             candles,
             symbol,
@@ -290,11 +291,15 @@ class TradingBot {
         try {
             const positions = await getOpenPositions();
             for (const pos of positions.positions) {
-                // console.log("pos", pos);
+                const symbol = pos.market ? pos.market.epic : pos.position.epic;
+
+                // Fetch recent candles for the symbol (e.g. M15)
+                const m15Data = await getHistorical(symbol, "MINUTE_15", 50);
+                const indicators = await calcIndicators(m15Data.prices);
 
                 const positionData = {
                     dealId: pos.position.dealId,
-                    symbol: pos.market ? pos.market.epic : pos.position.epic,
+                    symbol,
                     currency: pos.position.currency,
                     direction: pos.position.direction,
                     size: pos.position.size,
@@ -302,10 +307,12 @@ class TradingBot {
                     entryPrice: pos.position.level,
                     takeProfit: pos.position.profitLevel,
                     stopLoss: pos.position.stopLevel,
-                    currentPrice: pos.market.bid, // or offer, depending on direction
+                    currentPrice: pos.market.bid,
                     trailingStop: pos.position.trailingStop,
                 };
-                await tradingService.updateTrailingStopIfNeeded(positionData);
+
+                // Pass indicators to trailing stop logic
+                await tradingService.updateTrailingStopIfNeeded(positionData, indicators);
             }
         } catch (error) {
             logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
