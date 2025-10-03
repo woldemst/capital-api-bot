@@ -92,7 +92,12 @@ async function withSessionRetry(fn, ...args) {
     } catch (error) {
         const status = error.response?.status;
         const errorCode = error.response?.data?.errorCode || "";
-        if (status === 401 || status === 403 || errorCode === "error.invalid.session.token" || (typeof errorCode === "string" && errorCode.toLowerCase().includes("session"))) {
+        if (
+            status === 401 ||
+            status === 403 ||
+            errorCode === "error.invalid.session.token" ||
+            (typeof errorCode === "string" && errorCode.toLowerCase().includes("session"))
+        ) {
             logger.warn("[API] Session error detected. Refreshing session and retrying...");
             await refreshSession();
             return await fn(...args); // Retry once
@@ -129,7 +134,7 @@ export const getOpenPositions = async () =>
     });
 
 export async function getHistorical(symbol, resolution, count) {
-    logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
+    // logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
     return {
         prices: response.data.prices.map((p) => ({
@@ -161,13 +166,13 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
 }
 
 export async function updateTrailingStop(
-    positionId, // (string) the position/deal id to update
-    currentPrice, // (number) latest market price (bid for BUY, offer for SELL)
-    entryPrice, // (number) price at which the position was entered
-    takeProfit, // (number) planned take‑profit level
-    direction, // (string) "BUY" or "SELL"
-    symbol, // (string) market epic (e.g. "USDCAD")
-    isTrailingEnabled // (boolean) true if trailing already active
+    positionId,
+    currentPrice,
+    entryPrice,
+    takeProfit,
+    direction,
+    symbol,
+    isTrailingEnabled
 ) {
     const tpDistance = Math.abs(takeProfit - entryPrice);
     const thresholdPrice = direction.toUpperCase() === "BUY" ? entryPrice + 0.7 * tpDistance : entryPrice - 0.7 * tpDistance;
@@ -178,36 +183,20 @@ export async function updateTrailingStop(
         return; // keep the original SL until the threshold is hit
     }
 
-    const trailingDistance = 0.1 * tpDistance;
-    let newStop = direction.toUpperCase() === "BUY" ? currentPrice - trailingDistance : currentPrice + trailingDistance;
-
-    try {
-        const range = await getAllowedTPRange(symbol);
-        const minStopDistance = range.minSLDistancePrice || 0;
-
-        if (direction.toUpperCase() === "BUY") {
-            if (currentPrice - newStop < minStopDistance) {
-                newStop = currentPrice - minStopDistance;
-            }
-        } else {
-            if (newStop - currentPrice < minStopDistance) {
-                newStop = currentPrice + minStopDistance;
-            }
-        }
-    } catch (e) {
-        logger.warn("[API] Unable to fetch TP/SL limits – proceeding without min‑stop check");
-    }
+    // trailingDistance is the distance in price units (e.g. 0.0012 for EURUSD)
+    // Make sure it's a positive number
+    const trailingDistance = Math.abs(currentPrice - entryPrice) * 0.1 || 0.001; // fallback if calculation fails
 
     try {
         const response = await axios.put(
             `${API.BASE_URL}/positions/${positionId}`,
             {
                 trailingStop: true,
-                stopLevel: newStop,
+                stopDistance: trailingDistance, // <-- THIS IS REQUIRED
             },
             { headers: getHeaders(true) }
         );
-        logger.info(`[API] Trailing stop for ${positionId} set to ${newStop}`);
+        logger.info(`[API] Trailing stop for ${positionId} set to distance ${trailingDistance}`);
         return response.data;
     } catch (err) {
         logger.error(`[API] updateTrailingStop error for ${positionId}:`, err.response?.data || err.message);

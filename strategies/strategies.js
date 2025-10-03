@@ -1,6 +1,6 @@
 // strategies.js
 import logger from "../utils/logger.js";
-import { RISK, STRATEGY_PARAMS, SESSIONS } from "../config.js";
+import { RISK } from "../config.js";
 
 const { REQUIRED_SCORE } = RISK;
 
@@ -9,7 +9,7 @@ class Strategy {
 
     getSignal({ symbol, indicators, candles, trendAnalysis }) {
         if (!symbol || !candles || !indicators) return { signal: null, reason: "missing_data" };
-        const { m1Candles, m15Candles } = candles;
+        const { m15Candles } = candles;
         const { m1, m5, m15, h1 } = indicators;
 
         try {
@@ -133,6 +133,44 @@ class Strategy {
             logger.warn(`${symbol}: Signal check failed: ${e?.message || e}`);
             return { signal: null, reason: "error" };
         }
+    }
+
+    legacyMultiTfStrategy({ h4Indicators, h1Indicators, m15Indicators }) {
+        const RSI_CONFIG = {
+            OVERBOUGHT: 70,
+            OVERSOLD: 30,
+            EXIT_OVERBOUGHT: 65,
+            EXIT_OVERSOLD: 35,
+        };
+
+        // --- Buy conditions ---
+        const buyConditions = [
+            h4Indicators.emaFast > h4Indicators.emaSlow,
+            h4Indicators.macd?.histogram > 0,
+            h1Indicators.ema9 > h1Indicators.ema21,
+            h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD,
+            m15Indicators.isBullishCross,
+            m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
+        ];
+
+        // --- Sell conditions ---
+        const sellConditions = [
+            !h4Indicators.isBullishTrend,
+            h4Indicators.macd?.histogram < 0,
+            h1Indicators.ema9 < h1Indicators.ema21,
+            h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
+            m15Indicators.isBearishCross,
+            m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
+        ];
+
+        const buyScore = buyConditions.filter(Boolean).length;
+        const sellScore = sellConditions.filter(Boolean).length;
+
+        let signal = null;
+        if (buyScore >= REQUIRED_SCORE) signal = "BUY";
+        else if (sellScore >= REQUIRED_SCORE) signal = "SELL";
+        const reason = signal ? "all_filters_passed" : "score_too_low";
+        return { signal, buyScore, sellScore, reason };
     }
 
     greenRedCandlePattern(trend, prev, last) {

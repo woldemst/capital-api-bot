@@ -193,13 +193,15 @@ class TradingBot {
 
     async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
         try {
-            const [h1Data, m15Data, m5Data, m1Data] = await Promise.all([
+            const [h4Data, h1Data, m15Data, m5Data, m1Data] = await Promise.all([
+                getHistorical(symbol, timeframes.H4, historyLength),
                 getHistorical(symbol, timeframes.H1, historyLength),
                 getHistorical(symbol, timeframes.M15, historyLength),
                 getHistorical(symbol, timeframes.M5, historyLength),
                 getHistorical(symbol, timeframes.M1, historyLength),
             ]);
-            return { h1Data, m15Data, m5Data, m1Data };
+            console.log(`Fetched candles: ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`);
+            return { h4Data, h1Data, m15Data, m5Data, m1Data };
         } catch (error) {
             logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
             return {};
@@ -210,11 +212,12 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        const { h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+        const { h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
             // D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
+            H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
             H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
             M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
             M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
@@ -222,30 +225,29 @@ class TradingBot {
         };
 
         // const d1Candles = this.candleHistory[symbol].D1;
+        const h4Candles = this.candleHistory[symbol].H4;
         const h1Candles = this.candleHistory[symbol].H1;
         const m15Candles = this.candleHistory[symbol].M15;
         const m5Candles = this.candleHistory[symbol].M5;
         const m1Candles = this.candleHistory[symbol].M1;
 
-        if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
+        if (!h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
             );
             return;
         }
 
         const indicators = {
             // d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
+            h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        const candles = { h1Candles, m15Candles, m5Candles, m1Candles };
-
-        // TODO !!
-        // Determine strategy for current session
+        const candles = { h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
         const trendAnalysis = await analyzeTrend(symbol, getHistorical);
 
@@ -281,6 +283,7 @@ class TradingBot {
 
                 const positionData = {
                     dealId: pos.position.dealId,
+                    symbol: pos.market ? pos.market.epic : pos.position.epic,
                     currency: pos.position.currency,
                     direction: pos.position.direction,
                     size: pos.position.size,
@@ -413,6 +416,14 @@ class TradingBot {
 
     isTradingAllowed() {
         const now = new Date();
+        const minutes = now.getMinutes();
+        
+        // Only analyze in the last minute of each M15 candle
+        if (minutes % 15 !== 14) {
+            logger.debug("[Bot] Waiting for M15 candle close...");
+            return false;
+        }
+
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday
         const hour = now.getHours();
 

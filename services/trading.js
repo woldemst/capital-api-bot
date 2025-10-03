@@ -204,7 +204,13 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
+            // const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
+            const h4Indicators = indicators.h4;
+            const h1Indicators = indicators.h1;
+            const m15Indicators = indicators.m15;
+
+
+            const { signal, reason } = Strategy.legacyMultiTfStrategy({ h4Indicators, h1Indicators, m15Indicators, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
@@ -266,7 +272,7 @@ class TradingService {
                     entryPrice,
                     takeProfit,
                     direction.toUpperCase(),
-                    position.symbol || position.market,
+                    position.symbol,
                     true // enable trailing
                 );
                 logger.info(`[TrailingStop] Updated stop to ${newStop} for ${dealId}`);

@@ -115,12 +115,11 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 15 seconds between analyses (was 1 min)
-    MODE: true,
+    MODE: false,
 };
 
 export const PROD = {
-    INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 3000,
-    // INTERVAL: 60 * 1000, // 60 seconds between analyses
+    INTERVAL: 15 * 60 * 1000, // 15 minutes between analyses (aligned with M15)
 };
 
 // For convenience in error messages and logging
