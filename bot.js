@@ -261,7 +261,7 @@ class TradingBot {
 
         const candles = { h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
-        const trendAnalysis = await analyzeTrend(symbol, getHistorical);
+        // const trendAnalysis = await analyzeTrend(symbol, getHistorical);
 
         // --- Fetch real-time bid/ask ---
         const marketDetails = await getMarketDetails(symbol);
@@ -270,7 +270,6 @@ class TradingBot {
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
-            trendAnalysis,
             indicators,
             candles,
             symbol,
@@ -428,13 +427,6 @@ class TradingBot {
 
     isTradingAllowed() {
         const now = new Date();
-        const minutes = now.getMinutes();
-        
-        // Only analyze in the last minute of each M15 candle
-        if (minutes % 15 !== 14) {
-            logger.debug("[Bot] Waiting for M15 candle close...");
-            return false;
-        }
 
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday
         if (day === 0 || day === 6) {
@@ -448,7 +440,7 @@ class TradingBot {
         const currentMinutes = hour * 60 + minute;
 
         // Check if current time is inside any allowed window
-        const allowed = this.allowedTradingWindows.some(win => {
+        const allowed = this.allowedTradingWindows.some((win) => {
             if (win.start <= win.end) {
                 return currentMinutes >= win.start && currentMinutes <= win.end;
             } else {
