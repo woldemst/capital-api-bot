@@ -40,8 +40,7 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, indicators, candles) {
-        const atr = indicators.atr || 0.001; // fallback if ATR missing
+    async calculateTradeParameters(signal, symbol, bid, ask, candles) {
         const { m1Candles } = candles;
 
         const price = signal === "BUY" ? ask : bid;
@@ -79,9 +78,31 @@ class TradingService {
             }
         }
 
-        let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
-        size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
+        // let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
+        // size = Math.floor(size / 100) * 100;
+        // if (size < 100) size = 100;
+
+        // Round SL/TP to valid decimals
+        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+
+        // --- FIXED: Proper pip-based sizing for all symbols ---
+        const slPips = Math.abs(slDistance / pip); // SL distance in pips
+        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
+
+        const maxSimultaneousTrades = MAX_POSITIONS;
+        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+
+        let size = riskAmount / (slPips * pipValuePerUnit);
+        size = Math.floor(size / 100) * 100; // round down to nearest 100
+        if (size < 100) size = 100; // enforce minimum
+
+        logger.info(`[Trade Parameters] ${symbol} ${signal}:
+            Entry: ${price}
+            SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
+            TP: ${takeProfitPrice}
+            Size: ${size}
+            PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
@@ -117,9 +138,9 @@ class TradingService {
         return { SL: newSL, TP: newTP };
     }
 
-    async executeTrade(symbol, signal, bid, ask, indicators = {}, candles) {
+    async executeTrade(symbol, signal, bid, ask, indicators, candles) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators, candles);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -213,7 +234,7 @@ class TradingService {
     }
 
     // --- Improved trailing stop logic ---
-    async updateTrailingStopIfNeeded(position, indicators = {}) {
+    async updateTrailingStopIfNeeded(position, indicators) {
         const { dealId, direction, entryPrice, stopLoss, currentPrice, symbol } = position;
 
         if (!dealId) {

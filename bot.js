@@ -116,7 +116,7 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                // await this.startMonitorOpenTrades();
+                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -298,8 +298,8 @@ class TradingBot {
                 const indicators = await calcIndicators(m15Data.prices);
 
                 const positionData = {
-                    dealId: pos.position.dealId,
                     symbol,
+                    dealId: pos.position.dealId,
                     currency: pos.position.currency,
                     direction: pos.position.direction,
                     size: pos.position.size,

@@ -56,6 +56,18 @@ export async function calcIndicators(bars) {
     const maFast = SMA.calculate({ period: 5, values: closes }).slice(-minLength).pop();
     const maSlow = SMA.calculate({ period: 20, values: closes }).slice(-minLength).pop();
 
+    const emaFast = EMA.calculate({ period: 12, values: closes }).pop();
+    const emaSlow = EMA.calculate({ period: 26, values: closes }).pop();
+
+    const ema5 = EMA.calculate({ period: 5, values: closes }).pop();
+    const ema9 = EMA.calculate({ period: 9, values: closes }).pop();
+    const ema10 = EMA.calculate({ period: 10, values: closes }).pop();
+    const ema20 = EMA.calculate({ period: 20, values: closes }).pop();
+    const ema21 = EMA.calculate({ period: 21, values: closes }).pop();
+    const ema30 = EMA.calculate({ period: 30, values: closes }).pop();
+    const ema50 = EMA.calculate({ period: 50, values: closes }).pop();
+    const ema100 = EMA.calculate({ period: 100, values: closes }).pop();
+    const ema200 = EMA.calculate({ period: 200, values: closes }).pop();
     // Add ATR calculation from old version (more accurate)
     const tr = [];
     for (let i = 1; i < bars.length; i++) {
@@ -69,17 +81,18 @@ export async function calcIndicators(bars) {
     return {
         maFast,
         maSlow,
-        emaFast: EMA.calculate({ period: 12, values: closes }).pop(),
-        emaSlow: EMA.calculate({ period: 26, values: closes }).pop(),
-        ema5: EMA.calculate({ period: 5, values: closes }).pop(),
-        ema9: EMA.calculate({ period: 9, values: closes }).pop(),
-        ema10: EMA.calculate({ period: 10, values: closes }).pop(),
-        ema20: EMA.calculate({ period: 20, values: closes }).pop(),
-        ema21: EMA.calculate({ period: 21, values: closes }).pop(),
-        ema30: EMA.calculate({ period: 30, values: closes }).pop(),
-        ema50: EMA.calculate({ period: 50, values: closes }).pop(),
-        ema100: EMA.calculate({ period: 100, values: closes }).pop(),
-        ema200: EMA.calculate({ period: 200, values: closes }).pop(),
+        emaFast,
+        emaSlow,
+        ema5,
+        ema9,
+        ema10,
+        ema20,
+        ema21,
+        ema30,
+        ema50,
+        ema100,
+        ema200,
+        
         // Extras for strategies
         ema20Prev,
         ema30Prev,
@@ -129,6 +142,16 @@ export async function calcIndicators(bars) {
         // Add profitable version indicators
         emaFastTrend: emaFastTrend.length ? emaFastTrend[emaFastTrend.length - 1] : null,
         emaSlowTrend: emaSlowTrend.length ? emaSlowTrend[emaSlowTrend.length - 1] : null,
+        // Store trend state
+        isBullishTrend:
+            emaFast.length &&
+            emaSlow.length &&
+            emaFast[emaFast.length - 1] > emaSlow[emaSlow.length - 1] &&
+            closes[closes.length - 1] > emaFast[emaFast.length - 1],
+        isBullishCross:
+            ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2],
+        isBearishCross:
+            ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2],
     };
 }
 
