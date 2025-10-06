@@ -13,7 +13,7 @@ export async function calcIndicators(bars) {
     // Add the essential trend EMAs from old version
     const emaFastTrend = EMA.calculate({ period: ANALYSIS.EMA.TREND.FAST, values: closes });
     const emaSlowTrend = EMA.calculate({ period: ANALYSIS.EMA.TREND.SLOW, values: closes });
-    
+
     // EMA series and helpers (needed for Calm River)
     const ema20Series = EMA.calculate({ period: 20, values: closes });
     const ema30Series = EMA.calculate({ period: 30, values: closes });
@@ -129,31 +129,7 @@ export async function calcIndicators(bars) {
         // Add profitable version indicators
         emaFastTrend: emaFastTrend.length ? emaFastTrend[emaFastTrend.length - 1] : null,
         emaSlowTrend: emaSlowTrend.length ? emaSlowTrend[emaSlowTrend.length - 1] : null,
-        
-        // Add crossover detection from old version
-        isBullishCross: 
-            ema9.length > 1 &&
-            ema21.length > 1 &&
-            ema9[ema9.length - 1] > ema21[ema21.length - 1] &&
-            ema9[ema9.length - 2] <= ema21[ema21.length - 2],
-        
-        isBearishCross:
-            ema9.length > 1 &&
-            ema21.length > 1 &&
-            ema9[ema9.length - 1] < ema21[ema21.length - 1] &&
-            ema9[ema9.length - 2] >= ema21[ema21.length - 2],
-        
-        // Add bullish trend confirmation
-        isBullishTrend:
-            emaFastTrend.length &&
-            emaSlowTrend.length &&
-            emaFastTrend[emaFastTrend.length - 1] > emaSlowTrend[emaSlowTrend.length - 1] &&
-            closes[closes.length - 1] > emaFastTrend[emaFastTrend.length - 1],
-
     };
-
-
-    
 }
 
 // Analyze trend on higher timeframes
@@ -165,10 +141,7 @@ export async function analyzeTrend(symbol, getHistorical) {
 
     try {
         // Add back D1 timeframe analysis
-        const [h4Data, d1Data] = await Promise.all([
-            getHistorical(symbol, ANALYSIS.TIMEFRAMES.TREND, 50),
-            getHistorical(symbol, "DAY", 30)
-        ]);
+        const [h4Data, d1Data] = await Promise.all([getHistorical(symbol, ANALYSIS.TIMEFRAMES.H4, 50), getHistorical(symbol, ANALYSIS.TIMEFRAMES.D1, 30)]);
 
         if (!h4Data?.prices || !d1Data?.prices) {
             console.error("Missing prices in historical data");
@@ -187,12 +160,7 @@ export async function analyzeTrend(symbol, getHistorical) {
             d1Trend,
             h4Indicators,
             d1Indicators,
-            overallTrend:
-                h4Trend === "bullish" && d1Trend === "bullish" 
-                    ? "bullish" 
-                    : h4Trend === "bearish" && d1Trend === "bearish" 
-                        ? "bearish" 
-                        : "mixed",
+            overallTrend: h4Trend === "bullish" && d1Trend === "bullish" ? "bullish" : h4Trend === "bearish" && d1Trend === "bearish" ? "bearish" : "mixed",
         };
     } catch (error) {
         console.error(`Error analyzing trend for ${symbol}:`, error);
