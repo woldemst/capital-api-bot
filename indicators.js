@@ -101,9 +101,7 @@ export async function calcIndicators(bars) {
         ema30Slope,
         ema50Slope,
         // keep short tails to avoid heavy payloads
-        ema20SeriesTail: ema20Series.slice(-30),
-        ema30SeriesTail: ema30Series.slice(-30),
-        ema50SeriesTail: ema50Series.slice(-30),
+
         rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
         bb: bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),

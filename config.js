@@ -68,10 +68,11 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_PRIMARY_SCORE: 3,    // Must have at least 3 primary conditions
-    REQUIRED_SECONDARY_SCORE: 2,      // Must have total score of 4 or more
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
+
+    REQUIRED_PRIMARY_SCORE: 2,    // Must have at least 3 primary conditions
+    REQUIRED_SECONDARY_SCORE: 2,      // Must have total score of 4 or more
 };
 
 // Technical Analysis Configuration
@@ -124,7 +125,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 1 minute between analyses
-    MODE: true,
+    MODE: false,
 };
 
 export const PROD = {
