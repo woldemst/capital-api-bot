@@ -92,7 +92,7 @@ export async function calcIndicators(bars) {
         ema50,
         ema100,
         ema200,
-        
+
         // Extras for strategies
         ema20Prev,
         ema30Prev,
@@ -150,6 +150,9 @@ export async function calcIndicators(bars) {
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2],
         isBearishCross:
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2],
+        price_vs_ema9: (entryPrice - ema9) / ema9,
+        price_vs_ema21: (entryPrice - ema21) / ema21,
+        price_vs_bb_mid: (entryPrice - bb.middle) / bb.middle,
     };
 }
 
