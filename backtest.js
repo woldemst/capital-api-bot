@@ -1,11 +1,30 @@
 import yahooFinance from "yahoo-finance2";
-import { backtestSymbols, ANALYSIS } from "./config.js";
+import { ANALYSIS } from "./config.js";
 import tradingService from "./services/trading.js";
 import Strategy from "./strategies/strategies.js";
 import { calcIndicators } from "./indicators.js";
 import logger from "./utils/logger.js";
 import fs from "fs";
 
+const backtestSymbols = [
+    "EURUSD",
+    "GBPUSD",
+    "EURGBP",
+    "USDCHF",
+    "EURJPY",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "USDCAD",
+    "AUDUSD",
+    "NZDUSD",
+    "AUDJPY",
+    "NZDJPY",
+    "USDJPY",
+    "EURJPY",
+    "AUDUSD",
+    "NZDUSD",
+];
 // Helper to map your symbols to Yahoo Finance tickers
 function mapSymbol(symbol) {
     // Forex: EURUSD -> EURUSD=X, GBPUSD -> GBPUSD=X, etc.
@@ -45,7 +64,7 @@ async function backtest(symbol, start = ANALYSIS.BACKTESTING.START_DATE, end = A
     const m5Candles = await fetchYahooCandles(symbol, "5m", start, end);
     const m1Candles = await fetchYahooCandles(symbol, "1m", start, end);
 
-    console.log(`Fetched ${h1Candles.length} H1, ${m15Candles.length} M15, ${m5Candles.length} M5, ${m1Candles.length} M1 candles for ${symbol}`    );
+    console.log(`Fetched ${h1Candles.length} H1, ${m15Candles.length} M15, ${m5Candles.length} M5, ${m1Candles.length} M1 candles for ${symbol}`);
     let trades = [];
     // for (let i = 50; i < h1Candles.length; i++) {
     //     // Get slices for each timeframe

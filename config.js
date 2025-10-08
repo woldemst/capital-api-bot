@@ -9,25 +9,7 @@ export const API = {
     WS_URL: process.env.WS_BASE_URL,
 };
 
-export const backtestSymbols = [
-    "EURUSD",
-    "GBPUSD",
-    "EURGBP",
-    "USDCHF",
-    "EURJPY",
-    "EURUSD",
-    "GBPUSD",
-    "USDJPY",
-    "USDCAD",
-    "AUDUSD",
-    "NZDUSD",
-    "AUDJPY",
-    "NZDJPY",
-    "USDJPY",
-    "EURJPY",
-    "AUDUSD",
-    "NZDUSD",
-];
+
 
 // Trading Sessions (UTC times)
 export const SESSIONS = {
