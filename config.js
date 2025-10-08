@@ -71,7 +71,7 @@ export const RISK = {
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
 
-    REQUIRED_PRIMARY_SCORE: 2,    // Must have at least 3 primary conditions
+    REQUIRED_PRIMARY_SCORE: 1,    // Must have at least 3 primary conditions
     REQUIRED_SECONDARY_SCORE: 2,      // Must have total score of 4 or more
 };
 
