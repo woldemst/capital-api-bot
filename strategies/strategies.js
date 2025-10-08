@@ -224,18 +224,18 @@ class Strategy {
         let reason = null;
         if (primaryBuyScore >= REQUIRED_PRIMARY_SCORE && secondaryBuyScore >= REQUIRED_SECONDARY_SCORE) {
             signal = "BUY";
-            reason = ''
+            reason = "";
             console.log("");
             logger.info("✨ SIGNAL: BUY");
         } else if (primarySellScore >= REQUIRED_PRIMARY_SCORE && secondarySellScore >= REQUIRED_SECONDARY_SCORE) {
             signal = "SELL";
-            reason = 'SIGNAL: SELL'
+            reason = "SIGNAL: SELL";
             console.log("");
             logger.info("✨ SIGNAL: SELL");
         } else {
             console.log("");
             logger.info("❌ NO SIGNAL");
-            reason = 'NO SIGNAL'
+            reason = "NO SIGNAL";
         }
 
         logger.info("═══════════════════");
