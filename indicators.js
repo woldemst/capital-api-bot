@@ -39,6 +39,7 @@ export async function calcIndicators(bars) {
     const bbUpperSeries = bbSeries.map((b) => b.upper);
     const bbLowerSeries = bbSeries.map((b) => b.lower);
 
+    const bb = bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined;
     // Calculate EMAs for trend
     const emaFastCurrent = EMA.calculate({ period: 12, values: closes }).pop();
     const emaSlowCurrent = EMA.calculate({ period: 26, values: closes }).pop();
@@ -77,7 +78,7 @@ export async function calcIndicators(bars) {
         tr.push(Math.max(hl, hc, lc));
     }
     const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-
+    const lastClose = closes[closes.length - 1];
     return {
         maFast,
         maSlow,
@@ -103,7 +104,7 @@ export async function calcIndicators(bars) {
         // keep short tails to avoid heavy payloads
 
         rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
-        bb: bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined,
+        bb,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
         atr: atr,
         adaptiveRSI: (() => {
@@ -150,9 +151,10 @@ export async function calcIndicators(bars) {
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2],
         isBearishCross:
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2],
-        price_vs_ema9: (entryPrice - ema9) / ema9,
-        price_vs_ema21: (entryPrice - ema21) / ema21,
-        price_vs_bb_mid: (entryPrice - bb.middle) / bb.middle,
+
+        price_vs_ema9: (lastClose - ema9) / ema9,
+        price_vs_ema21: (lastClose - ema21) / ema21,
+        price_vs_bb_mid: bb && bb.middle ? (lastClose - bb.middle) / bb.middle : 0,
     };
 }
 
