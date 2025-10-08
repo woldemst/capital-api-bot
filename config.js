@@ -111,5 +111,5 @@ export const DEV = {
 };
 
 export const PROD = {
-    INTERVAL: 1 * 60 * 1000, // 15 minutes between analyses (aligned with M15)
+    INTERVAL: 30 * 1000, // 15 minutes between analyses (aligned with M15)
 };
