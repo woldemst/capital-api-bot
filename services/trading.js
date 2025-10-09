@@ -205,7 +205,7 @@ class TradingService {
     }
 
     //  Main price processing ---
-    async processPrice({ symbol, indicators, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, candles, trendAnalysis, bid, ask }) {
         try {
             // TODO !!
             // Check trading conditions
