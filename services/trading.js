@@ -171,25 +171,25 @@ class TradingService {
                         tp: TP,
                         size,
                         indicatorsSnapshot: {
-                            rsi: indicators.rsi,
-                            adx: indicators.adx,
-                            atr: indicators.atr,
-                            macdHist: indicators.macd?.histogram,
-                            macdSignal: indicators.macd?.signal,
-                            macdValue: indicators.macd?.MACD,
-                            ema9: indicators.ema9,
-                            ema21: indicators.ema21,
-                            ema50: indicators.ema50,
-                            ema200: indicators.ema200,
-                            ema20Slope: indicators.ema20Slope,
-                            ema50Slope: indicators.ema50Slope,
-                            bbUpper: indicators.bb?.upper,
-                            bbLower: indicators.bb?.lower,
-                            trend: indicators.trend,
-                            trendStrength: indicators.trendStrength,
-                            price_vs_ema9: indicators.price_vs_ema9,
-                            price_vs_ema21: indicators.price_vs_ema21,
-                            price_vs_bb_mid: indicators.price_vs_bb_mid,
+                            rsi: indicators.rsi ?? null,
+                            adx: indicators.adx ?? null,
+                            atr: indicators.atr ?? null,
+                            macdHist: indicators.macd?.histogram ?? null,
+                            macdSignal: indicators.macd?.signal ?? null,
+                            macdValue: indicators.macd?.MACD ?? null,
+                            ema9: indicators.ema9 ?? null,
+                            ema21: indicators.ema21 ?? null,
+                            ema50: indicators.ema50 ?? null,
+                            ema200: indicators.ema200 ?? null,
+                            ema20Slope: indicators.ema20Slope ?? null,
+                            ema50Slope: indicators.ema50Slope ?? null,
+                            bbUpper: indicators.bb?.upper ?? null,
+                            bbLower: indicators.bb?.lower ?? null,
+                            trend: indicators.trend ?? null,
+                            trendStrength: indicators.trendStrength ?? null,
+                            price_vs_ema9: indicators.ema9 ? (price - indicators.ema9) / indicators.ema9 : null,
+                            price_vs_ema21: indicators.ema21 ? (price - indicators.ema21) / indicators.ema21 : null,
+                            price_vs_bb_mid: indicators.bb?.middle ? (price - indicators.bb.middle) / indicators.bb.middle : null,
                         },
                         result: null,
                     };
@@ -223,9 +223,9 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            // const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
+            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
 
-            const { signal, reason } = Strategy.legacyMultiTfStrategy({ indicators, bid, ask });
+            // const { signal, reason } = Strategy.legacyMultiTfStrategy({ indicators, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
@@ -311,7 +311,7 @@ class TradingService {
         try {
             await apiClosePosition(dealId);
             logger.info(`[API] Closed position for dealId: ${dealId}`);
-            if (result) logTradeResult(dealId, result);
+
             try {
                 const logPath = getCurrentTradesLogPath();
                 const closeEntry = {
@@ -329,6 +329,25 @@ class TradingService {
         } catch (error) {
             logger.error(`[trading.js][API] Failed to close position for dealId: ${dealId}`, error);
         }
+    }
+
+    async finalizeTradeResult(dealId, result) {
+        const logPath = getCurrentTradesLogPath();
+        if (!fs.existsSync(logPath)) return;
+
+        const lines = fs.readFileSync(logPath, "utf-8").split("\n").filter(Boolean);
+        const updatedLines = lines.map((line) => {
+            const entry = JSON.parse(line);
+            if (entry.id === dealId && !entry.result) {
+                entry.result = result?.type || result;
+                entry.exitPrice = result?.closePrice || null;
+                entry.exitTime = new Date().toISOString();
+                entry.profitPips = result?.profitPips || null;
+                entry.holdingMinutes = entry.exitTime && entry.time ? Math.round((new Date(entry.exitTime) - new Date(entry.time)) / 60000) : null;
+            }
+            return JSON.stringify(entry);
+        });
+        fs.writeFileSync(logPath, updatedLines.join("\n") + "\n");
     }
 
     // --- Close all positions before weekend ---
