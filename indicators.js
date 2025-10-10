@@ -79,11 +79,16 @@ export async function calcIndicators(bars) {
     }
     const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
     const lastClose = closes[closes.length - 1];
+
+    const price_vs_ema9 = (lastClose - ema9) / ema9;
+    const price_vs_ema21 = (lastClose - ema21) / ema21;
+    const price_vs_bb_mid = bb && bb.middle ? (lastClose - bb.middle) / bb.middle : 0;
     return {
         maFast,
         maSlow,
         emaFast,
         emaSlow,
+
         ema5,
         ema9,
         ema10,
@@ -94,7 +99,6 @@ export async function calcIndicators(bars) {
         ema100,
         ema200,
 
-        // Extras for strategies
         ema20Prev,
         ema30Prev,
         ema50Prev,
@@ -103,6 +107,10 @@ export async function calcIndicators(bars) {
         ema50Slope,
         // keep short tails to avoid heavy payloads
 
+        price_vs_ema9,
+        price_vs_ema21,
+        price_vs_bb_mid,
+        
         rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
         bb,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
@@ -151,10 +159,6 @@ export async function calcIndicators(bars) {
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2],
         isBearishCross:
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2],
-
-        price_vs_ema9: (lastClose - ema9) / ema9,
-        price_vs_ema21: (lastClose - ema21) / ema21,
-        price_vs_bb_mid: bb && bb.middle ? (lastClose - bb.middle) / bb.middle : 0,
     };
 }
 
