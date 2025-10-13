@@ -2,8 +2,8 @@
 import fs from "fs";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-import { calcIndicators } from "./indicators.js";
-import logger from "./utils/logger.js";
+import { calcIndicators } from "../indicators.js";
+import logger from "../utils/logger.js";
 dotenv.config();
 
 // === CONFIG ===
@@ -27,6 +27,7 @@ const symbols = [
 
 // === TIMEFRAMES ===
 const timeframes = {
+  M1: "1min",
   M5: "5min",
   M15: "15min",
   H1: "1h",
@@ -38,6 +39,7 @@ const MAX_CANDLES_PER_REQUEST = 5000;
 
 // Helper to convert timeframe to minutes
 const timeframeToMinutes = {
+  "1min": 1,
   "5min": 5,
   "15min": 15,
   "1h": 60,
@@ -153,13 +155,24 @@ async function generateDataset() {
       try {
         let candles;
 
+        let startDate;
+        if (tfName === "M1") {
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        } else if (tfName === "M5") {
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        } else if (tfName === "M15") {
+          startDate = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+        } else {
+          startDate = oneYearAgo;
+        }
+
         if (tfName === "H4") {
           // Fetch H1 data once if not already fetched
           if (!h1Candles) {
             h1Candles = await fetchTwelveDataCandles(
               symbol,
               timeframes.H1,
-              oneYearAgo.toISOString().slice(0, 19),
+              startDate.toISOString().slice(0, 19),
               now.toISOString().slice(0, 19)
             );
             logger.info(`✅ ${h1Candles.length} H1 candles fetched for ${symbol}`);
@@ -171,7 +184,7 @@ async function generateDataset() {
           candles = await fetchTwelveDataCandles(
             symbol,
             interval,
-            oneYearAgo.toISOString().slice(0, 19),
+            startDate.toISOString().slice(0, 19),
             now.toISOString().slice(0, 19)
           );
           logger.info(`✅ ${candles.length} candles fetched for ${symbol} ${tfName}`);
