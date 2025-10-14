@@ -17,7 +17,7 @@ class TradingBot {
         this.latestCandles = {}; // Store latest candles for each symbol
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
-        this.maxCandleHistory = 120; // Rolling window size for indicators
+        this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
 
         // Define allowed trading windows (UTC, Berlin time for example)
@@ -108,10 +108,10 @@ class TradingBot {
 
         this.analysisInterval = setInterval(async () => {
             try {
-                if (!this.isTradingAllowed()) {
-                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                    return;
-                }
+                // if (!this.isTradingAllowed()) {
+                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                //     return;
+                // }
 
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();

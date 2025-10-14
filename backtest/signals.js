@@ -1,43 +1,106 @@
-import Strategy from "../strategies/strategies.js";
+import fs from "fs";
+import path from "path";
+import readline from "readline";
 
-const m15Windows = {};
+function analyzeSignals(inputFile, analyzedFile, profitableFile) {
+  return new Promise((resolve, reject) => {
+    const analyzedStream = fs.createWriteStream(analyzedFile, { flags: "w" });
+    const profitableStream = fs.createWriteStream(profitableFile, { flags: "w" });
 
-export function generateSignal(data, symbol) {
-    if (!data || !data.M1 || !data.M15 || !data.H1 || !data.H4) return null;
+    const rl = readline.createInterface({
+      input: fs.createReadStream(inputFile),
+      crlfDelay: Infinity,
+    });
 
-    // initialize rolling window
-    if (!m15Windows[symbol]) m15Windows[symbol] = [];
-    m15Windows[symbol].push(data.M15);
+    let totalProfit = 0;
+    let totalTrades = 0;
 
-    // keep last 3 M15 candles
-    const m15Candles = m15Windows[symbol].slice(-3);
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
 
-    if (m15Candles.length < 3) return null;
+      const signal = JSON.parse(line);
+      const profit = signal.profit || 0;
+      totalProfit += profit;
+      totalTrades++;
 
-    const indicators = {
-        m1: data.M1,
-        m5: data.M5,
-        m15: data.M15,
-        h1: data.H1,
-        h4: data.H4
-    };
+      analyzedStream.write(line + "\n");
 
-    const candles = { m15Candles };
+      if (profit > 0) {
+        profitableStream.write(line + "\n");
+      }
+    });
 
-    // generate signal
-    const result = Strategy.getSignal({ symbol, indicators, candles });
+    rl.on("close", () => {
+      analyzedStream.close();
+      profitableStream.close();
+      resolve({ totalProfit, totalTrades });
+    });
 
-    if (!result || !result.signal) return null;
-
-    return {
-        signal: result.signal,
-        reason: result.reason,
-        time: data.M1.timestamp,
-        indicators,
-        M1: data.M1,
-        M5: data.M5,
-        M15: data.M15,
-        H1: data.H1,
-        H4: data.H4
-    };
+    rl.on("error", (err) => {
+      reject(err);
+    });
+  });
 }
+
+// --- EXISTING BACKTEST ANALYSIS ---
+
+(async () => {
+  try {
+    const inputDir = "./results";
+    const outputDir = "./analysis";
+    const outputProfitableDir = "./analysis_profitable";
+
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
+    if (!fs.existsSync(outputProfitableDir)) fs.mkdirSync(outputProfitableDir);
+
+    const symbols = fs.readdirSync(inputDir).filter((file) => file.endsWith("_signals.jsonl"));
+
+    for (const file of symbols) {
+      const symbol = file.replace("_signals.jsonl", "");
+      const inputFile = path.join(inputDir, file);
+      const analyzedFile = path.join(outputDir, `${symbol}_analyzed.jsonl`);
+      const profitableFile = path.join(outputProfitableDir, `${symbol}_profitable.jsonl`);
+
+      const { totalProfit, totalTrades } = await analyzeSignals(inputFile, analyzedFile, profitableFile);
+
+      console.log(`Symbol: ${symbol}`);
+      console.log(`Total Trades: ${totalTrades}`);
+      console.log(`Total Profit: ${totalProfit.toFixed(2)}`);
+      console.log("-----");
+    }
+  } catch (error) {
+    console.error("Error during backtest analysis:", error);
+  }
+})();
+
+// --- AUDUSD STRATEGY BACKTEST ---
+
+(async () => {
+  try {
+    const inputDirV2 = "./results";
+    const outputDirV2 = "./analysis_v2";
+    const outputProfitableDirV2 = "./analysis_v2_profitable";
+
+    if (!fs.existsSync(outputDirV2)) fs.mkdirSync(outputDirV2);
+    if (!fs.existsSync(outputProfitableDirV2)) fs.mkdirSync(outputProfitableDirV2);
+
+    const symbol = "AUDUSD";
+    const inputFile = path.join(inputDirV2, `${symbol}_signals.jsonl`);
+    const analyzedFile = path.join(outputDirV2, `${symbol}_analyzed.jsonl`);
+    const profitableFile = path.join(outputProfitableDirV2, `${symbol}_profitable.jsonl`);
+
+    if (!fs.existsSync(inputFile)) {
+      console.warn(`Input file for ${symbol} not found: ${inputFile}`);
+      return;
+    }
+
+    const { totalProfit, totalTrades } = await analyzeSignals(inputFile, analyzedFile, profitableFile);
+
+    console.log(`AUDUSD Strategy Backtest (v2)`);
+    console.log(`Total Trades: ${totalTrades}`);
+    console.log(`Total Profit: ${totalProfit.toFixed(2)}`);
+    console.log("-----");
+  } catch (error) {
+    console.error("Error during AUDUSD strategy backtest analysis:", error);
+  }
+})();

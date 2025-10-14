@@ -136,115 +136,106 @@ class Strategy {
         }
     }
 
-    legacyMultiTfStrategy({ indicators, bid, ask }) {
+    legacyMultiTfStrategy({ symbol, indicators, bid, ask }) {
         const { h4, h1, m15 } = indicators;
+        let buyConditions = [];
+        let sellConditions = [];
 
-        // --- Buy conditions ---
-        const buyConditions = [
-            // PRIMARY (must have 2/3)
-            { name: "H4 EMA Fast > Slow", value: h4.emaFast > h4.emaSlow, weight: 2 },
-            { name: "H4 MACD Histogram > 0", value: h4.macd?.histogram > 0, weight: 2 },
-            { name: "H1 EMA9 > EMA21", value: h1.ema9 > h1.ema21, weight: 2 },
+        switch (symbol) {
+            // ==========================================================
+            // 🟢 AUDUSD — optimized version
+            // ==========================================================
+            case "AUDUSD":
+                buyConditions = [
+                    // PRIMARY (must have 2/3)
+                    { name: "H4 EMA Fast > Slow", value: h4.emaFast > h4.emaSlow, weight: 2 },
+                    { name: "H4 MACD Histogram bullish", value: h4.macd?.histogram > -0.0001, weight: 2 },
+                    { name: "H1 EMA9 > EMA21", value: h1.ema9 > h1.ema21, weight: 2 },
 
-            // SECONDARY (need 2/4)
-            { name: "H1 RSI < 35", value: h1.rsi < RSI.EXIT_OVERSOLD, weight: 1 },
-            { name: "M15 Bullish Cross", value: m15.isBullishCross, weight: 1 },
-            { name: "M15 RSI < 30", value: m15.rsi < RSI.OVERSOLD, weight: 1 },
-            { name: "Price at BB Lower", value: bid <= m15.bb?.lower, weight: 1 },
-        ];
+                    // SECONDARY (need 1/4)
+                    { name: "H1 RSI < 45", value: h1.rsi < 45, weight: 1 },
+                    { name: "M15 Bullish Cross", value: m15.isBullishCross, weight: 1 },
+                    { name: "M15 RSI < 40", value: m15.rsi < 40, weight: 1 },
+                    { name: "Price near BB Lower", value: bid <= m15.bb?.lower * 1.002, weight: 1 },
+                ];
 
-        // --- Sell conditions ---
-        const sellConditions = [
-            // PRIMARY (must have 2/3)
-            { name: "H4 Bearish Trend", value: !h4.isBullishTrend, weight: 2 },
-            { name: "H4 MACD Histogram < 0", value: h4.macd?.histogram < 0, weight: 2 },
-            { name: "H1 EMA9 < EMA21", value: h1.ema9 < h1.ema21, weight: 2 },
+                sellConditions = [
+                    // PRIMARY (must have 2/3)
+                    { name: "H4 Bearish Trend", value: !h4.isBullishTrend, weight: 2 },
+                    { name: "H4 MACD Histogram bearish", value: h4.macd?.histogram < 0.0001, weight: 2 },
+                    { name: "H1 EMA9 < EMA21", value: h1.ema9 < h1.ema21, weight: 2 },
 
-            // SECONDARY (need 2/4)
-            { name: "H1 RSI > 65", value: h1.rsi > RSI.EXIT_OVERBOUGHT, weight: 1 },
-            { name: "M15 Bearish Cross", value: m15.isBearishCross, weight: 1 },
-            { name: "M15 RSI > 70", value: m15.rsi > RSI.OVERBOUGHT, weight: 1 },
-            { name: "Price at BB Upper", value: ask >= m15.bb?.upper, weight: 1 },
-        ];
+                    // SECONDARY (need 1/4)
+                    { name: "H1 RSI > 55", value: h1.rsi > 55, weight: 1 },
+                    { name: "M15 Bearish Cross", value: m15.isBearishCross, weight: 1 },
+                    { name: "M15 RSI > 60", value: m15.rsi > 60, weight: 1 },
+                    { name: "Price near BB Upper", value: ask >= m15.bb?.upper * 0.998, weight: 1 },
+                ];
+                break;
 
-        // Calculate scores first
-        const buyScore = buyConditions.reduce((score, condition) => score + (condition.value ? condition.weight : 0), 0);
-        const sellScore = sellConditions.reduce((score, condition) => score + (condition.value ? condition.weight : 0), 0);
+            // ==========================================================
+            // 🟡 Default logic (used for all other pairs until customized)
+            // ==========================================================
+            default:
+                buyConditions = [
+                    { name: "H4 EMA Fast > Slow", value: h4.emaFast > h4.emaSlow, weight: 2 },
+                    { name: "H4 MACD Histogram > 0", value: h4.macd?.histogram > 0, weight: 2 },
+                    { name: "H1 EMA9 > EMA21", value: h1.ema9 > h1.ema21, weight: 2 },
 
-        logger.info("🔍 ANALYSIS SUMMARY");
-        logger.info("═════════════════════");
-        console.log("");
+                    { name: "H1 RSI < 35", value: h1.rsi < RSI.EXIT_OVERSOLD, weight: 1 },
+                    { name: "M15 Bullish Cross", value: m15.isBullishCross, weight: 1 },
+                    { name: "M15 RSI < 30", value: m15.rsi < RSI.OVERSOLD, weight: 1 },
+                    { name: "Price at BB Lower", value: bid <= m15.bb?.lower, weight: 1 },
+                ];
 
-        // BUY Signal Analysis
-        logger.info("🔵 BUY CONDITIONS");
-        logger.info("-------------------");
-        logger.info(`Main Trend (need ${REQUIRED_PRIMARY_SCORE}/3):`);
+                sellConditions = [
+                    { name: "H4 Bearish Trend", value: !h4.isBullishTrend, weight: 2 },
+                    { name: "H4 MACD Histogram < 0", value: h4.macd?.histogram < 0, weight: 2 },
+                    { name: "H1 EMA9 < EMA21", value: h1.ema9 < h1.ema21, weight: 2 },
 
-        logger.info(`${h4.emaFast > h4.emaSlow ? "✅" : "❌"} H4 EMA Fast (${h4.emaFast?.toFixed(5)}) > Slow (${h4.emaSlow?.toFixed(5)})`);
-        logger.info(`${h4.macd?.histogram > 0 ? "✅" : "❌"} H4 MACD (${h4.macd?.histogram?.toFixed(5)})`);
-        logger.info(`${h1.ema9 > h1.ema21 ? "✅" : "❌"} H1 EMA Cross: 9(${h1.ema9?.toFixed(5)}) vs 21(${h1.ema21?.toFixed(5)})`);
-        console.log("");
-        logger.info(`Entry Filters (need any ${REQUIRED_SECONDARY_SCORE}):`);
-        logger.info(`${h1.rsi < 35 ? "✅" : "❌"} H1 RSI: ${h1.rsi?.toFixed(1)} < 35`);
-        logger.info(`${m15.isBullishCross ? "✅" : "❌"} M15 Bullish Cross`);
-        logger.info(`${m15.rsi < 30 ? "✅" : "❌"} M15 RSI: ${m15.rsi?.toFixed(1)} < 30`);
-        logger.info(`${bid <= m15.bb?.lower ? "✅" : "❌"} Price at BB: ${bid} <= ${m15.bb?.lower?.toFixed(5)}`);
-        console.log("");
+                    { name: "H1 RSI > 65", value: h1.rsi > RSI.EXIT_OVERBOUGHT, weight: 1 },
+                    { name: "M15 Bearish Cross", value: m15.isBearishCross, weight: 1 },
+                    { name: "M15 RSI > 70", value: m15.rsi > RSI.OVERBOUGHT, weight: 1 },
+                    { name: "Price at BB Upper", value: ask >= m15.bb?.upper, weight: 1 },
+                ];
+                break;
+        }
 
-        // SELL Signal Analysis
-        logger.info("🔴 SELL CONDITIONS");
-        logger.info("-------------------");
-        logger.info(`Main Trend (need ${REQUIRED_PRIMARY_SCORE}/3):`);
-        logger.info(`${!h4.isBullishTrend ? "✅" : "❌"} H4 Bearish Trend`);
-        logger.info(`${h4.macd?.histogram < 0 ? "✅" : "❌"} H4 MACD (${h4.macd?.histogram?.toFixed(5)})`);
-        logger.info(`${h1.ema9 < h1.ema21 ? "✅" : "❌"} H1 EMA Cross: 9(${h1.ema9?.toFixed(5)}) vs 21(${h1.ema21?.toFixed(5)})`);
-        console.log("");
+        // ==========================================================
+        // 🧮 Common logic (scoring, logs, signal)
+        // ==========================================================
+        const buyScore = buyConditions.reduce((s, c) => s + (c.value ? c.weight : 0), 0);
+        const sellScore = sellConditions.reduce((s, c) => s + (c.value ? c.weight : 0), 0);
 
-        logger.info(`Entry Filters (need any ${REQUIRED_SECONDARY_SCORE}):`);
-        logger.info(`${h1.rsi > 65 ? "✅" : "❌"} H1 RSI: ${h1.rsi?.toFixed(1)} > 65`);
-        logger.info(`${m15.isBearishCross ? "✅" : "❌"} M15 Bearish Cross`);
-        logger.info(`${m15.rsi > 70 ? "✅" : "❌"} M15 RSI: ${m15.rsi?.toFixed(1)} > 70`);
-        logger.info(`${ask >= m15.bb?.upper ? "✅" : "❌"} Price at BB: ${ask} >= ${m15.bb?.upper?.toFixed(5)}`);
-        console.log("");
-
-        // Score calculation
         const primaryBuyScore = buyConditions.slice(0, 3).filter((c) => c.value).length;
         const secondaryBuyScore = buyConditions.slice(3).filter((c) => c.value).length;
         const primarySellScore = sellConditions.slice(0, 3).filter((c) => c.value).length;
         const secondarySellScore = sellConditions.slice(3).filter((c) => c.value).length;
 
-        // Final Decision
         logger.info("📊 FINAL SCORES");
         logger.info("══════════════════");
         logger.info(`BUY  → Main: ${primaryBuyScore}/${REQUIRED_PRIMARY_SCORE}, Entry: ${secondaryBuyScore}/${REQUIRED_SECONDARY_SCORE}`);
         logger.info(`SELL → Main: ${primarySellScore}/${REQUIRED_PRIMARY_SCORE}, Entry: ${secondarySellScore}/${REQUIRED_SECONDARY_SCORE}`);
 
-        // Signal determination
         let signal = null;
         let reason = null;
         if (primaryBuyScore >= REQUIRED_PRIMARY_SCORE && secondaryBuyScore >= REQUIRED_SECONDARY_SCORE) {
             signal = "BUY";
-            reason = "";
-            console.log("");
             logger.info("✨ SIGNAL: BUY");
         } else if (primarySellScore >= REQUIRED_PRIMARY_SCORE && secondarySellScore >= REQUIRED_SECONDARY_SCORE) {
             signal = "SELL";
-            reason = "SIGNAL: SELL";
-            console.log("");
             logger.info("✨ SIGNAL: SELL");
         } else {
-            console.log("");
             logger.info("❌ NO SIGNAL");
             reason = "NO SIGNAL";
         }
 
         logger.info("═══════════════════");
-        console.log("");
-
         return { signal, reason, buyScore: primaryBuyScore + secondaryBuyScore, sellScore: primarySellScore + secondarySellScore };
     }
 
     greenRedCandlePattern(trend, prev, last) {
+        console.log(trend, prev, last);
         if (!prev || !last || !trend) return false;
         const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
         const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
@@ -314,6 +305,53 @@ class Strategy {
     //     // to block specific session windows if you want.
     //     return true;
     // }
+
+    hybridPatternMomentum({ symbol, indicators, candles, bid, ask }) {
+        const { m15, h4 } = indicators; // or whichever TF you want to use
+        const price = (bid + ask) / 2;
+
+        // 1. Trend filter (H4 or same TF)
+        const emaShort = h4.ema50;
+        const emaLong = h4.ema200;
+
+        if (emaShort == null || emaLong == null) {
+            return { signal: null, reason: "No trend EMAs" };
+        }
+        const isUptrend = emaShort > emaLong;
+        const isDowntrend = emaShort < emaLong;
+
+        // 2. Pattern detection
+        const { m15Candles } = candles;
+
+        if (m15Candles.length < 2) {
+            return { signal: null, reason: "Not enough candles for pattern" };
+        }
+        const prev = m15Candles[m15Candles.length - 2];
+        const last = m15Candles[m15Candles.length - 1];
+
+        const pattern = this.greenRedCandlePattern(isUptrend ? "bullish" : isDowntrend ? "bearish" : null, prev, last);
+        if (!pattern) {
+            return { signal: null, reason: "Pattern not matched" };
+        }
+
+        // 3. Momentum / confirmation indicator (RSI)
+        const rsi = m15.rsi;
+        if (rsi == null) {
+            return { signal: null, reason: "No RSI" };
+        }
+
+        // For long, ensure not overbought; for short, ensure not oversold
+        if (pattern === "bullish" && isUptrend) {
+            if (rsi > 70) return { signal: null, reason: "RSI too high" };
+            return { signal: "BUY", reason: "Pattern + trend + RSI support" };
+        }
+        if (pattern === "bearish" && isDowntrend) {
+            if (rsi < 30) return { signal: null, reason: "RSI too low" };
+            return { signal: "SELL", reason: "Pattern + trend + RSI support" };
+        }
+
+        return { signal: null, reason: "Conditions not met" };
+    }
 }
 
 export default new Strategy();

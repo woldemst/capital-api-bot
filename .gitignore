@@ -3,3 +3,6 @@
 logs/
 node_modules/
 backtest/data/
+backtest/signals/
+backtest/results/
+backtest/analysis/

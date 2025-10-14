@@ -191,7 +191,7 @@ class TradingService {
                         //     price_vs_ema21: indicators.price_vs_ema21,
                         //     price_vs_bb_mid: indicators.price_vs_bb_mid,
                         // },
-                        indicators, 
+                        indicators,
                         result: null,
                     };
                     fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
@@ -226,7 +226,7 @@ class TradingService {
             }
             // const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
 
-            const { signal, reason } = Strategy.legacyMultiTfStrategy({ indicators, bid, ask });
+            const { signal, reason } = Strategy.hybridPatternMomentum({ symbol, indicators, candles, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
