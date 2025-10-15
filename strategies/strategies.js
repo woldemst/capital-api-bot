@@ -4,7 +4,7 @@ import { RISK, ANALYSIS } from "../config.js";
 
 const { RSI } = ANALYSIS;
 
-const { REQUIRED_PRIMARY_SCORE, REQUIRED_SECONDARY_SCORE } = RISK;
+const { REQUIRED_PRIMARY_SCORE, REQUIRED_SECONDARY_SCORE, REQUIRED_SCORE } = RISK;
 
 class Strategy {
     constructor() {}
@@ -29,9 +29,6 @@ class Strategy {
             }
             const prev = m15Candles[m15Candles.length - 3]; // previous closed
             const last = m15Candles[m15Candles.length - 2]; // most recent closed
-
-            // const patternDir = this.greenRedCandlePattern(h1Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
-            // if (!patternDir) return { signal: null, reason: "price_action_pattern_failed" };
 
             const patternDir = this.greenRedCandlePattern(h1Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
             // const patternDir = this.greenRedCandlePattern(h1Trend, prev, last);
@@ -85,8 +82,8 @@ class Strategy {
             // Decide signal
             const threshold = typeof REQUIRED_SCORE === "number" && REQUIRED_SCORE > 0 ? REQUIRED_SCORE : 3;
             let signal = null;
-            if (patternDir === "bullish" && buyScore >= threshold) signal = "BUY";
-            if (patternDir === "bearish" && sellScore >= threshold) signal = "SELL";
+            if (patternDir === "bullish" || ("BUY" && buyScore >= threshold)) signal = "BUY";
+            if (patternDir === "bearish" || ("SELL" && sellScore >= threshold)) signal = "SELL";
 
             logger.info(`[Signal Analysis] ${symbol}
                 H1 Trend: ${h1Trend}
@@ -142,31 +139,28 @@ class Strategy {
         let sellConditions = [];
 
         switch (symbol) {
-            // ==========================================================
-            // 🟢 AUDUSD — optimized version
-            // ==========================================================
             case "AUDUSD":
                 buyConditions = [
-                    // PRIMARY (must have 2/3)
+                    // PRIMARY
                     { name: "H4 EMA Fast > Slow", value: h4.emaFast > h4.emaSlow, weight: 2 },
                     { name: "H4 MACD Histogram bullish", value: h4.macd?.histogram > -0.0001, weight: 2 },
                     { name: "H1 EMA9 > EMA21", value: h1.ema9 > h1.ema21, weight: 2 },
+                    { name: "H1 RSI < 45", value: h1.rsi < 45, weight: 2 },
 
-                    // SECONDARY (need 1/4)
-                    { name: "H1 RSI < 45", value: h1.rsi < 45, weight: 1 },
+                    // SECONDARY
                     { name: "M15 Bullish Cross", value: m15.isBullishCross, weight: 1 },
                     { name: "M15 RSI < 40", value: m15.rsi < 40, weight: 1 },
                     { name: "Price near BB Lower", value: bid <= m15.bb?.lower * 1.002, weight: 1 },
                 ];
 
                 sellConditions = [
-                    // PRIMARY (must have 2/3)
+                    // PRIMARY
                     { name: "H4 Bearish Trend", value: !h4.isBullishTrend, weight: 2 },
                     { name: "H4 MACD Histogram bearish", value: h4.macd?.histogram < 0.0001, weight: 2 },
                     { name: "H1 EMA9 < EMA21", value: h1.ema9 < h1.ema21, weight: 2 },
+                    { name: "H1 RSI > 55", value: h1.rsi > 55, weight: 2 },
 
-                    // SECONDARY (need 1/4)
-                    { name: "H1 RSI > 55", value: h1.rsi > 55, weight: 1 },
+                    // SECONDARY
                     { name: "M15 Bearish Cross", value: m15.isBearishCross, weight: 1 },
                     { name: "M15 RSI > 60", value: m15.rsi > 60, weight: 1 },
                     { name: "Price near BB Upper", value: ask >= m15.bb?.upper * 0.998, weight: 1 },
@@ -181,8 +175,8 @@ class Strategy {
                     { name: "H4 EMA Fast > Slow", value: h4.emaFast > h4.emaSlow, weight: 2 },
                     { name: "H4 MACD Histogram > 0", value: h4.macd?.histogram > 0, weight: 2 },
                     { name: "H1 EMA9 > EMA21", value: h1.ema9 > h1.ema21, weight: 2 },
+                    { name: "H1 RSI < 35", value: h1.rsi < RSI.EXIT_OVERSOLD, weight: 2 },
 
-                    { name: "H1 RSI < 35", value: h1.rsi < RSI.EXIT_OVERSOLD, weight: 1 },
                     { name: "M15 Bullish Cross", value: m15.isBullishCross, weight: 1 },
                     { name: "M15 RSI < 30", value: m15.rsi < RSI.OVERSOLD, weight: 1 },
                     { name: "Price at BB Lower", value: bid <= m15.bb?.lower, weight: 1 },
@@ -192,20 +186,14 @@ class Strategy {
                     { name: "H4 Bearish Trend", value: !h4.isBullishTrend, weight: 2 },
                     { name: "H4 MACD Histogram < 0", value: h4.macd?.histogram < 0, weight: 2 },
                     { name: "H1 EMA9 < EMA21", value: h1.ema9 < h1.ema21, weight: 2 },
+                    { name: "H1 RSI > 65", value: h1.rsi > RSI.EXIT_OVERBOUGHT, weight: 2 },
 
-                    { name: "H1 RSI > 65", value: h1.rsi > RSI.EXIT_OVERBOUGHT, weight: 1 },
                     { name: "M15 Bearish Cross", value: m15.isBearishCross, weight: 1 },
                     { name: "M15 RSI > 70", value: m15.rsi > RSI.OVERBOUGHT, weight: 1 },
                     { name: "Price at BB Upper", value: ask >= m15.bb?.upper, weight: 1 },
                 ];
                 break;
         }
-
-        // ==========================================================
-        // 🧮 Common logic (scoring, logs, signal)
-        // ==========================================================
-        const buyScore = buyConditions.reduce((s, c) => s + (c.value ? c.weight : 0), 0);
-        const sellScore = sellConditions.reduce((s, c) => s + (c.value ? c.weight : 0), 0);
 
         const primaryBuyScore = buyConditions.slice(0, 3).filter((c) => c.value).length;
         const secondaryBuyScore = buyConditions.slice(3).filter((c) => c.value).length;
@@ -214,8 +202,8 @@ class Strategy {
 
         logger.info("📊 FINAL SCORES");
         logger.info("══════════════════");
-        logger.info(`BUY  → Main: ${primaryBuyScore}/${REQUIRED_PRIMARY_SCORE}, Entry: ${secondaryBuyScore}/${REQUIRED_SECONDARY_SCORE}`);
-        logger.info(`SELL → Main: ${primarySellScore}/${REQUIRED_PRIMARY_SCORE}, Entry: ${secondarySellScore}/${REQUIRED_SECONDARY_SCORE}`);
+        logger.info(`BUY  → Primary: ${primaryBuyScore}/${REQUIRED_PRIMARY_SCORE}, Secondary: ${secondaryBuyScore}/${REQUIRED_SECONDARY_SCORE}`);
+        logger.info(`SELL → Primary: ${primarySellScore}/${REQUIRED_PRIMARY_SCORE}, Secondary: ${secondarySellScore}/${REQUIRED_SECONDARY_SCORE}`);
 
         let signal = null;
         let reason = null;
@@ -235,7 +223,6 @@ class Strategy {
     }
 
     greenRedCandlePattern(trend, prev, last) {
-        console.log(trend, prev, last);
         if (!prev || !last || !trend) return false;
         const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
         const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
@@ -251,15 +238,16 @@ class Strategy {
     }
 
     engulfingPattern(prev, last) {
-        const getOpen = (c) => c.o ?? c.open;
-        const getClose = (c) => c.c ?? c.close;
+        const getOpen = (c) => c.open;
+        const getClose = (c) => c.close;
 
         if (!prev || !last) return null;
 
-        const prevOpen = getOpen(prev),
-            prevClose = getClose(prev);
-        const lastOpen = getOpen(last),
-            lastClose = getClose(last);
+        const prevOpen = getOpen(prev);
+        const prevClose = getClose(prev);
+
+        const lastOpen = getOpen(last);
+        const lastClose = getClose(last);
 
         // Bullish engulfing
         if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) {
@@ -294,58 +282,47 @@ class Strategy {
         return null;
     }
 
-    // isSessionTime(now) {
-    //     const hour = now.getHours();
-    //     const minute = now.getMinutes();
-
-    //     // Example: block 00–15 & 20–24 for all sessions
-    //     if (minute < 15 || minute > 44) return false;
-
-    //     // Keep logic simple: just let it run during any session; you can extend
-    //     // to block specific session windows if you want.
-    //     return true;
-    // }
-
     hybridPatternMomentum({ symbol, indicators, candles, bid, ask }) {
-        const { m15, h4 } = indicators; // or whichever TF you want to use
-        const price = (bid + ask) / 2;
+        // const { signal, reason } = this.legacyMultiTfStrategy({ symbol, indicators, bid, ask });
+        const { m5, h1 } = indicators;
 
-        // 1. Trend filter (H4 or same TF)
-        const emaShort = h4.ema50;
-        const emaLong = h4.ema200;
+        // if (!signal) return { signal: null, reason: `No signal from legacy strategy: ${reason}` };
 
-        if (emaShort == null || emaLong == null) {
+        if (m5.emaFast == null || m5.emaSlow == null) {
             return { signal: null, reason: "No trend EMAs" };
         }
-        const isUptrend = emaShort > emaLong;
-        const isDowntrend = emaShort < emaLong;
+        const isUptrend = m5.ema20 > m5.ema50;
+        const isDowntrend = m5.ema20 < m5.ema50;
 
         // 2. Pattern detection
-        const { m15Candles } = candles;
+        const { m5Candles } = candles;
 
-        if (m15Candles.length < 2) {
+        if (m5Candles.length < 2) {
             return { signal: null, reason: "Not enough candles for pattern" };
         }
-        const prev = m15Candles[m15Candles.length - 2];
-        const last = m15Candles[m15Candles.length - 1];
+        const prev = m5Candles[m5Candles.length - 2];
+        const last = m5Candles[m5Candles.length - 1];
 
-        const pattern = this.greenRedCandlePattern(isUptrend ? "bullish" : isDowntrend ? "bearish" : null, prev, last);
+        const pattern =
+            this.greenRedCandlePattern(isUptrend ? "bullish" : isDowntrend ? "bearish" : null, prev, last) ||
+            this.engulfingPattern(prev, last) ||
+            this.pinBarPattern(last);
         if (!pattern) {
             return { signal: null, reason: "Pattern not matched" };
         }
 
         // 3. Momentum / confirmation indicator (RSI)
-        const rsi = m15.rsi;
+        const rsi = m5.rsi;
         if (rsi == null) {
             return { signal: null, reason: "No RSI" };
         }
 
         // For long, ensure not overbought; for short, ensure not oversold
-        if (pattern === "bullish" && isUptrend) {
+        if (pattern === "BUY" && isUptrend) {
             if (rsi > 70) return { signal: null, reason: "RSI too high" };
             return { signal: "BUY", reason: "Pattern + trend + RSI support" };
         }
-        if (pattern === "bearish" && isDowntrend) {
+        if (pattern === "SELL" && isDowntrend) {
             if (rsi < 30) return { signal: null, reason: "RSI too low" };
             return { signal: "SELL", reason: "Pattern + trend + RSI support" };
         }

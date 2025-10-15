@@ -206,7 +206,7 @@ class TradingService {
     }
 
     //  Main price processing ---
-    async processPrice({ symbol, indicators, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, trendAnalysis, candles, bid, ask }) {
         try {
             // TODO !!
             // Check trading conditions
@@ -224,9 +224,9 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            // const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
+            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
 
-            const { signal, reason } = Strategy.hybridPatternMomentum({ symbol, indicators, candles, bid, ask });
+            // const { signal, reason } = Strategy.hybridPatternMomentum({ symbol, indicators, candles, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
@@ -254,7 +254,6 @@ class TradingService {
         }
     }
 
-    // --- Improved trailing stop logic ---
     async updateTrailingStopIfNeeded(position, indicators) {
         const { dealId, direction, entryPrice, stopLoss, takeProfit, currentPrice, symbol } = position;
 
@@ -263,37 +262,48 @@ class TradingService {
             return;
         }
 
-        // --- New logic: trailing stop at 70% of TP distance ---
-        const tpDistance = Math.abs(takeProfit - entryPrice);
-        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.7 : entryPrice - tpDistance * 0.7;
+        // --- Activation logic (unchanged) ---
+        const risk = Math.abs(entryPrice - stopLoss);
+        const activationLevel = direction === "BUY"
+            ? entryPrice + 0.5 * risk
+            : entryPrice - 0.5 * risk;
 
-        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
+        const reachedActivation = direction === "BUY"
+            ? currentPrice >= activationLevel
+            : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
-            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 70% TP activation.`);
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 0.5x risk activation.`);
             return;
         }
 
-        // Once activated, move stop closer to lock in 30% of profit distance
-        const newStop = direction === "BUY" ? currentPrice - tpDistance * 0.3 : currentPrice + tpDistance * 0.3;
+        // --- Trailing stop at 10% of TP distance ---
+        const tpDistance = Math.abs(takeProfit - entryPrice);
+        const trailDistance = tpDistance * 0.10;
 
-        const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
+        let newStop;
+        if (direction === "BUY") {
+            newStop = currentPrice - trailDistance;
+            // Don't move SL backwards
+            if (newStop <= stopLoss) return;
+        } else {
+            newStop = currentPrice + trailDistance;
+            if (newStop >= stopLoss) return;
+        }
 
-        if (shouldUpdate) {
-            try {
-                await updateTrailingStop(
-                    dealId,
-                    currentPrice,
-                    entryPrice,
-                    null, // takeProfit not needed for trailing
-                    direction.toUpperCase(),
-                    symbol,
-                    true
-                );
-                logger.info(`[TrailingStop] Updated stop to ${newStop.toFixed(5)} (70% TP logic) for ${dealId}`);
-            } catch (error) {
-                logger.error(`[TrailingStop] Error updating trailing stop for ${dealId}:`, error);
-            }
+        try {
+            await updateTrailingStop(
+                dealId,
+                currentPrice,
+                newStop,
+                null, // takeProfit not needed for trailing
+                direction.toUpperCase(),
+                symbol,
+                true
+            );
+            logger.info(`[TrailingStop] Updated stop to ${newStop.toFixed(5)} (10% TP logic) for ${dealId}`);
+        } catch (error) {
+            logger.error(`[TrailingStop] Error updating trailing stop for ${dealId}:`, error);
         }
     }
 
