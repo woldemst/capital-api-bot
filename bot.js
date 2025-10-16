@@ -259,7 +259,6 @@ class TradingBot {
         await tradingService.processPrice({
             symbol,
             indicators,
-            trendAnalysis,
             candles,
             bid,
             ask,

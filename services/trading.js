@@ -206,7 +206,7 @@ class TradingService {
     }
 
     //  Main price processing ---
-    async processPrice({ symbol, indicators, trendAnalysis, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
             // TODO !!
             // Check trading conditions
@@ -224,9 +224,7 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
-
-            // const { signal, reason } = Strategy.hybridPatternMomentum({ symbol, indicators, candles, bid, ask });
+            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
@@ -264,13 +262,9 @@ class TradingService {
 
         // --- Activation logic (unchanged) ---
         const risk = Math.abs(entryPrice - stopLoss);
-        const activationLevel = direction === "BUY"
-            ? entryPrice + 0.5 * risk
-            : entryPrice - 0.5 * risk;
+        const activationLevel = direction === "BUY" ? entryPrice + 0.5 * risk : entryPrice - 0.5 * risk;
 
-        const reachedActivation = direction === "BUY"
-            ? currentPrice >= activationLevel
-            : currentPrice <= activationLevel;
+        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
             logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 0.5x risk activation.`);
@@ -279,7 +273,7 @@ class TradingService {
 
         // --- Trailing stop at 10% of TP distance ---
         const tpDistance = Math.abs(takeProfit - entryPrice);
-        const trailDistance = tpDistance * 0.10;
+        const trailDistance = tpDistance * 0.1;
 
         let newStop;
         if (direction === "BUY") {
