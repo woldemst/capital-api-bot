@@ -57,27 +57,70 @@ class Strategy {
 
             const lastClose = getClose(last);
 
-            // Build conditions explicitly
-            const buyConditions = [
-                h1Trend === "bullish",
-                emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
-                ema9h1 != null ? lastClose > ema9h1 : true,
-                rsi15 != null ? rsi15 > adaptiveRSI : true,
-                macd15Hist != null ? macd15Hist > 0 : true,
-                adx15 != null ? adx15 > adaptiveADX : true,
-            ];
+            let buyConditions = [];
+            let sellConditions = [];
 
-            const sellConditions = [
-                h1Trend === "bearish",
-                emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
-                ema9h1 != null ? lastClose < ema9h1 : true,
-                rsi15 != null ? rsi15 < 100 - adaptiveRSI : true,
-                macd15Hist != null ? macd15Hist < 0 : true,
-                adx15 != null ? adx15 > adaptiveADX : true,
-            ];
+            let buyScore = 0;
+            let sellScore = 0;
 
-            const buyScore = buyConditions.filter(Boolean).length;
-            const sellScore = sellConditions.filter(Boolean).length;
+            switch (symbol) {
+                case "EURUSD": {
+                    buyConditions = [
+                        { name: "Pattern Bullish", value: pattern === "bullish" || pattern === "BUY", weight: 2 },
+                        { name: "H1 EMA Fast > Slow", value: h1.emaFast > h1.emaSlow, weight: 2 },
+                        { name: "M5 EMA20 > EMA50", value: m5.ema20 > m5.ema50, weight: 2 },
+                        { name: "RSI 45–65", value: m5.rsi > 45 && m5.rsi < 65, weight: 1 },
+                        { name: "ADX > 20", value: m5.adx?.adx > 20, weight: 1 },
+                        { name: "BB Lower Zone", value: m5.bb?.pb < 0.3, weight: 1 },
+                        { name: "ATR > 0.0004", value: m5.atr > 0.0004, weight: 1 },
+                    ];
+
+                    sellConditions = [
+                        { name: "Pattern Bearish", value: pattern === "bearish" || pattern === "SELL", weight: 2 },
+                        { name: "H1 EMA Fast < Slow", value: h1.emaFast < h1.emaSlow, weight: 2 },
+                        { name: "M5 EMA20 < EMA50", value: m5.ema20 < m5.ema50, weight: 2 },
+                        { name: "RSI 35–55", value: m5.rsi < 55 && m5.rsi > 35, weight: 1 },
+                        { name: "ADX > 20", value: m5.adx?.adx > 20, weight: 1 },
+                        { name: "BB Upper Zone", value: m5.bb?.pb > 0.7, weight: 1 },
+                        { name: "ATR > 0.0004", value: m5.atr > 0.0004, weight: 1 },
+                    ];
+
+                    buyScore = buyConditions.filter((c) => c.value).length;
+                    sellScore = sellConditions.filter((c) => c.value).length;
+
+                    logger.info(`[EURUSD] BuyScore: ${buyScore}, SellScore: ${sellScore}`);
+
+                    // if (buyScore >= REQUIRED_SCORE) {
+                    //     return { signal: "BUY", reason: "EURUSD hybrid pattern confirmed", buyScore, sellScore };
+                    // }
+                    // if (sellScore >= REQUIRED_SCORE) {
+                    //     return { signal: "SELL", reason: "EURUSD hybrid pattern confirmed", buyScore, sellScore };
+                    // }
+                }
+
+                default:
+                    // Build conditions explicitly
+                    buyConditions = [
+                        h1Trend === "bullish",
+                        emaFastH1 != null && emaSlowH1 != null ? emaFastH1 > emaSlowH1 : true,
+                        ema9h1 != null ? lastClose > ema9h1 : true,
+                        rsi15 != null ? rsi15 > adaptiveRSI : true,
+                        macd15Hist != null ? macd15Hist > 0 : true,
+                        adx15 != null ? adx15 > adaptiveADX : true,
+                    ];
+
+                    sellConditions = [
+                        h1Trend === "bearish",
+                        emaFastH1 != null && emaSlowH1 != null ? emaFastH1 < emaSlowH1 : true,
+                        ema9h1 != null ? lastClose < ema9h1 : true,
+                        rsi15 != null ? rsi15 < 100 - adaptiveRSI : true,
+                        macd15Hist != null ? macd15Hist < 0 : true,
+                        adx15 != null ? adx15 > adaptiveADX : true,
+                    ];
+                    buyScore = buyConditions.filter(Boolean).length;
+                    sellScore = sellConditions.filter(Boolean).length;
+                    break;
+            }
 
             // Decide signal
             const threshold = typeof REQUIRED_SCORE === "number" && REQUIRED_SCORE > 0 ? REQUIRED_SCORE : 3;
@@ -133,12 +176,63 @@ class Strategy {
         }
     }
 
-    legacyMultiTfStrategy({ symbol, indicators, bid, ask }) {
-        const { h4, h1, m15 } = indicators;
+    legacyMultiTfStrategy({ symbol, indicators, candles, bid, ask }) {
+        const { h4, h1, m15, m5 } = indicators;
         let buyConditions = [];
         let sellConditions = [];
 
         switch (symbol) {
+            case "EURUSD": {
+                const { m15Candles } = candles;
+
+                if (!m15Candles?.length) return { signal: null, reason: "no_candles" };
+                const prev = m15Candles[m15Candles.length - 2];
+                const last = m15Candles[m15Candles.length - 1];
+
+                const pattern =
+                    this.greenRedCandlePattern(h1.emaFast > h1.emaSlow ? "bullish" : "bearish", prev, last) ||
+                    this.engulfingPattern(prev, last) ||
+                    this.pinBarPattern(last);
+
+                if (!pattern) {
+                    return { signal: null, reason: "no_pattern" };
+                }
+
+                buyConditions = [
+                    { name: "Pattern Bullish", value: pattern === "bullish" || pattern === "BUY", weight: 2 },
+                    { name: "H1 EMA Fast > Slow", value: h1.emaFast > h1.emaSlow, weight: 2 },
+                    { name: "M5 EMA20 > EMA50", value: m5.ema20 > m5.ema50, weight: 2 },
+                    { name: "RSI 45–65", value: m5.rsi > 45 && m5.rsi < 65, weight: 1 },
+                    { name: "ADX > 20", value: m5.adx?.adx > 20, weight: 1 },
+                    { name: "BB Lower Zone", value: m5.bb?.pb < 0.3, weight: 1 },
+                    { name: "ATR > 0.0004", value: m5.atr > 0.0004, weight: 1 },
+                ];
+
+                sellConditions = [
+                    { name: "Pattern Bearish", value: pattern === "bearish" || pattern === "SELL", weight: 2 },
+                    { name: "H1 EMA Fast < Slow", value: h1.emaFast < h1.emaSlow, weight: 2 },
+                    { name: "M5 EMA20 < EMA50", value: m5.ema20 < m5.ema50, weight: 2 },
+                    { name: "RSI 35–55", value: m5.rsi < 55 && m5.rsi > 35, weight: 1 },
+                    { name: "ADX > 20", value: m5.adx?.adx > 20, weight: 1 },
+                    { name: "BB Upper Zone", value: m5.bb?.pb > 0.7, weight: 1 },
+                    { name: "ATR > 0.0004", value: m5.atr > 0.0004, weight: 1 },
+                ];
+
+                const buyScore = buyConditions.filter((c) => c.value).length;
+                const sellScore = sellConditions.filter((c) => c.value).length;
+                const REQUIRED_SCORE = 4;
+
+                logger.info(`[EURUSD] BuyScore: ${buyScore}, SellScore: ${sellScore}`);
+
+                if (buyScore >= REQUIRED_SCORE) {
+                    return { signal: "BUY", reason: "EURUSD hybrid pattern confirmed", buyScore, sellScore };
+                }
+                if (sellScore >= REQUIRED_SCORE) {
+                    return { signal: "SELL", reason: "EURUSD hybrid pattern confirmed", buyScore, sellScore };
+                }
+
+                return { signal: null, reason: "conditions_not_met", buyScore, sellScore };
+            }
             case "AUDUSD":
                 buyConditions = [
                     // PRIMARY
