@@ -110,9 +110,11 @@ export async function calcIndicators(bars) {
         price_vs_ema9,
         price_vs_ema21,
         price_vs_bb_mid,
-        
-        rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
+
         bb,
+        lastClose,
+        close: lastClose,
+        rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
         atr: atr,
         adaptiveRSI: (() => {

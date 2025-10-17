@@ -260,21 +260,23 @@ class TradingService {
             return;
         }
 
-        // --- Activation logic (unchanged) ---
-        const risk = Math.abs(entryPrice - stopLoss);
-        const activationLevel = direction === "BUY" ? entryPrice + 0.5 * risk : entryPrice - 0.5 * risk;
+        // --- Activation logic: 60% of TP ---
+        const tpDistance = Math.abs(takeProfit - entryPrice);
+        const activationLevel = direction === "BUY"
+            ? entryPrice + tpDistance * 0.6
+            : entryPrice - tpDistance * 0.6;
 
-        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
+        const reachedActivation = direction === "BUY"
+            ? currentPrice >= activationLevel
+            : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
-            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 0.5x risk activation.`);
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 60% TP activation.`);
             return;
         }
 
-        // --- Trailing stop at 10% of TP distance ---
-        const tpDistance = Math.abs(takeProfit - entryPrice);
+        // --- Trailing stop at 10% of TP distance from current price ---
         const trailDistance = tpDistance * 0.1;
-
         let newStop;
         if (direction === "BUY") {
             newStop = currentPrice - trailDistance;
