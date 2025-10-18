@@ -40,8 +40,7 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, indicators, candles) {
-        const atr = indicators.atr || 0.001; // fallback if ATR missing
+    async calculateTradeParameters(signal, symbol, bid, ask, candles) {
         const { m1Candles } = candles;
 
         const price = signal === "BUY" ? ask : bid;
@@ -79,9 +78,31 @@ class TradingService {
             }
         }
 
-        let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
-        size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
+        // let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
+        // size = Math.floor(size / 100) * 100;
+        // if (size < 100) size = 100;
+
+        // Round SL/TP to valid decimals
+        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+
+        // --- FIXED: Proper pip-based sizing for all symbols ---
+        const slPips = Math.abs(slDistance / pip); // SL distance in pips
+        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
+
+        const maxSimultaneousTrades = MAX_POSITIONS;
+        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+
+        let size = riskAmount / (slPips * pipValuePerUnit);
+        size = Math.floor(size / 100) * 100; // round down to nearest 100
+        if (size < 100) size = 100; // enforce minimum
+
+        logger.info(`[Trade Parameters] ${symbol} ${signal}:
+            Entry: ${price}
+            SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
+            TP: ${takeProfitPrice}
+            Size: ${size}
+            PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
@@ -117,9 +138,9 @@ class TradingService {
         return { SL: newSL, TP: newTP };
     }
 
-    async executeTrade(symbol, signal, bid, ask, indicators = {}, candles) {
+    async executeTrade(symbol, signal, bid, ask, indicators, candles) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators, candles);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -137,9 +158,9 @@ class TradingService {
                 logger.info(
                     `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
                 );
-
                 try {
                     const logPath = getCurrentTradesLogPath();
+                    if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, "");
                     const logEntry = {
                         time: new Date().toISOString(),
                         id: position.dealReference,
@@ -149,11 +170,32 @@ class TradingService {
                         sl: SL,
                         tp: TP,
                         size,
+                        // indicators: {
+                        //     rsi: indicators.rsi,
+                        //     adx: indicators.adx,
+                        //     atr: indicators.atr,
+                        //     macdHist: indicators.macd?.histogram,
+                        //     macdSignal: indicators.macd?.signal,
+                        //     macdValue: indicators.macd?.MACD,
+                        //     ema9: indicators.ema9,
+                        //     ema21: indicators.ema21,
+                        //     ema50: indicators.ema50,
+                        //     ema200: indicators.ema200,
+                        //     ema20Slope: indicators.ema20Slope,
+                        //     ema50Slope: indicators.ema50Slope,
+                        //     bbUpper: indicators.bb?.upper,
+                        //     bbLower: indicators.bb?.lower,
+                        //     trend: indicators.trend,
+                        //     trendStrength: indicators.trendStrength,
+                        //     price_vs_ema9: indicators.price_vs_ema9,
+                        //     price_vs_ema21: indicators.price_vs_ema21,
+                        //     price_vs_bb_mid: indicators.price_vs_bb_mid,
+                        // },
                         indicators,
                         result: null,
                     };
                     fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
-                    logger.info(`[TradeLog] Logged opened trade ${position.dealReference} to ${logPath}`);
+                    logger.info(`[TradeLog] Logged opened trade ${position.dealReference}`);
                 } catch (err) {
                     logger.error("[TradeLog] Failed to append opened trade:", err);
                 }
@@ -182,9 +224,7 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            // const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, trendAnalysis });
-
-            const { signal, reason } = Strategy.legacyMultiTfStrategy({ indicators, bid, ask });
+            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
@@ -212,48 +252,54 @@ class TradingService {
         }
     }
 
-    // --- Improved trailing stop logic ---
-    async updateTrailingStopIfNeeded(position, indicators = {}) {
-        const { dealId, direction, entryPrice, stopLoss, currentPrice, symbol } = position;
+    async updateTrailingStopIfNeeded(position, indicators) {
+        const { dealId, direction, entryPrice, stopLoss, takeProfit, currentPrice, symbol } = position;
 
         if (!dealId) {
             logger.warn(`[TrailingStop] No dealId for position, skipping update.`);
             return;
         }
 
-        // Use ATR from indicators (fallback to SL distance if missing)
-        const atr = indicators.atr || Math.abs(entryPrice - stopLoss);
+        // --- Activation logic: 60% of TP ---
+        const tpDistance = Math.abs(takeProfit - entryPrice);
+        const activationLevel = direction === "BUY"
+            ? entryPrice + tpDistance * 0.6
+            : entryPrice - tpDistance * 0.6;
 
-        // Activate trailing when price moves +1×ATR in profit
-        const activationLevel = direction === "BUY" ? entryPrice + atr : entryPrice - atr;
-        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
+        const reachedActivation = direction === "BUY"
+            ? currentPrice >= activationLevel
+            : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
-            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached trailing activation level.`);
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 60% TP activation.`);
             return;
         }
 
-        // Trailing stop: set new stop at ATR distance from current price
-        const newStop = direction === "BUY" ? currentPrice - atr : currentPrice + atr;
+        // --- Trailing stop at 10% of TP distance from current price ---
+        const trailDistance = tpDistance * 0.1;
+        let newStop;
+        if (direction === "BUY") {
+            newStop = currentPrice - trailDistance;
+            // Don't move SL backwards
+            if (newStop <= stopLoss) return;
+        } else {
+            newStop = currentPrice + trailDistance;
+            if (newStop >= stopLoss) return;
+        }
 
-        // Only update if new stop is better than previous
-        const shouldUpdate = direction === "BUY" ? newStop > stopLoss : newStop < stopLoss;
-
-        if (shouldUpdate) {
-            try {
-                await updateTrailingStop(
-                    dealId,
-                    currentPrice,
-                    entryPrice,
-                    null, // takeProfit not needed for trailing
-                    direction.toUpperCase(),
-                    symbol,
-                    true // enable trailing
-                );
-                logger.info(`[TrailingStop] Updated stop to ${newStop} (ATR: ${atr}) for ${dealId}`);
-            } catch (error) {
-                logger.error(`[TrailingStop] Error updating stops for ${dealId}:`, error);
-            }
+        try {
+            await updateTrailingStop(
+                dealId,
+                currentPrice,
+                newStop,
+                null, // takeProfit not needed for trailing
+                direction.toUpperCase(),
+                symbol,
+                true
+            );
+            logger.info(`[TrailingStop] Updated stop to ${newStop.toFixed(5)} (10% TP logic) for ${dealId}`);
+        } catch (error) {
+            logger.error(`[TrailingStop] Error updating trailing stop for ${dealId}:`, error);
         }
     }
 
@@ -273,6 +319,20 @@ class TradingService {
             await apiClosePosition(dealId);
             logger.info(`[API] Closed position for dealId: ${dealId}`);
             if (result) logTradeResult(dealId, result);
+            try {
+                const logPath = getCurrentTradesLogPath();
+                const closeEntry = {
+                    time: new Date().toISOString(),
+                    id: dealId,
+                    resultType: result?.type || result,
+                    closePrice: result?.closePrice || null,
+                    profitPips: result?.profitPips || null,
+                };
+                fs.appendFileSync(logPath, JSON.stringify(closeEntry) + "\n");
+                logger.info(`[TradeLog] Logged closed trade result for ${dealId}: ${result?.type || result}`);
+            } catch (err) {
+                logger.error("[TradeLog] Failed to log trade result:", err);
+            }
         } catch (error) {
             logger.error(`[trading.js][API] Failed to close position for dealId: ${dealId}`, error);
         }

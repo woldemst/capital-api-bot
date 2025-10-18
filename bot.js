@@ -17,7 +17,7 @@ class TradingBot {
         this.latestCandles = {}; // Store latest candles for each symbol
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
-        this.maxCandleHistory = 120; // Rolling window size for indicators
+        this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
 
         // Define allowed trading windows (UTC, Berlin time for example)
@@ -116,7 +116,7 @@ class TradingBot {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
 
-                // await this.startMonitorOpenTrades();
+                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -179,19 +179,6 @@ class TradingBot {
 
         logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
         return combined;
-    }
-
-    // Determine which strategy to use based on current session
-    getStrategyForSession() {
-        const now = new Date();
-        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
-        // London 8:00-13:00 → Pullback Hybrid
-        if (hour >= 8 && hour < 13) return "checkPullbackHybrid";
-        // London+NY overlap (13:00-17:00) and NY only after London closes (17:00-21:00) → Breakout
-        if (hour >= 13 && hour < 21) return "checkBreakout";
-        // Tokyo (0:00-9:00) and Sydney (22:00-7:00) → Mean Reversion
-        if ((hour >= 22 && hour <= 23) || (hour >= 0 && hour < 9)) return "checkMeanReversion";
-        return "checkBreakout"; // default
     }
 
     // Analyzes all symbols in the trading universe.
@@ -270,10 +257,9 @@ class TradingBot {
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
-            trendAnalysis,
+            symbol,
             indicators,
             candles,
-            symbol,
             bid,
             ask,
         });
@@ -298,8 +284,8 @@ class TradingBot {
                 const indicators = await calcIndicators(m15Data.prices);
 
                 const positionData = {
-                    dealId: pos.position.dealId,
                     symbol,
+                    dealId: pos.position.dealId,
                     currency: pos.position.currency,
                     direction: pos.position.direction,
                     size: pos.position.size,

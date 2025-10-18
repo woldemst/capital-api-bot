@@ -1,5 +1,8 @@
 .env*
 .DS_Store
-node_modules/
 logs/
-
+node_modules/
+backtest/data/
+backtest/signals/
+backtest/results/
+backtest/analysis/

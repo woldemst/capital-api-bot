@@ -9,26 +9,6 @@ export const API = {
     WS_URL: process.env.WS_BASE_URL,
 };
 
-export const backtestSymbols = [
-    "EURUSD",
-    "GBPUSD",
-    "EURGBP",
-    "USDCHF",
-    "EURJPY",
-    "EURUSD",
-    "GBPUSD",
-    "USDJPY",
-    "USDCAD",
-    "AUDUSD",
-    "NZDUSD",
-    "AUDJPY",
-    "NZDJPY",
-    "USDJPY",
-    "EURJPY",
-    "AUDUSD",
-    "NZDUSD",
-];
-
 // Trading Sessions (UTC times)
 export const SESSIONS = {
     LONDON: {
@@ -68,9 +48,11 @@ export const RISK = {
     MAX_SLIPPAGE_PIPS: 2,
     MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    REQUIRED_SCORE: 3,
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
+    REQUIRED_SCORE: 4, // Must have total score or more
+    REQUIRED_PRIMARY_SCORE: 1, // Must have at least 3 primary conditions
+    REQUIRED_SECONDARY_SCORE: 1, // Must have total score of 4 or more
 };
 
 // Technical Analysis Configuration
@@ -122,10 +104,10 @@ export const HISTORY = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 60 * 1000, // 1 minute between analyses
+    INTERVAL: 15 * 1000, // 1 minute between analyses
     MODE: true,
 };
 
 export const PROD = {
-    INTERVAL: 15 * 60 * 1000, // 15 minutes between analyses (aligned with M15)
+    INTERVAL: 30 * 1000, // 15 minutes between analyses (aligned with M15)
 };
