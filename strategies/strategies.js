@@ -227,27 +227,24 @@ class Strategy {
         const hasBullishMomentum = m1.ema9 > m1.ema21 && m1.rsi > 50 && m1.adx?.adx > 20 && m1.close > m1.ema20;
         const hasBearishMomentum = m1.ema9 < m1.ema21 && m1.rsi < 50 && m1.adx?.adx > 20 && m1.close < m1.ema20;
 
-        // Defensive check for candle array length
-        if (!candles.m1Candles || candles.m1Candles.length < 3) return { signal: null, reason: "not_enough_m1_candles" };
-
         const prev = candles.m1Candles[candles.m1Candles.length - 3]; // previous closed
         const last = candles.m1Candles[candles.m1Candles.length - 2]; // most recent closed
 
-        const pattern =
-            this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last)
+        const pattern = this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last);
+
+        console.log(bullishTrend, hasBullishMomentum, pattern);
 
         // --- Combine everything ---
-        if (bullishTrend && hasBullishMomentum === "bullish") {
+        if (bullishTrend && hasBullishMomentum && pattern === "bullish") {
             return { signal: "BUY", reason: "trend+momentum+pattern" };
         }
 
-        if (bearishTrend && hasBearishMomentum === "bearish") {
+        if (bearishTrend && hasBearishMomentum && pattern === "bearish") {
             return { signal: "SELL", reason: "trend+momentum+pattern" };
         }
 
         return { signal: null, reason: "no_signal" };
     };
-
 
     greenRedCandlePattern(trend, prev, last) {
         if (!prev || !last || !trend) return false;
