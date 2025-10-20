@@ -230,16 +230,17 @@ class Strategy {
         const prev = candles.m1Candles[candles.m1Candles.length - 3]; // previous closed
         const last = candles.m1Candles[candles.m1Candles.length - 2]; // most recent closed
 
-        const pattern = this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last);
+        const pattern =
+            this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
 
         console.log(bullishTrend, hasBullishMomentum, pattern);
 
         // --- Combine everything ---
-        if (bullishTrend && hasBullishMomentum && pattern === "bullish") {
+        if (hasBullishMomentum && pattern === "bullish") {
             return { signal: "BUY", reason: "trend+momentum+pattern" };
         }
 
-        if (bearishTrend && hasBearishMomentum && pattern === "bearish") {
+        if (hasBearishMomentum && pattern === "bearish") {
             return { signal: "SELL", reason: "trend+momentum+pattern" };
         }
 
@@ -275,12 +276,12 @@ class Strategy {
 
         // Bullish engulfing
         if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) {
-            return "BUY";
+            return "bullish";
         }
 
         // Bearish engulfing
         if (lastClose < lastOpen && prevClose > prevOpen && lastClose < prevOpen && lastOpen > prevClose) {
-            return "SELL";
+            return "bearish";
         }
 
         return null;
@@ -298,10 +299,10 @@ class Strategy {
         const lowerWick = Math.min(open, close) - low;
 
         // Bullish pin bar: long lower wick (≥2× body)
-        if (lowerWick > body * 2) return "BUY";
+        if (lowerWick > body * 2) return "bullish";
 
         // Bearish pin bar: long upper wick (≥2× body)
-        if (upperWick > body * 2) return "SELL";
+        if (upperWick > body * 2) return "bearish";
 
         return null;
     }
