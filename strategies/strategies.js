@@ -231,16 +231,16 @@ class Strategy {
         const last = candles.m1Candles[candles.m1Candles.length - 2]; // most recent closed
 
         const pattern =
-            this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
+            this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last)
 
         console.log(bullishTrend, hasBullishMomentum, pattern);
 
         // --- Combine everything ---
-        if (hasBullishMomentum && pattern === "bullish") {
+        if (pattern === "bullish") {
             return { signal: "BUY", reason: "trend+momentum+pattern" };
         }
 
-        if (hasBearishMomentum && pattern === "bearish") {
+        if (pattern === "bearish") {
             return { signal: "SELL", reason: "trend+momentum+pattern" };
         }
 
