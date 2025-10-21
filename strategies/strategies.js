@@ -217,32 +217,34 @@ class Strategy {
     // }
 
     getSignal = ({ symbol, indicators, candles }) => {
-        const { m1, m5, h1 } = indicators;
+        const { m1, m5, m15, h1 } = indicators;
 
-        // --- Trend direction ---
-        const bullishTrend = m5.ema20 > m5.ema50 && h1.ema20 > h1.ema50;
-        const bearishTrend = m5.ema20 < m5.ema50 && h1.ema20 < h1.ema50;
+        // --- Multi-timeframe trends ---
+        const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
+        const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+        const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
 
-        // --- Momentum confirmation on M1 ---
-        const hasBullishMomentum = m1.ema9 > m1.ema21 && m1.rsi > 50 && m1.adx?.adx > 20 && m1.close > m1.ema20;
-        const hasBearishMomentum = m1.ema9 < m1.ema21 && m1.rsi < 50 && m1.adx?.adx > 20 && m1.close < m1.ema20;
+        // --- Check alignment between higher timeframes ---
+        const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
+        if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
 
-        const prev = candles.m1Candles[candles.m1Candles.length - 3]; // previous closed
-        const last = candles.m1Candles[candles.m1Candles.length - 2]; // most recent closed
+        // --- Candle data ---
+        const prev = candles.m1Candles[candles.m1Candles.length - 3];
+        const last = candles.m1Candles[candles.m1Candles.length - 2];
+        if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
-        const pattern =
-            this.greenRedCandlePattern(bullishTrend ? "bullish" : "bearish", prev, last)
+        // --- Pattern recognition based on M1 trend ---
+        const pattern = this.greenRedCandlePattern(m1Trend, prev, last);
 
-        console.log(bullishTrend, hasBullishMomentum, pattern);
+        // --- Candle body strength check ---
+        // const body = Math.abs(last.close - last.open);
+        // const avgBody = Math.abs(prev.close - prev.open);
+        // if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
 
-        // --- Combine everything ---
-        if (pattern === "bullish") {
-            return { signal: "BUY", reason: "trend+momentum+pattern" };
-        }
+        // --- Combine all signals ---
+        if (pattern === "bullish" && m1Trend === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment" };
 
-        if (pattern === "bearish") {
-            return { signal: "SELL", reason: "trend+momentum+pattern" };
-        }
+        if (pattern === "bearish" && m1Trend === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment" };
 
         return { signal: null, reason: "no_signal" };
     };
@@ -251,14 +253,17 @@ class Strategy {
         if (!prev || !last || !trend) return false;
         const getOpen = (c) => (typeof c.o !== "undefined" ? c.o : c.open);
         const getClose = (c) => (typeof c.c !== "undefined" ? c.c : c.close);
-        if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) {
-            return false;
-        }
+
+        if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) return false;
+
         const isBullish = (c) => getClose(c) > getOpen(c);
         const isBearish = (c) => getClose(c) < getOpen(c);
+
         const trendDirection = String(trend).toLowerCase();
+
         if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) return "bullish";
         if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) return "bearish";
+        
         return false;
     }
 
@@ -275,14 +280,10 @@ class Strategy {
         const lastClose = getClose(last);
 
         // Bullish engulfing
-        if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) {
-            return "bullish";
-        }
+        if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) return "bullish";
 
         // Bearish engulfing
-        if (lastClose < lastOpen && prevClose > prevOpen && lastClose < prevOpen && lastOpen > prevClose) {
-            return "bearish";
-        }
+        if (lastClose < lastOpen && prevClose > prevOpen && lastClose < prevOpen && lastOpen > prevClose) return "bearish";
 
         return null;
     }
