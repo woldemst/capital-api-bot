@@ -226,12 +226,13 @@ class Strategy {
         const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
 
         // --- Check alignment between higher timeframes ---
-        const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
+        // const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
+        const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
         if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
 
         // --- Candle data ---
-        const prev = candles.m1Candles[candles.m1Candles.length - 3];
-        const last = candles.m1Candles[candles.m1Candles.length - 2];
+        const prev = candles.m5Candles[candles.m5Candles.length - 3];
+        const last = candles.m5Candles[candles.m5Candles.length - 2];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
         // --- Pattern recognition based on M1 trend ---
@@ -244,11 +245,34 @@ class Strategy {
         // if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
 
         // --- Combine all signals ---
-        if (pattern === "bullish" && m5Trend === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment" };
+        if (pattern === "bullish" && m5Trend === "bullish" && alignedTrend)
+            return {
+                signal: "BUY",
+                reason: "pattern_trend_alignment",
+                context: {
+                    prevHigh: prev.high,
+                    prevLow: prev.low,
+                    prevOpen: prev.open,
+                    prevClose: prev.close,
+                },
+            };
 
-        if (pattern === "bearish" && m5Trend === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment" };
+        if (pattern === "bearish" && m5Trend === "bearish" && alignedTrend)
+            return {
+                signal: "SELL",
+                reason: "pattern_trend_alignment",
+                context: {
+                    prevHigh: prev.high,
+                    prevLow: prev.low,
+                    prevOpen: prev.open,
+                    prevClose: prev.close,
+                },
+            };
 
-        return { signal: null, reason: "no_signal" };
+        return {
+            signal: null,
+            reason: "no_signal",
+        };
     };
 
     greenRedCandlePattern(trend, prev, last) {
@@ -265,7 +289,7 @@ class Strategy {
 
         if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) return "bullish";
         if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) return "bearish";
-        
+
         return false;
     }
 
