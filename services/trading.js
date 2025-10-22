@@ -263,8 +263,8 @@ class TradingService {
         // --- Activation logic: 60% of TP ---
         const tpDistance = Math.abs(takeProfit - entryPrice);
         const activationLevel = direction === "BUY"
-            ? entryPrice + tpDistance * 0.6
-            : entryPrice - tpDistance * 0.6;
+            ? entryPrice + tpDistance * 0.5
+            : entryPrice - tpDistance * 0.5;
 
         const reachedActivation = direction === "BUY"
             ? currentPrice >= activationLevel

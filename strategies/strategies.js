@@ -222,6 +222,7 @@ class Strategy {
         // --- Multi-timeframe trends ---
         const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
         const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+        const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
         const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
 
         // --- Check alignment between higher timeframes ---
@@ -234,7 +235,8 @@ class Strategy {
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
         // --- Pattern recognition based on M1 trend ---
-        const pattern = this.greenRedCandlePattern(m1Trend, prev, last);
+        // const pattern = this.greenRedCandlePattern(m1Trend, prev, last);
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last);
 
         // --- Candle body strength check ---
         // const body = Math.abs(last.close - last.open);
@@ -242,9 +244,9 @@ class Strategy {
         // if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
 
         // --- Combine all signals ---
-        if (pattern === "bullish" && m1Trend === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment" };
+        if (pattern === "bullish" && m5Trend === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment" };
 
-        if (pattern === "bearish" && m1Trend === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment" };
+        if (pattern === "bearish" && m5Trend === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment" };
 
         return { signal: null, reason: "no_signal" };
     };
