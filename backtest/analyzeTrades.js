@@ -5,8 +5,8 @@ const DATA_DIR = "./data";
 const OUTPUT_DIR = "./analysis";
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
+// Only required timeframes
 const TIMEFRAMES = ["M1", "M5", "M15", "H1", "H4"];
-const MAX_DIFF_MS = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 function loadAndSortData(symbol, timeframe) {
     const filePath = path.join(DATA_DIR, symbol, `${symbol}_${timeframe}.json`);
@@ -32,81 +32,71 @@ function loadAndSortData(symbol, timeframe) {
     return data;
 }
 
-function findClosestIndex(arr, targetTime) {
+function findPreviousIndex(arr, targetTime) {
+    // find the most recent candle before (or exactly at) the target time
     let left = 0;
     let right = arr.length - 1;
-    let bestIndex = -1;
-    let bestDiff = Infinity;
+    let result = -1;
 
     while (left <= right) {
         const mid = Math.floor((left + right) / 2);
         const midTime = new Date(arr[mid].time).getTime();
-        const diff = Math.abs(midTime - targetTime);
-        if (diff < bestDiff) {
-            bestDiff = diff;
-            bestIndex = mid;
-        }
-        if (midTime < targetTime) {
-            left = mid + 1;
-        } else if (midTime > targetTime) {
-            right = mid - 1;
+
+        if (midTime <= targetTime) {
+            result = mid;       // candidate found
+            left = mid + 1;     // try to find a later one
         } else {
-            break;
+            right = mid - 1;
         }
     }
 
-    return bestDiff <= MAX_DIFF_MS ? bestIndex : -1;
+    return result; // -1 if none before target
 }
 
 function mergeTimeframes(symbol) {
     console.log(`🔍 Loading data for symbol: ${symbol}`);
     const dataByTF = {};
+    const missingTFs = [];
     for (const tf of TIMEFRAMES) {
         dataByTF[tf] = loadAndSortData(symbol, tf);
         console.log(`  - Loaded ${dataByTF[tf].length} entries for ${tf}`);
+        if (dataByTF[tf].length === 0) {
+            missingTFs.push(tf);
+        }
     }
 
-    // Determine overlapping date range among all timeframes
+    // Require M1, M5, M15, H1 to be present (guarantee inclusion, but allow nulls for missing)
+    if (missingTFs.length > 0) {
+        console.warn(`⚠️ The following required timeframes have NO data and will be filled as null: ${missingTFs.join(", ")}`);
+    }
+
+    // Use the smallest timeframe (M1) as the base timeline
+    const baseData = dataByTF["M1"];
+    if (!baseData || !baseData.length) {
+        console.error("❌ No base timeframe data (M1) available. Aborting.");
+        return [];
+    }
+
+    // For reference: find earliest/latest among available timeframes (for info)
+    const availableTFs = TIMEFRAMES.filter(tf => dataByTF[tf] && dataByTF[tf].length > 0);
+    if (availableTFs.length < TIMEFRAMES.length) {
+        console.warn(`⚠️ Some required timeframes have missing data. Merged dataset will have nulls for those.`);
+    }
     const earliestTimes = [];
     const latestTimes = [];
-    for (const tf of TIMEFRAMES) {
+    for (const tf of availableTFs) {
         const data = dataByTF[tf];
-        if (data.length === 0) {
-            // If any timeframe has no data, overlapping range is empty
-            console.error(`❌ No data for timeframe ${tf}, cannot determine overlapping range.`);
-            return [];
-        }
         earliestTimes.push(new Date(data[0].time).getTime());
         latestTimes.push(new Date(data[data.length - 1].time).getTime());
     }
     const overlapStart = Math.max(...earliestTimes);
     const overlapEnd = Math.min(...latestTimes);
     if (overlapStart > overlapEnd) {
-        console.error("❌ No overlapping date range among timeframes. Aborting.");
-        return [];
+        console.warn("⚠️ No overlapping date range among available timeframes. Proceeding with full M1 range, filling missing as nulls.");
     }
 
-    // Filter each timeframe data to the overlapping date range
-    for (const tf of TIMEFRAMES) {
-        dataByTF[tf] = dataByTF[tf].filter(entry => {
-            const t = new Date(entry.time).getTime();
-            return t >= overlapStart && t <= overlapEnd;
-        });
-        if (dataByTF[tf].length === 0) {
-            console.error(`❌ No data for timeframe ${tf} after filtering to overlapping range.`);
-            return [];
-        }
-    }
-
-    // Use the smallest timeframe (M1) as the base timeline
-    const baseData = dataByTF["M1"];
-    if (!baseData.length) {
-        console.error("❌ No base timeframe data (M1) available. Aborting.");
-        return [];
-    }
-
+    // Merge: for each M1 bar, find closest in other timeframes, fill null if not found or timeframe missing
     const merged = [];
-
     for (const baseEntry of baseData) {
         const baseTime = new Date(baseEntry.time).getTime();
         const combinedEntry = { time: baseEntry.time, M1: baseEntry };
@@ -114,17 +104,21 @@ function mergeTimeframes(symbol) {
         for (const tf of TIMEFRAMES) {
             if (tf === "M1") continue;
             const tfData = dataByTF[tf];
-            if (!tfData.length) {
+            if (!tfData || tfData.length === 0) {
                 combinedEntry[tf] = null;
                 continue;
             }
-            const idx = findClosestIndex(tfData, baseTime);
+            const idx = findPreviousIndex(tfData, baseTime);
             combinedEntry[tf] = idx >= 0 ? tfData[idx] : null;
         }
-
         merged.push(combinedEntry);
     }
 
+    // Info log: show how many merged entries, and which timeframes had missing data
+    console.log(`✅ Merged ${merged.length} entries for ${symbol}.`);
+    if (missingTFs.length > 0) {
+        console.log(`ℹ️ Merged data contains nulls for missing timeframes: ${missingTFs.join(", ")}`);
+    }
     return merged;
 }
 
