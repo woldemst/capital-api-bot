@@ -2,7 +2,7 @@ import fs from "fs";
 import readline from "readline";
 import logger from "../utils/logger.js";
 
-const pair = "AUDUSD"; // or dynamically detect from file name
+const pair = "EURUSD"; // or dynamically detect from file name
 const inputFile = `./analysis/${pair}_combined.jsonl`; // <-- remove space before ./
 const outputFile = `./results/${pair}_backtest_results.jsonl`;
 
