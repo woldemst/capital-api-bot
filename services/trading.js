@@ -40,24 +40,26 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, candles) {
+    async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
         const { m1Candles } = candles;
 
         const price = signal === "BUY" ? ask : bid;
+        const prevLow = context.prevLow;
+        const prevHigh = context.prevHigh;
 
         // Use previous M1 candle for SL
-        const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
-        if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
+        // const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
+        // if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
 
         const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
         let stopLossPrice, slDistance, takeProfitPrice;
 
         if (signal === "BUY") {
-            stopLossPrice = prevCandle.low - buffer;
+            stopLossPrice = prevLow - buffer;
             slDistance = price - stopLossPrice;
             takeProfitPrice = price + slDistance * 1.8;
         } else {
-            stopLossPrice = prevCandle.high + buffer;
+            stopLossPrice = prevHigh + buffer;
             slDistance = stopLossPrice - price;
             takeProfitPrice = price - slDistance * 1.8;
         }
@@ -138,9 +140,9 @@ class TradingService {
         return { SL: newSL, TP: newTP };
     }
 
-    async executeTrade(symbol, signal, bid, ask, indicators, candles) {
+    async executeTrade(symbol, signal, bid, ask, indicators, candles, context) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles, context);
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -224,11 +226,11 @@ class TradingService {
                 logger.warn(`[ProcessPrice] ${symbol} already has an open position.`);
                 return;
             }
-            const { signal, reason } = Strategy.getSignal({ symbol, indicators, candles, bid, ask });
+            const { signal, reason, context } = Strategy.getSignal({ symbol, indicators, candles, bid, ask });
 
             if (signal) {
                 logger.info(`[Signal] ${symbol}: ${signal} signal found`);
-                await this.processSignal(symbol, signal, bid, ask, candles, indicators);
+                await this.processSignal(symbol, signal, bid, ask, candles, indicators, context);
             } else {
                 logger.debug(`[Signal] ${symbol}: No signal found for reason: ${reason}`);
             }
@@ -238,9 +240,9 @@ class TradingService {
     }
 
     // --- Signal processing ---
-    async processSignal(symbol, signal, bid, ask, candles, indicators = {}) {
+    async processSignal(symbol, signal, bid, ask, candles, indicators = {}, context) {
         try {
-            await this.executeTrade(symbol, signal, bid, ask, indicators, candles);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, candles, context);
             logger.info(`[Signal] Successfully processed ${signal.toUpperCase()} signal for ${symbol}`);
         } catch (error) {
             // Check if the error message contains 'Not placed'
@@ -262,16 +264,12 @@ class TradingService {
 
         // --- Activation logic: 60% of TP ---
         const tpDistance = Math.abs(takeProfit - entryPrice);
-        const activationLevel = direction === "BUY"
-            ? entryPrice + tpDistance * 0.6
-            : entryPrice - tpDistance * 0.6;
+        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.5 : entryPrice - tpDistance * 0.5;
 
-        const reachedActivation = direction === "BUY"
-            ? currentPrice >= activationLevel
-            : currentPrice <= activationLevel;
+        const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
-            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 60% TP activation.`);
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 50% TP activation.`);
             return;
         }
 

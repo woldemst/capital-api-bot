@@ -6,3 +6,5 @@ backtest/data/
 backtest/signals/
 backtest/results/
 backtest/analysis/
+logs/trades_2025-10.log
+*.log

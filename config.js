@@ -41,8 +41,8 @@ export const RISK = {
     PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     BUFFER_PIPS: 1, // Buffer for SL calculation
-    REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 60, // Maximum hold time in minutes
+    REWARD_RATIO: 2,   // 2:1 reward-to-risk ratio
+    MAX_HOLD_TIME: 45, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
@@ -66,9 +66,7 @@ export const ANALYSIS = {
         M5: "MINUTE_5", // 5-minute entry timeframe
         M1: "MINUTE", // 1-minute entry timeframe
     },
-
-    // EMAs for trend and entry
-
+    
     EMA: {
         TREND: {
             FAST: 50,
@@ -80,7 +78,6 @@ export const ANALYSIS = {
         },
     },
 
-    // RSI settings
     RSI: {
         PERIOD: 14,
         OVERBOUGHT: 70,
@@ -109,5 +106,5 @@ export const DEV = {
 };
 
 export const PROD = {
-    INTERVAL: 30 * 1000, // 15 minutes between analyses (aligned with M15)
+    INTERVAL: 60 * 1000, // 15 minutes between analyses (aligned with M15)
 };
