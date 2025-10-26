@@ -41,44 +41,44 @@ class TradingService {
 
     // --- Position size + achievable SL/TP for M1 ---
     async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
-        const { m1Candles } = candles;
-
         const price = signal === "BUY" ? ask : bid;
-        const prevLow = context.prevLow;
-        const prevHigh = context.prevHigh;
 
-        // Use previous M1 candle for SL
-        // const prevCandle = m1Candles && m1Candles.length > 1 ? m1Candles[m1Candles.length - 2] : null;
-        // if (!prevCandle) throw new Error("Not enough M1 candles for SL calculation");
+        const { prev, last } = context;
 
         const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+
+        const body = Math.abs(last.close - last.open);
         let stopLossPrice, slDistance, takeProfitPrice;
 
         if (signal === "BUY") {
-            stopLossPrice = prevLow - buffer;
-            slDistance = price - stopLossPrice;
-            takeProfitPrice = price + slDistance * 1.8;
+            // SL under previous candle low
+            stopLossPrice = prev.low - buffer;
+
+            // TP = 2x candle body above entry
+            takeProfitPrice = price + body * 2;
         } else {
-            stopLossPrice = prevHigh + buffer;
-            slDistance = stopLossPrice - price;
-            takeProfitPrice = price - slDistance * 1.8;
+            // SL above previous candle high
+            stopLossPrice = prev.high + buffer;
+
+            // TP = 2x candle body below entry
+            takeProfitPrice = price - body * 2;
         }
 
-        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-        const minSlPips = symbol.includes("JPY") ? 12 : 10;
-        const minSl = minSlPips * pip;
+        // const minSlPips = symbol.includes("JPY") ? 12 : 10;
+        // const minSl = minSlPips * pip;
 
-        if (Math.abs(slDistance) < minSl) {
-            if (signal === "BUY") {
-                stopLossPrice = price - minSl;
-                slDistance = price - stopLossPrice;
-                takeProfitPrice = price + slDistance * 1.8;
-            } else {
-                stopLossPrice = price + minSl;
-                slDistance = stopLossPrice - price;
-                takeProfitPrice = price - slDistance * 1.8;
-            }
-        }
+        // if (Math.abs(slDistance) < minSl) {
+        //     if (signal === "BUY") {
+        //         stopLossPrice = price - minSl;
+        //         slDistance = price - stopLossPrice;
+        //         takeProfitPrice = price + slDistance * 1.8;
+        //     } else {
+        //         stopLossPrice = price + minSl;
+        //         slDistance = stopLossPrice - price;
+        //         takeProfitPrice = price - slDistance * 1.8;
+        //     }
+        // }
 
         // let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
         // size = Math.floor(size / 100) * 100;
@@ -88,7 +88,7 @@ class TradingService {
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // --- FIXED: Proper pip-based sizing for all symbols ---
+        slDistance = Math.abs(price - stopLossPrice);
         const slPips = Math.abs(slDistance / pip); // SL distance in pips
         const pipValuePerUnit = pip / price; // pip value per unit (approx.)
 
@@ -160,47 +160,26 @@ class TradingService {
                 logger.info(
                     `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
                 );
-                try {
-                    const logPath = getCurrentTradesLogPath();
-                    if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, "");
-                    const logEntry = {
-                        time: new Date().toISOString(),
-                        id: position.dealReference,
-                        symbol,
-                        direction: signal.toLowerCase(),
-                        entry: price,
-                        sl: SL,
-                        tp: TP,
-                        size,
-                        // indicators: {
-                        //     rsi: indicators.rsi,
-                        //     adx: indicators.adx,
-                        //     atr: indicators.atr,
-                        //     macdHist: indicators.macd?.histogram,
-                        //     macdSignal: indicators.macd?.signal,
-                        //     macdValue: indicators.macd?.MACD,
-                        //     ema9: indicators.ema9,
-                        //     ema21: indicators.ema21,
-                        //     ema50: indicators.ema50,
-                        //     ema200: indicators.ema200,
-                        //     ema20Slope: indicators.ema20Slope,
-                        //     ema50Slope: indicators.ema50Slope,
-                        //     bbUpper: indicators.bb?.upper,
-                        //     bbLower: indicators.bb?.lower,
-                        //     trend: indicators.trend,
-                        //     trendStrength: indicators.trendStrength,
-                        //     price_vs_ema9: indicators.price_vs_ema9,
-                        //     price_vs_ema21: indicators.price_vs_ema21,
-                        //     price_vs_bb_mid: indicators.price_vs_bb_mid,
-                        // },
-                        indicators,
-                        result: null,
-                    };
-                    fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
-                    logger.info(`[TradeLog] Logged opened trade ${position.dealReference}`);
-                } catch (err) {
-                    logger.error("[TradeLog] Failed to append opened trade:", err);
-                }
+                // try {
+                //     const logPath = getCurrentTradesLogPath();
+                //     if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, "");
+                //     const logEntry = {
+                //         time: new Date().toISOString(),
+                //         id: position.dealReference,
+                //         symbol,
+                //         direction: signal.toLowerCase(),
+                //         entry: price,
+                //         sl: SL,
+                //         tp: TP,
+                //         size,
+                //         indicators,
+                //         result: null,
+                //     };
+                //     fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
+                //     logger.info(`[TradeLog] Logged opened trade ${position.dealReference}`);
+                // } catch (err) {
+                //     logger.error("[TradeLog] Failed to append opened trade:", err);
+                // }
             }
         } catch (error) {
             logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
@@ -316,7 +295,7 @@ class TradingService {
         try {
             await apiClosePosition(dealId);
             logger.info(`[API] Closed position for dealId: ${dealId}`);
-            if (result) logTradeResult(dealId, result);
+            // if (result) logTradeResult(dealId, result);
             try {
                 const logPath = getCurrentTradesLogPath();
                 const closeEntry = {
