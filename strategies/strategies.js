@@ -1,10 +1,48 @@
 // strategies.js
 import logger from "../utils/logger.js";
-import { RISK, ANALYSIS } from "../config.js";
+import { RISK } from "../config.js";
 
-const { RSI } = ANALYSIS;
+const {
+    REQUIRED_SCORE,
+    REQUIRED_PRIMARY_SCORE,
+    REQUIRED_SECONDARY_SCORE,
+    BUFFER_PIPS = 1,
+    ATR_MULTIPLIER = 2,
+    RISK_REWARD: CONFIG_RISK_REWARD,
+    REWARD_RATIO: ALT_REWARD_RATIO,
+} = RISK;
 
-const { REQUIRED_SCORE } = RISK;
+const TARGET_REWARD_RATIO = CONFIG_RISK_REWARD || ALT_REWARD_RATIO || 2;
+const CANDLE_FIELD_MAP = {
+    open: ["open", "Open", "o", "O"],
+    high: ["high", "High", "h", "H"],
+    low: ["low", "Low", "l", "L"],
+    close: ["close", "Close", "c", "C"],
+};
+
+function toNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function getCandleValue(candle, field) {
+    if (!candle) return null;
+    const keys = CANDLE_FIELD_MAP[field] || [field];
+    for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(candle, key)) {
+            const num = toNumber(candle[key]);
+            if (num != null) return num;
+        }
+    }
+    return null;
+}
+
+function getCandleBody(candle) {
+    const open = getCandleValue(candle, "open");
+    const close = getCandleValue(candle, "close");
+    if (open == null || close == null) return null;
+    return Math.abs(close - open);
+}
 
 class Strategy {
     constructor() {}
@@ -216,84 +254,220 @@ class Strategy {
     //     }
     // }
 
-    getSignal = ({ symbol, indicators, candles }) => {
-        const { m1, m5, m15, h1 } = indicators;
+    getSignal = ({ symbol, indicators = {}, candles = {}, bid, ask }) => {
+        try {
+            const { m5, m15, h1 } = indicators;
 
-        // --- Multi-timeframe trends ---
-        // const h1Trend =
-        //     h1 && h1.ema20 != null && h1.ema50 != null ? (h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral") : "neutral";
-        const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
-        const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
-        // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
+            if (!m5 || !m15 || !h1) {
+                return { signal: null, reason: "missing_indicators" };
+            }
 
-        // --- Check alignment between higher timeframes ---
-        const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
-        if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
+            const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+            const buffer = BUFFER_PIPS * pip;
 
-        // --- Candle data ---
-        const prev = candles.m5Candles[candles.m5Candles.length - 3];
-        const last = candles.m5Candles[candles.m5Candles.length - 2];
-        if (!prev || !last) return { signal: null, reason: "no_candle_data" };
+            const history = Array.isArray(candles?.m5Candles) ? candles.m5Candles : Array.isArray(candles?.M5) ? candles.M5 : [];
+            if (history.length < 3) {
+                return { signal: null, reason: "insufficient_m5_history" };
+            }
 
-        // --- Pattern recognition based on M1 trend ---
-        // const pattern = this.greenRedCandlePattern(m1Trend, prev, last);
-        const pattern = this.greenRedCandlePattern(m5Trend, prev, last);
+            const prev = history[history.length - 3];
+            const last = history[history.length - 2];
 
-        // --- Candle body strength check ---
-        // const body = Math.abs(last.close - last.open);
-        // const avgBody = Math.abs(prev.close - prev.open);
-        // if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
+            if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
-        // --- Combine all signals ---
-        if (pattern === "bullish" && alignedTrend)
-            return {
-                signal: "BUY",
-                reason: "pattern_trend_alignment",
-                context: { prev, last },
+            const prevLow = getCandleValue(prev, "low");
+            const prevHigh = getCandleValue(prev, "high");
+            const lastLow = getCandleValue(last, "low");
+            const lastHigh = getCandleValue(last, "high");
+            const lastClose = getCandleValue(last, "close");
+            const lastOpen = getCandleValue(last, "open");
+            const prevClose = getCandleValue(prev, "close");
+
+            if ([prevLow, prevHigh, lastLow, lastHigh, lastClose, lastOpen].some((v) => v == null)) {
+                return { signal: null, reason: "invalid_candle_values" };
+            }
+
+            const body = getCandleBody(last);
+            if (body == null || body < pip * 3) {
+                return { signal: null, reason: "weak_candle_body" };
+            }
+
+            const h1Trend = this.resolveTrend(h1);
+            const m15Trend = this.resolveTrend(m15);
+            const m5Trend = this.resolveTrend(m5);
+
+            const bullishAligned = [h1Trend, m15Trend, m5Trend].every((trend) => trend === "bullish");
+            const bearishAligned = [h1Trend, m15Trend, m5Trend].every((trend) => trend === "bearish");
+
+            const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
+            if (!pattern) {
+                return { signal: null, reason: "no_valid_pattern" };
+            }
+
+            const atr = typeof m5?.atr === "number" ? m5.atr : typeof m15?.atr === "number" ? m15.atr : null;
+
+            const evaluateDirection = (direction) => {
+                const isBuy = direction === "BUY";
+                const patternMatches = (pattern === "bullish" && isBuy) || (pattern === "bearish" && !isBuy);
+                if (!patternMatches) return null;
+
+                const alignedTrend = isBuy ? bullishAligned : bearishAligned;
+                const entryPrice = isBuy ? toNumber(ask) ?? lastClose : toNumber(bid) ?? lastClose;
+                if (entryPrice == null) return null;
+
+                const swingLow = Math.min(prevLow, lastLow);
+                const swingHigh = Math.max(prevHigh, lastHigh);
+                let rawStop = isBuy ? swingLow - buffer : swingHigh + buffer;
+
+                if (isBuy && rawStop >= entryPrice) rawStop = entryPrice - buffer;
+                if (!isBuy && rawStop <= entryPrice) rawStop = entryPrice + buffer;
+
+                const slDistance = Math.abs(entryPrice - rawStop);
+                const minSlDistance = pip * 4;
+                const maxSlDistance = atr != null ? atr * ATR_MULTIPLIER : null;
+                const slValid = slDistance >= minSlDistance && (!maxSlDistance || slDistance <= maxSlDistance);
+
+                const rewardDistance = slDistance * TARGET_REWARD_RATIO;
+                const tpValid = rewardDistance >= pip * 6;
+
+                const m5Adx = m5?.adx?.adx ?? 0;
+                const m15Adx = m15?.adx?.adx ?? 0;
+                const h1Adx = h1?.adx?.adx ?? 0;
+                const momentum = m5Adx >= 23 || m15Adx >= 20 || h1Adx >= 20;
+
+                const m5Rsi = m5?.rsi;
+                const h1Rsi = h1?.rsi;
+                const rsiValid = isBuy
+                    ? (m5Rsi == null || (m5Rsi >= 40 && m5Rsi <= 62)) && (h1Rsi == null || h1Rsi <= 65)
+                    : (m5Rsi == null || (m5Rsi >= 38 && m5Rsi <= 60)) && (h1Rsi == null || h1Rsi >= 35);
+
+                const prevBody = getCandleBody(prev);
+                const bodyStrength = prevBody == null ? true : body >= prevBody * 0.8;
+                const breakout = isBuy ? lastClose > Math.max(prevHigh, prevClose ?? prevHigh) : lastClose < Math.min(prevLow, prevClose ?? prevLow);
+
+                const secondaryConditions = [
+                    { name: "momentum", weight: 1, passed: momentum },
+                    { name: "rsi_filter", weight: 1, passed: rsiValid },
+                    { name: "body_strength", weight: 1, passed: bodyStrength },
+                    { name: "breakout", weight: 1, passed: breakout },
+                    { name: "atr_reasonable", weight: 1, passed: !maxSlDistance || slDistance <= maxSlDistance },
+                    { name: "tp_distance", weight: 1, passed: tpValid },
+                ];
+
+                const primaryConditions = [
+                    { name: "trend_alignment", weight: 2, passed: alignedTrend },
+                    { name: "pattern_confirmed", weight: 2, passed: patternMatches },
+                    { name: "sl_distance", weight: 2, passed: slValid },
+                ];
+
+                const allConditions = [...primaryConditions, ...secondaryConditions];
+                const score = allConditions.reduce((sum, cond) => (cond.passed ? sum + cond.weight : sum), 0);
+                const primaryCount = primaryConditions.filter((c) => c.passed).length;
+                const secondaryCount = secondaryConditions.filter((c) => c.passed).length;
+
+                const qualifies =
+                    alignedTrend &&
+                    patternMatches &&
+                    slValid &&
+                    score >= REQUIRED_SCORE &&
+                    primaryCount >= REQUIRED_PRIMARY_SCORE &&
+                    secondaryCount >= REQUIRED_SECONDARY_SCORE;
+
+                const breakdown = allConditions.map(({ name, weight, passed }) => ({ name, weight, passed }));
+
+                if (!qualifies) {
+                    const fail = allConditions.find((c) => !c.passed);
+                    const reason = fail ? `failed_${fail.name}` : "score_threshold";
+                    logger.debug(`[Strategy] ${symbol} ${direction} rejected | score=${score} | reason=${reason}`);
+                    return {
+                        direction,
+                        qualifies: false,
+                        score,
+                        reason,
+                        breakdown,
+                    };
+                }
+
+                logger.info(`[Strategy] ${symbol} ${direction} confirmed | score=${score} primary=${primaryCount} secondary=${secondaryCount}`);
+
+                return {
+                    direction,
+                    qualifies: true,
+                    score,
+                    result: {
+                        signal: direction,
+                        reason: "confluence_setup",
+                        score,
+                        breakdown,
+                        context: {
+                            prev,
+                            last,
+                            entryPrice,
+                            stopLossPrice: rawStop,
+                            slDistance,
+                            rewardDistance,
+                            atr,
+                            swingHigh,
+                            swingLow,
+                        },
+                    },
+                };
             };
 
-        if (pattern === "bearish" && alignedTrend)
-            return {
-                signal: "SELL",
-                reason: "pattern_trend_alignment",
-                context: { prev, last },
-            };
+            const evaluations = ["BUY", "SELL"].map(evaluateDirection).filter(Boolean);
+            if (!evaluations.length) {
+                return { signal: null, reason: "pattern_not_confirmed" };
+            }
 
-        return {
-            signal: null,
-            reason: "no_signal",
-        };
+            const qualified = evaluations.filter((e) => e.qualifies).sort((a, b) => b.score - a.score);
+            if (qualified.length) {
+                return qualified[0].result;
+            }
+
+            const bestAttempt = evaluations.sort((a, b) => b.score - a.score)[0];
+            return {
+                signal: null,
+                reason: bestAttempt?.reason || "conditions_not_met",
+                score: bestAttempt?.score || 0,
+                breakdown: bestAttempt?.breakdown,
+            };
+        } catch (error) {
+            logger.warn(`[Strategy] ${symbol}: signal generation failed: ${error?.message || error}`);
+            return { signal: null, reason: "strategy_error" };
+        }
     };
 
     greenRedCandlePattern(trend, prev, last) {
         if (!prev || !last || !trend) return false;
-        const getOpen = (c) => c.open;
-        const getClose = (c) => c.close;
 
-        if (getOpen(prev) == null || getClose(prev) == null || getOpen(last) == null || getClose(last) == null) return false;
+        const prevOpen = getCandleValue(prev, "open");
+        const prevClose = getCandleValue(prev, "close");
+        const lastOpen = getCandleValue(last, "open");
+        const lastClose = getCandleValue(last, "close");
 
-        const isBullish = (c) => getClose(c) > getOpen(c);
-        const isBearish = (c) => getClose(c) < getOpen(c);
+        if ([prevOpen, prevClose, lastOpen, lastClose].some((v) => v == null)) return false;
+
+        const isBullish = (open, close) => close > open;
+        const isBearish = (open, close) => close < open;
 
         const trendDirection = String(trend).toLowerCase();
 
-        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) return "bullish";
-        if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) return "bearish";
+        if (trendDirection === "bullish" && isBearish(prevOpen, prevClose) && isBullish(lastOpen, lastClose)) return "bullish";
+        if (trendDirection === "bearish" && isBullish(prevOpen, prevClose) && isBearish(lastOpen, lastClose)) return "bearish";
 
         return false;
     }
 
     engulfingPattern(prev, last) {
-        const getOpen = (c) => c.open;
-        const getClose = (c) => c.close;
-
         if (!prev || !last) return null;
 
-        const prevOpen = getOpen(prev);
-        const prevClose = getClose(prev);
+        const prevOpen = getCandleValue(prev, "open");
+        const prevClose = getCandleValue(prev, "close");
 
-        const lastOpen = getOpen(last);
-        const lastClose = getClose(last);
+        const lastOpen = getCandleValue(last, "open");
+        const lastClose = getCandleValue(last, "close");
+
+        if ([prevOpen, prevClose, lastOpen, lastClose].some((v) => v == null)) return null;
 
         // Bullish engulfing
         if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) return "bullish";
@@ -306,10 +480,12 @@ class Strategy {
 
     pinBarPattern(last) {
         if (!last) return null;
-        const open = last.open;
-        const close = last.close;
-        const high = last.high;
-        const low = last.low;
+        const open = getCandleValue(last, "open");
+        const close = getCandleValue(last, "close");
+        const high = getCandleValue(last, "high");
+        const low = getCandleValue(last, "low");
+
+        if ([open, close, high, low].some((v) => v == null)) return null;
 
         const body = Math.abs(close - open);
         const upperWick = high - Math.max(open, close);
@@ -322,6 +498,26 @@ class Strategy {
         if (upperWick > body * 2) return "bearish";
 
         return null;
+    }
+
+    resolveTrend(indicator) {
+        if (!indicator) return "neutral";
+
+        const fastCandidates = [indicator.ema20, indicator.emaFastTrend, indicator.emaFast, indicator.ema9, indicator.ema5];
+        const slowCandidates = [indicator.ema50, indicator.emaSlowTrend, indicator.emaSlow, indicator.ema21, indicator.ema10];
+
+        const fast = fastCandidates.find((val) => typeof val === "number");
+        const slow = slowCandidates.find((val) => typeof val === "number");
+
+        if (fast != null && slow != null) {
+            if (fast > slow) return "bullish";
+            if (fast < slow) return "bearish";
+            return "neutral";
+        }
+
+        if (typeof indicator.trend === "string") return indicator.trend.toLowerCase();
+
+        return "neutral";
     }
 }
 

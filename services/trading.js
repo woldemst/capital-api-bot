@@ -5,7 +5,39 @@ import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js
 import fs from "fs";
 import Strategy from "../strategies/strategies.js";
 
-const { PER_TRADE, MAX_POSITIONS } = RISK;
+const {
+    PER_TRADE,
+    MAX_POSITIONS,
+    BUFFER_PIPS = 1,
+    ATR_MULTIPLIER = 2,
+    RISK_REWARD: CONFIG_RISK_REWARD,
+    REWARD_RATIO: ALT_REWARD_RATIO,
+} = RISK;
+const TARGET_REWARD_RATIO = CONFIG_RISK_REWARD || ALT_REWARD_RATIO || 2;
+
+const CANDLE_FIELD_MAP = {
+    open: ["open", "Open", "o", "O"],
+    high: ["high", "High", "h", "H"],
+    low: ["low", "Low", "l", "L"],
+    close: ["close", "Close", "c", "C"],
+};
+
+function toNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function readCandleValue(candle, field) {
+    if (!candle) return null;
+    const keys = CANDLE_FIELD_MAP[field] || [field];
+    for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(candle, key)) {
+            const num = toNumber(candle[key]);
+            if (num != null) return num;
+        }
+    }
+    return null;
+}
 
 class TradingService {
     constructor() {
@@ -40,71 +72,118 @@ class TradingService {
     }
 
     // --- Position size + achievable SL/TP for M1 ---
-    async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
-        const price = signal === "BUY" ? ask : bid;
-
-        const { prev, last } = context;
-
-        const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
+    async calculateTradeParameters(signal, symbol, bid, ask, candles, context = {}) {
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const buffer = BUFFER_PIPS * pip;
 
-        const body = Math.abs(last.close - last.open);
-        let stopLossPrice, slDistance, takeProfitPrice;
-
-        if (signal === "BUY") {
-            // SL under previous candle low
-            stopLossPrice = prev.low - buffer;
-
-            // TP = 2x candle body above entry
-            takeProfitPrice = price + body * 2;
-        } else {
-            // SL above previous candle high
-            stopLossPrice = prev.high + buffer;
-
-            // TP = 2x candle body below entry
-            takeProfitPrice = price - body * 2;
+        const price = signal === "BUY" ? toNumber(ask) : toNumber(bid);
+        if (price == null) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Missing price data (bid/ask).`);
+            return null;
         }
 
-        // const minSlPips = symbol.includes("JPY") ? 12 : 10;
-        // const minSl = minSlPips * pip;
+        const history = Array.isArray(candles?.m5Candles) ? candles.m5Candles : Array.isArray(candles?.M5) ? candles.M5 : [];
+        const prevCandle = context?.prev ?? (history.length >= 3 ? history[history.length - 3] : null);
+        const lastCandle = context?.last ?? (history.length >= 2 ? history[history.length - 2] : null);
 
-        // if (Math.abs(slDistance) < minSl) {
-        //     if (signal === "BUY") {
-        //         stopLossPrice = price - minSl;
-        //         slDistance = price - stopLossPrice;
-        //         takeProfitPrice = price + slDistance * 1.8;
-        //     } else {
-        //         stopLossPrice = price + minSl;
-        //         slDistance = stopLossPrice - price;
-        //         takeProfitPrice = price - slDistance * 1.8;
-        //     }
-        // }
+        if (!prevCandle || !lastCandle) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Insufficient candle context for SL/TP calculation.`);
+            return null;
+        }
 
-        // let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
-        // size = Math.floor(size / 100) * 100;
-        // if (size < 100) size = 100;
+        const prevLow = readCandleValue(prevCandle, "low");
+        const prevHigh = readCandleValue(prevCandle, "high");
+        const lastLow = readCandleValue(lastCandle, "low");
+        const lastHigh = readCandleValue(lastCandle, "high");
 
-        // Round SL/TP to valid decimals
+        if ([prevLow, prevHigh, lastLow, lastHigh].some((v) => v == null)) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Candle values missing for SL/TP calculation.`);
+            return null;
+        }
+
+        const swingLow = Math.min(prevLow, lastLow);
+        const swingHigh = Math.max(prevHigh, lastHigh);
+
+        let stopLossPrice = signal === "BUY" ? swingLow - buffer : swingHigh + buffer;
+        if (signal === "BUY" && stopLossPrice >= price) stopLossPrice = price - buffer;
+        if (signal === "SELL" && stopLossPrice <= price) stopLossPrice = price + buffer;
+
+        let slDistance = Math.abs(price - stopLossPrice);
+        const minSlDistance = pip * 4;
+        if (slDistance < minSlDistance) {
+            stopLossPrice = signal === "BUY" ? price - minSlDistance : price + minSlDistance;
+            slDistance = Math.abs(price - stopLossPrice);
+        }
+
+        const atr = typeof context?.atr === "number" ? context.atr : null;
+        if (atr != null && slDistance > atr * ATR_MULTIPLIER) {
+            logger.warn(
+                `[Trade Parameters] ${symbol} ${signal}: SL distance (${slDistance.toFixed(5)}) exceeds ATR cap (${(atr * ATR_MULTIPLIER).toFixed(5)}).`
+            );
+            return null;
+        }
+
+        let takeProfitPrice = signal === "BUY" ? price + slDistance * TARGET_REWARD_RATIO : price - slDistance * TARGET_REWARD_RATIO;
+
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
         slDistance = Math.abs(price - stopLossPrice);
-        const slPips = Math.abs(slDistance / pip); // SL distance in pips
-        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
+        if (slDistance <= 0) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Invalid SL distance after rounding.`);
+            return null;
+        }
 
-        const maxSimultaneousTrades = MAX_POSITIONS;
-        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
+        let tpDistance = Math.abs(takeProfitPrice - price);
+        const desiredTpDistance = slDistance * TARGET_REWARD_RATIO;
+
+        if (tpDistance < desiredTpDistance) {
+            const adjustedTarget = signal === "BUY" ? price + desiredTpDistance : price - desiredTpDistance;
+            takeProfitPrice = this.roundPrice(adjustedTarget, symbol);
+            tpDistance = Math.abs(takeProfitPrice - price);
+        }
+
+        if (tpDistance <= slDistance) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Unable to achieve target risk-reward after rounding.`);
+            return null;
+        }
+
+        const slPips = slDistance / pip;
+        const pipValuePerUnit = pip / price;
+
+        if (!Number.isFinite(slPips) || slPips <= 0 || !Number.isFinite(pipValuePerUnit) || pipValuePerUnit <= 0) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Invalid pip calculations.`);
+            return null;
+        }
+
+        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
+        if (!Number.isFinite(riskAmount) || riskAmount <= 0) {
+            logger.warn(`[Trade Parameters] ${symbol} ${signal}: Risk amount calculation failed (balance ${this.accountBalance}).`);
+            return null;
+        }
 
         let size = riskAmount / (slPips * pipValuePerUnit);
-        size = Math.floor(size / 100) * 100; // round down to nearest 100
-        if (size < 100) size = 100; // enforce minimum
+        size = Math.floor(size / 100) * 100;
+        if (size < 100) size = 100;
 
-        logger.info(`[Trade Parameters] ${symbol} ${signal}:
-            Entry: ${price}
-            SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
-            TP: ${takeProfitPrice}
-            Size: ${size}
-            PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
+        let estimatedRisk = slPips * pipValuePerUnit * size;
+        if (estimatedRisk > riskAmount * 1.05) {
+            const adjustedSize = Math.floor((riskAmount / (slPips * pipValuePerUnit)) / 100) * 100;
+            if (adjustedSize < 100) {
+                logger.warn(`[Trade Parameters] ${symbol} ${signal}: Position size too small after risk adjustment.`);
+                return null;
+            }
+            size = adjustedSize;
+            estimatedRisk = slPips * pipValuePerUnit * size;
+        }
+
+        const riskReward = tpDistance / slDistance;
+
+        logger.info(
+            `[Trade Parameters] ${symbol} ${signal}: Entry=${price.toFixed(5)} SL=${stopLossPrice.toFixed(5)} (${slPips.toFixed(
+                1
+            )} pips) TP=${takeProfitPrice.toFixed(5)} RR=${riskReward.toFixed(2)} Size=${size} Risk=${estimatedRisk.toFixed(2)}`
+        );
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
@@ -119,30 +198,60 @@ class TradingService {
         let newTP = takeProfitPrice;
         let newSL = stopLossPrice;
 
-        // Berechne tatsächlichen Abstand
-        const slDistance = Math.abs(entryPrice - stopLossPrice);
-        const minSLDistance = allowed?.minStopDistance || 0;
+        const decimals = allowed?.decimals ?? (symbol.includes("JPY") ? 3 : 5);
+        const minSLDistancePrice = allowed?.minSLDistancePrice ?? (allowed?.minSLDistance || 0) * Math.pow(10, -decimals);
+        const minTPDistancePrice = allowed?.minTPDistancePrice ?? (allowed?.minTPDistance || 0) * Math.pow(10, -decimals);
 
-        // Wenn SL zu nah, passe ihn an
-        if (slDistance < minSLDistance) {
+        let slDistance = Math.abs(entryPrice - newSL);
+
+        if (slDistance < minSLDistancePrice) {
             if (direction === "BUY") {
-                newSL = entryPrice - minSLDistance;
+                newSL = entryPrice - minSLDistancePrice;
             } else {
-                newSL = entryPrice + minSLDistance;
+                newSL = entryPrice + minSLDistancePrice;
             }
+            newSL = this.roundPrice(newSL, symbol);
+            slDistance = Math.abs(entryPrice - newSL);
         }
 
-        // Runde Preise ggf. auf die erlaubte Tickgröße
-        newSL = this.roundPrice(newSL, symbol);
-        newTP = this.roundPrice(newTP, symbol);
+        if (slDistance <= 0) {
+            throw new Error("Invalid stop-loss distance after validation.");
+        }
 
-        logger.info(`[TP/SL Validation] Final SL: ${newSL}, Final TP: ${newTP}`);
+        let desiredTpDistance = slDistance * TARGET_REWARD_RATIO;
+        if (minTPDistancePrice && desiredTpDistance < minTPDistancePrice) {
+            desiredTpDistance = minTPDistancePrice;
+        }
+
+        const targetTP = direction === "BUY" ? entryPrice + desiredTpDistance : entryPrice - desiredTpDistance;
+        newTP = this.roundPrice(targetTP, symbol);
+
+        let tpDistance = Math.abs(entryPrice - newTP);
+        if (tpDistance < desiredTpDistance) {
+            const adjusted = direction === "BUY" ? entryPrice + desiredTpDistance : entryPrice - desiredTpDistance;
+            newTP = this.roundPrice(adjusted, symbol);
+            tpDistance = Math.abs(entryPrice - newTP);
+        }
+
+        const finalRR = tpDistance / slDistance;
+        if (finalRR < TARGET_REWARD_RATIO) {
+            const adjusted = direction === "BUY" ? entryPrice + slDistance * TARGET_REWARD_RATIO : entryPrice - slDistance * TARGET_REWARD_RATIO;
+            newTP = this.roundPrice(adjusted, symbol);
+            tpDistance = Math.abs(entryPrice - newTP);
+        }
+
+        logger.info(`[TP/SL Validation] Final SL: ${newSL}, Final TP: ${newTP}, RR=${(tpDistance / slDistance).toFixed(2)}`);
         return { SL: newSL, TP: newTP };
     }
 
     async executeTrade(symbol, signal, bid, ask, indicators, candles, context) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles, context);
+            const tradeParams = await this.calculateTradeParameters(signal, symbol, bid, ask, candles, context);
+            if (!tradeParams) {
+                logger.info(`[trading.js][Order] Skipped ${symbol} ${signal}: Trade parameters invalid.`);
+                return;
+            }
+            const { size, price, stopLossPrice, takeProfitPrice } = tradeParams;
             const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, SL, TP);
 
@@ -241,19 +350,21 @@ class TradingService {
             return;
         }
 
-        // --- Activation logic: 60% of TP ---
+        // --- Activation logic: pct of TP ---
+        const activationPct = 0.6;
+        const trailPct = 0.25;
         const tpDistance = Math.abs(takeProfit - entryPrice);
-        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.9 : entryPrice - tpDistance * 0.9;
+        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * activationPct : entryPrice - tpDistance * activationPct;
 
         const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
-            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 50% TP activation.`);
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached ${Math.round(activationPct * 100)}% TP activation.`);
             return;
         }
 
-        // --- Trailing stop at 10% of TP distance from current price ---
-        const trailDistance = tpDistance * 0.1;
+        // --- Trailing stop at percentage of TP distance from current price ---
+        const trailDistance = tpDistance * trailPct;
         let newStop;
         if (direction === "BUY") {
             newStop = currentPrice - trailDistance; 
@@ -274,7 +385,7 @@ class TradingService {
                 symbol,
                 true
             );
-            logger.info(`[TrailingStop] Updated stop to ${newStop.toFixed(5)} (10% TP logic) for ${dealId}`);
+            logger.info(`[TrailingStop] Updated stop to ${newStop.toFixed(5)} (${Math.round(trailPct * 100)}% trail) for ${dealId}`);
         } catch (error) {
             logger.error(`[TrailingStop] Error updating trailing stop for ${dealId}:`, error);
         }
