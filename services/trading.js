@@ -243,7 +243,7 @@ class TradingService {
 
         // --- Activation logic: 60% of TP ---
         const tpDistance = Math.abs(takeProfit - entryPrice);
-        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.5 : entryPrice - tpDistance * 0.5;
+        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.9 : entryPrice - tpDistance * 0.9;
 
         const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
@@ -256,7 +256,7 @@ class TradingService {
         const trailDistance = tpDistance * 0.1;
         let newStop;
         if (direction === "BUY") {
-            newStop = currentPrice - trailDistance;
+            newStop = currentPrice - trailDistance; 
             // Don't move SL backwards
             if (newStop <= stopLoss) return;
         } else {
