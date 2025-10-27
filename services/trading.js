@@ -65,24 +65,21 @@ class TradingService {
             takeProfitPrice = price - body * 2;
         }
 
-        // const minSlPips = symbol.includes("JPY") ? 12 : 10;
-        // const minSl = minSlPips * pip;
+        // --- Ensure SL respects broker minimum distance ---
+        const minDistancePips = symbol.includes("JPY") ? 12 : 10;
+        const minDistance = minDistancePips * pip;
 
-        // if (Math.abs(slDistance) < minSl) {
-        //     if (signal === "BUY") {
-        //         stopLossPrice = price - minSl;
-        //         slDistance = price - stopLossPrice;
-        //         takeProfitPrice = price + slDistance * 1.8;
-        //     } else {
-        //         stopLossPrice = price + minSl;
-        //         slDistance = stopLossPrice - price;
-        //         takeProfitPrice = price - slDistance * 1.8;
-        //     }
-        // }
-
-        // let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
-        // size = Math.floor(size / 100) * 100;
-        // if (size < 100) size = 100;
+        let slDistanceCheck = Math.abs(price - stopLossPrice);
+        if (slDistanceCheck < minDistance) {
+            logger.warn(`[TP/SL Adjust] ${symbol}: SL (${slDistanceCheck.toFixed(5)}) too close, enforcing minimum distance (${minDistance.toFixed(5)})`);
+            if (signal === "BUY") {
+                stopLossPrice = price - minDistance;
+                takeProfitPrice = price + minDistance * 2;
+            } else {
+                stopLossPrice = price + minDistance;
+                takeProfitPrice = price - minDistance * 2;
+            }
+        }
 
         // Round SL/TP to valid decimals
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
