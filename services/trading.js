@@ -53,13 +53,13 @@ class TradingService {
 
         if (signal === "BUY") {
             // SL under previous candle low
-            stopLossPrice = prev.low - buffer;
+            stopLossPrice = last.low - buffer;
 
             // TP = 2x candle body above entry
             takeProfitPrice = price + body * 2;
         } else {
             // SL above previous candle high
-            stopLossPrice = prev.high + buffer;
+            stopLossPrice = last.high + buffer;
 
             // TP = 2x candle body below entry
             takeProfitPrice = price - body * 2;
