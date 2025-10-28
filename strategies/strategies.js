@@ -222,22 +222,22 @@ class Strategy {
         // --- Multi-timeframe trends ---
         // const h1Trend =
         //     h1 && h1.ema20 != null && h1.ema50 != null ? (h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral") : "neutral";
-        // const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+        const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
         const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
-        const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
+        // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
 
         // --- Check alignment between higher timeframes ---
-        const alignedTrend = m5Trend === m1Trend && (m5Trend === "bullish" || m5Trend === "bearish");
+        const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
         if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
 
         // --- Candle data ---
-        const prev = candles.m1Candles[candles.m1Candles.length - 3];
-        const last = candles.m1Candles[candles.m1Candles.length - 2];
+        const prev = candles.m5Candles[candles.m5Candles.length - 3];
+        const last = candles.m5Candles[candles.m5Candles.length - 2];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
         // --- Pattern recognition based on M1 trend ---
         // const pattern = this.greenRedCandlePattern(m1Trend, prev, last);
-        const pattern = this.greenRedCandlePattern(m1Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
 
         // --- Candle body strength check ---
         // const body = Math.abs(last.close - last.open);

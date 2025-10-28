@@ -102,7 +102,7 @@ export const HISTORY = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 1 minute between analyses
-    MODE: true,
+    MODE: false,
 };
 
 // export const PROD = {
@@ -112,6 +112,11 @@ export const DEV = {
 //         return msToNextMinute + 5000; // 5 seconds after the next minute
 //     })(),
 // };
-export const PROD = {
-    INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
-};
+
+// 1 min
+export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
+
+// 5 min
+// export const PROD = {
+//     INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
+// };

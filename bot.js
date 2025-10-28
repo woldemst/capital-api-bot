@@ -103,24 +103,32 @@ class TradingBot {
 
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
-        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
-        logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
+        const getNext5MinDelay = () =>
+            ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
 
-        this.analysisInterval = setInterval(async () => {
+        const runAnalysis = async () => {
             try {
                 if (!this.isTradingAllowed()) {
                     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
                     return;
                 }
-
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
-
-                await this.startMonitorOpenTrades();
+                // await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
-        }, interval);
+        };
+
+        // First run: align to next 5th minute + 5 seconds
+        const initialDelay = DEV.MODE ? DEV.INTERVAL : getNext5MinDelay();
+        logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${initialDelay}ms`);
+
+        setTimeout(() => {
+            runAnalysis();
+            // After first run, repeat every 5 minutes
+            this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
+        }, initialDelay);
     }
 
     // Updates account balance, margin, and open trades in the trading service.

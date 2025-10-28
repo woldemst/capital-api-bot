@@ -48,18 +48,18 @@ class TradingService {
         const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
 
-        const body = Math.abs(last.close - last.open);
-        let stopLossPrice, slDistance, takeProfitPrice;
+        const body = Math.abs(prev.close - prev.open);
+        let stopLossPrice, takeProfitPrice;
 
         if (signal === "BUY") {
             // SL under previous candle low
-            stopLossPrice = last.low - buffer;
+            stopLossPrice = prev.low - buffer;
 
             // TP = 2x candle body above entry
             takeProfitPrice = price + body * 2;
         } else {
             // SL above previous candle high
-            stopLossPrice = last.high + buffer;
+            stopLossPrice = prev.high + buffer;
 
             // TP = 2x candle body below entry
             takeProfitPrice = price - body * 2;
@@ -68,26 +68,27 @@ class TradingService {
         // --- Ensure SL respects broker minimum distance ---
         const minDistancePips = symbol.includes("JPY") ? 12 : 10;
         const minDistance = minDistancePips * pip;
+        let slDistance = Math.abs(price - stopLossPrice);
 
-        let slDistanceCheck = Math.abs(price - stopLossPrice);
-        if (slDistanceCheck < minDistance) {
-            logger.warn(`[TP/SL Adjust] ${symbol}: SL (${slDistanceCheck.toFixed(5)}) too close, enforcing minimum distance (${minDistance.toFixed(5)})`);
+        // If SL is too close, move it further away and adjust TP to keep risk/reward
+        if (slDistance < minDistance) {
+            logger.warn(`[TP/SL Adjust] ${symbol}: SL (${slDistance.toFixed(5)}) too close, enforcing minimum distance (${minDistance.toFixed(5)})`);
             if (signal === "BUY") {
                 stopLossPrice = price - minDistance;
-                takeProfitPrice = price + minDistance * 2;
+                takeProfitPrice = price + minDistance * RISK.REWARD_RATIO;
             } else {
                 stopLossPrice = price + minDistance;
-                takeProfitPrice = price - minDistance * 2;
+                takeProfitPrice = price - minDistance * RISK.REWARD_RATIO;
             }
+            slDistance = minDistance;
         }
 
         // Round SL/TP to valid decimals
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        slDistance = Math.abs(price - stopLossPrice);
-        const slPips = Math.abs(slDistance / pip); // SL distance in pips
-        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
+        const slPips = Math.abs((price - stopLossPrice) / pip);
+        const pipValuePerUnit = pip / price;
 
         const maxSimultaneousTrades = MAX_POSITIONS;
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
@@ -253,7 +254,7 @@ class TradingService {
         const trailDistance = tpDistance * 0.1;
         let newStop;
         if (direction === "BUY") {
-            newStop = currentPrice - trailDistance; 
+            newStop = currentPrice - trailDistance;
             // Don't move SL backwards
             if (newStop <= stopLoss) return;
         } else {
