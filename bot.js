@@ -103,8 +103,7 @@ class TradingBot {
 
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
-        const getNext5MinDelay = () =>
-            ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
+        const getNext5MinDelay = () => ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
 
         const runAnalysis = async () => {
             try {
@@ -114,7 +113,7 @@ class TradingBot {
                 }
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
-                // await this.startMonitorOpenTrades();
+                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
             }
@@ -423,7 +422,7 @@ class TradingBot {
             } catch (error) {
                 logger.error("[Bot] Error in max hold monitor:", error);
             }
-        }, 60 * 1000); // Check every minute
+        }, 5 * 60 * 1000); // Check every 5 minutes
     }
 
     isTradingAllowed() {

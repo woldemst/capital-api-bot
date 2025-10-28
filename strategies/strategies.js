@@ -220,8 +220,6 @@ class Strategy {
         const { m1, m5, m15, h1 } = indicators;
 
         // --- Multi-timeframe trends ---
-        // const h1Trend =
-        //     h1 && h1.ema20 != null && h1.ema50 != null ? (h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral") : "neutral";
         const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
         const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
         // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
@@ -235,38 +233,24 @@ class Strategy {
         const last = candles.m5Candles[candles.m5Candles.length - 2];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
-        // --- Pattern recognition based on M1 trend ---
-        // const pattern = this.greenRedCandlePattern(m1Trend, prev, last);
-        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.engulfingPattern(prev, last) || this.pinBarPattern(last);
-
+        // --- Pattern recognition ---
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern(last);
+        if (!pattern) return { signal: null, reason: "no_pattern" };
         // --- Candle body strength check ---
         // const body = Math.abs(last.close - last.open);
         // const avgBody = Math.abs(prev.close - prev.open);
         // if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
 
         // --- Combine all signals ---
-        if (pattern === "bullish" && alignedTrend)
-            return {
-                signal: "BUY",
-                reason: "pattern_trend_alignment",
-                context: { prev, last },
-            };
+        if (pattern === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment", context: { prev, last } };
 
-        if (pattern === "bearish" && alignedTrend)
-            return {
-                signal: "SELL",
-                reason: "pattern_trend_alignment",
-                context: { prev, last },
-            };
+        if (pattern === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment", context: { prev, last } };
 
-        return {
-            signal: null,
-            reason: "no_signal",
-        };
+        return { signal: null, reason: "no_signal" };
     };
 
     greenRedCandlePattern(trend, prev, last) {
-        if (!prev || !last || !trend) return false;
+        if (!prev || !last) return false;
         const getOpen = (c) => c.open;
         const getClose = (c) => c.close;
 
@@ -275,10 +259,10 @@ class Strategy {
         const isBullish = (c) => getClose(c) > getOpen(c);
         const isBearish = (c) => getClose(c) < getOpen(c);
 
-        const trendDirection = String(trend).toLowerCase();
+        // const trendDirection = String(trend).toLowerCase();
 
-        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) return "bullish";
-        if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) return "bearish";
+        if (isBearish(prev) && isBullish(last)) return "bullish";
+        if (isBullish(prev) && isBearish(last)) return "bearish";
 
         return false;
     }
