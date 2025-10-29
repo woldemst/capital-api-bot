@@ -117,8 +117,8 @@ class TradingService {
         }
         try {
             const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles, context);
-            const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
-            const position = await placePosition(symbol, signal, size, price, SL, TP);
+            // const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
+            const position = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
             if (!position?.dealReference) {
                 logger.error(`[trading.js][Order] Deal reference is missing: ${JSON.stringify(position)}`);
