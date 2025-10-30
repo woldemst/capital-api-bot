@@ -193,7 +193,7 @@ class TradingBot {
         const activeSymbols = this.getActiveSymbols();
         for (const symbol of activeSymbols) {
             await this.analyzeSymbol(symbol);
-            await this.delay(2000); // Add at least 1 second delay between symbols
+            await this.delay(3000);
         }
     }
 

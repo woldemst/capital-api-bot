@@ -1,10 +1,4 @@
-// strategies.js
 import logger from "../utils/logger.js";
-import { RISK, ANALYSIS } from "../config.js";
-
-const { RSI } = ANALYSIS;
-
-const { REQUIRED_SCORE } = RISK;
 
 class Strategy {
     constructor() {}
@@ -220,9 +214,16 @@ class Strategy {
         const { m1, m5, m15, h1 } = indicators;
 
         // --- Multi-timeframe trends ---
-        const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
-        const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
+        // const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+        // const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
+
         // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
+
+        const m15Trend =
+            m15 && m15.ema20 != null && m15.ema50 != null ? (m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral") : "neutral";
+
+        const m5Trend =
+            m5 && m5.ema20 != null && m5.ema50 != null ? (m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral") : "neutral";
 
         // --- Check alignment between higher timeframes ---
         const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
@@ -236,6 +237,7 @@ class Strategy {
         // --- Pattern recognition ---
         const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern(last);
         if (!pattern) return { signal: null, reason: "no_pattern" };
+        
         // --- Candle body strength check ---
         // const body = Math.abs(last.close - last.open);
         // const avgBody = Math.abs(prev.close - prev.open);

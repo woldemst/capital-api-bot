@@ -42,7 +42,7 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
         const price = signal === "BUY" ? ask : bid;
         const { last } = context; // previous closed candle
-        const buffer = symbol.includes("JPY") ? 0.08 : 0.0002;
+        const buffer = symbol.includes("JPY") ? 0.02 : 0.0002;
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
 
         // --- Simple candle body size ---
@@ -126,12 +126,15 @@ class TradingService {
             }
             const confirmation = await getDealConfirmation(position.dealReference);
 
-            if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
-                logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
-            } else {
+            const dealStatus = confirmation.dealStatus || confirmation.status || "UNKNOWN";
+            const reason = confirmation.reason || confirmation.reasonCode || "no_reason_provided";
+
+            if (dealStatus === "ACCEPTED" || dealStatus === "OPEN" || dealStatus === "SUCCESS") {
                 logger.info(
                     `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
                 );
+            } else {
+                logger.error(`[trading.js][Order] Not placed: ${reason} (status=${dealStatus})`);
             }
         } catch (error) {
             logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
