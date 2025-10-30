@@ -128,6 +128,7 @@ class TradingService {
 
             if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                 logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+                this.openTrades.push(symbol);
             } else {
                 logger.info(
                     `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
@@ -234,8 +235,10 @@ class TradingService {
 
     async closePartialPosition(dealId, size) {
         try {
-            // Add your broker's API call to close partial position
             await apiClosePosition(dealId, size);
+
+            // remove from internal list
+            this.openTrades = this.openTrades.filter((s) => s !== dealId && s !== symbol);
             logger.info(`[PartialTP] Successfully closed ${size} units for ${dealId}`);
         } catch (error) {
             logger.error(`[PartialTP] Failed to close partial position for ${dealId}:`, error);
