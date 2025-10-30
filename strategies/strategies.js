@@ -209,46 +209,57 @@ class Strategy {
     //         return { signal: null, reason: "error" };
     //     }
     // }
+    // Small helpers
+    
+    trendFrom = (fast, slow, minGap = 0) => {
+        if (fast == null || slow == null) return "neutral";
+        const diff = fast - slow;
+        if (diff > minGap) return "bullish";
+        if (diff < -minGap) return "bearish";
+        return "neutral";
+    };
 
+    // --- Main signal with H1 filter ---
     getSignal = ({ symbol, indicators, candles }) => {
-        const { m1, m5, m15, h1 } = indicators;
+        const { m5, m15, h1 } = indicators || {};
+        const m5Candles = candles?.m5Candles || [];
 
-        // --- Multi-timeframe trends ---
-        // const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
-        // const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
-
-        // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
-
-        const m15Trend =
-            m15 && m15.ema20 != null && m15.ema50 != null ? (m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral") : "neutral";
-
-        const m5Trend =
-            m5 && m5.ema20 != null && m5.ema50 != null ? (m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral") : "neutral";
-
-        // --- Check alignment between higher timeframes ---
-        const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
-        if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
-
-        // --- Candle data ---
-        const prev = candles.m5Candles[candles.m5Candles.length - 3];
-        const last = candles.m5Candles[candles.m5Candles.length - 2];
+        // Use last two CLOSED M5 candles
+        const prev = m5Candles[m5Candles.length - 3];
+        const last = m5Candles[m5Candles.length - 2];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
-        // --- Pattern recognition ---
-        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern(last);
+        // Trends (null-safe)
+        const h1Trend = this.trendFrom(h1?.ema50, h1?.ema200); // HTF filter
+        const m15Trend = this.trendFrom(m15?.ema20, m15?.ema50); // confirmation TF
+        const m5Trend = this.trendFrom(m5?.ema20, m5?.ema50); // entry TF
+
+        // Require M5 & M15 alignment first
+        const m5m15Aligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
+        if (!m5m15Aligned) return { signal: null, reason: "m5_m15_not_aligned" };
+
+        // H1 filter mode (choose one):
+        const STRICT_H1 = true; // set false if you want softer filter
+
+        // STRICT: H1 must match M5/M15
+        // SOFT: H1 must not be opposite (neutral allowed)
+        const h1Passes = STRICT_H1 ? h1Trend === m5Trend : h1Trend === m5Trend || h1Trend === "neutral";
+
+        if (!h1Passes) return { signal: null, reason: "h1_filter_blocked" };
+
+        // Entry pattern on M5 (using closed candles only)
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern?.(last);
         if (!pattern) return { signal: null, reason: "no_pattern" };
-        
-        // --- Candle body strength check ---
-        // const body = Math.abs(last.close - last.open);
-        // const avgBody = Math.abs(prev.close - prev.open);
-        // if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
 
-        // --- Combine all signals ---
-        if (pattern === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment", context: { prev, last } };
+        // Combine
+        if (pattern === "bullish" && m5Trend === "bullish") {
+            return { signal: "BUY", reason: "pattern+tf_alignment", context: { prev, last } };
+        }
+        if (pattern === "bearish" && m5Trend === "bearish") {
+            return { signal: "SELL", reason: "pattern+tf_alignment", context: { prev, last } };
+        }
 
-        if (pattern === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment", context: { prev, last } };
-
-        return { signal: null, reason: "no_signal" };
+        return { signal: null, reason: "pattern_tf_mismatch" };
     };
 
     greenRedCandlePattern(trend, prev, last) {

@@ -61,9 +61,7 @@ class TradingBot {
         try {
             // this.setupWebSocket(tokens); // just for 15, 5, 1 minute candles
             this.startSessionPing();
-
             this.startAnalysisInterval();
-
             this.startMaxHoldMonitor();
             this.isRunning = true;
         } catch (error) {
@@ -103,7 +101,7 @@ class TradingBot {
 
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
-        const getNext5MinDelay = () => ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
+        const getNextDelay = () => ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
 
         const runAnalysis = async () => {
             try {
@@ -120,14 +118,14 @@ class TradingBot {
         };
 
         // First run: align to next 5th minute + 5 seconds
-        const initialDelay = DEV.MODE ? DEV.INTERVAL : getNext5MinDelay();
-        logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${initialDelay}ms`);
+        const interval = DEV.MODE ? DEV.INTERVAL : getNextDelay();
+        logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
         setTimeout(() => {
             runAnalysis();
             // After first run, repeat every 5 minutes
             this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
-        }, initialDelay);
+        }, interval);
     }
 
     // Updates account balance, margin, and open trades in the trading service.
@@ -193,21 +191,21 @@ class TradingBot {
         const activeSymbols = this.getActiveSymbols();
         for (const symbol of activeSymbols) {
             await this.analyzeSymbol(symbol);
-            await this.delay(3000);
+            await this.delay(2000);
         }
     }
 
     async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
         try {
-            const [h4Data, h1Data, m15Data, m5Data, m1Data] = await Promise.all([
+            const [h4Data, h1Data, m15Data, m5Data] = await Promise.all([
                 getHistorical(symbol, timeframes.H4, historyLength),
                 getHistorical(symbol, timeframes.H1, historyLength),
                 getHistorical(symbol, timeframes.M15, historyLength),
                 getHistorical(symbol, timeframes.M5, historyLength),
-                getHistorical(symbol, timeframes.M1, historyLength),
+                // getHistorical(symbol, timeframes.M1, historyLength),
             ]);
-            console.log(`Fetched candles: ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`);
-            return { h4Data, h1Data, m15Data, m5Data, m1Data };
+            console.log(`Fetched candles: ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}`);
+            return { h4Data, h1Data, m15Data, m5Data };
         } catch (error) {
             logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
             return {};
@@ -218,7 +216,7 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        const { h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+        const { h4Data, h1Data, m15Data, m5Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
@@ -227,7 +225,7 @@ class TradingBot {
             H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
             M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
             M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
-            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
+            // M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
         };
 
         // const d1Candles = this.candleHistory[symbol].D1;
@@ -235,11 +233,11 @@ class TradingBot {
         const h1Candles = this.candleHistory[symbol].H1;
         const m15Candles = this.candleHistory[symbol].M15;
         const m5Candles = this.candleHistory[symbol].M5;
-        const m1Candles = this.candleHistory[symbol].M1;
+        // const m1Candles = this.candleHistory[symbol].M1;
 
-        if (!h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
+        if (!h4Candles || !h1Candles || !m15Candles || !m5Candles) {
             logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles}), skipping analysis.`
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles} skipping analysis.`
             );
             return;
         }
@@ -250,10 +248,10 @@ class TradingBot {
             h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
-            m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
+            // m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        const candles = { h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
+        const candles = { h4Candles, h1Candles, m15Candles, m5Candles };
 
         const trendAnalysis = await analyzeTrend(symbol, getHistorical);
 
