@@ -41,24 +41,38 @@ class TradingService {
 
     async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
         const price = signal === "BUY" ? ask : bid;
-        const { last } = context; // previous closed candle
-        const buffer = symbol.includes("JPY") ? 0.02 : 0.0002;
+        const { last } = context; // previous closed candle (confirmation candle)
+        // ATR-based SL/TP
+        // Try to get ATR from m5 indicators if available
+        let atr = null;
+        if (candles?.m5Candles?.length) {
+            // Find ATR from last candle if available
+            const lastCandle = last || candles.m5Candles[candles.m5Candles.length - 2];
+            atr = lastCandle?.atr || null;
+        }
+        // Fallback: try context ATR or a default
+        if (!atr) atr =  symbol.includes("JPY") ? 0.10 : 0.001; // fallback default
+        // For JPY pairs, ATR is typically ~0.1-0.2, for others ~0.0005-0.001
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-
-        // --- Simple candle body size ---
-        const body = Math.abs(last.close - last.open);
-
-        // --- SL below/above previous candle ---
-        let stopLossPrice = signal === "BUY" ? last.low - buffer : last.high + buffer;
-
-        // --- TP exactly 2× body from entry ---
-        const takeProfitPrice = signal === "BUY" ? price + body * 2 : price - body * 2;
-
-        // --- Round ---
+        // SL = 1.5 × ATR below/above signal candle
+        let stopLossPrice;
+        if (signal === "BUY") {
+            stopLossPrice = last.low - 1.5 * atr;
+        } else {
+            stopLossPrice = last.high + 1.5 * atr;
+        }
+        // TP = 3 × ATR from entry (risk:reward 1:2)
+        let takeProfitPrice;
+        if (signal === "BUY") {
+            takeProfitPrice = price + 3 * atr;
+        } else {
+            takeProfitPrice = price - 3 * atr;
+        }
+        // Round for JPY/other pairs
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         const roundedTP = this.roundPrice(takeProfitPrice, symbol);
 
-        // --- Calculate position size ---
+        // Calculate position size
         const slDistance = Math.abs(price - stopLossPrice);
         const slPips = slDistance / pip;
         const pipValuePerUnit = pip / price;
@@ -71,7 +85,7 @@ class TradingService {
             Entry: ${price}
             SL: ${stopLossPrice}
             TP: ${roundedTP}
-            Body: ${body.toFixed(5)}
+            ATR: ${atr}
             RR: 2:1
             Size: ${size}
         `);
@@ -192,6 +206,23 @@ class TradingService {
         if (!dealId) {
             logger.warn(`[TrailingStop] No dealId for position, skipping update.`);
             return;
+        }
+
+        // --- SOFT EXIT: if trend alignment breaks (M5 vs M15) ---
+        const { m5, m15 } = indicators || {};
+        if (m5 && m15) {
+            const m5Trend = Strategy.trendFrom(m5.ema20, m5.ema50);
+            const m15Trend = Strategy.trendFrom(m15.ema20, m15.ema50);
+
+            const alignmentBroken =
+                (direction === "BUY" && (m5Trend === "bearish" || m15Trend === "bearish")) ||
+                (direction === "SELL" && (m5Trend === "bullish" || m15Trend === "bullish"));
+
+            if (alignmentBroken) {
+                logger.info(`[SoftExit] ${symbol}: Trend misalignment detected (M5=${m5Trend}, M15=${m15Trend}). Closing position.`);
+                await this.closePosition(dealId, "soft_exit");
+                return;
+            }
         }
 
         // --- Activation logic: 70% of TP ---

@@ -2,15 +2,21 @@ import fs from "fs";
 import readline from "readline";
 import logger from "../utils/logger.js";
 import Strategy from "../strategies/strategies.js";
+import { calcIndicators } from "../indicators.js";
 
-const pair = "EURUSD"; // or dynamically detect from file name
-const inputFile = `./analysis/${pair}_combined.jsonl`; // <-- remove space before ./
-const outputFile = `./results/${pair}_backtest_results.jsonl`;
+const pair = process.env.PAIR || "AUDUSD";
+const inputFile = process.env.INPUT || `./analysis/${pair}_combined.jsonl`;
+const outputFile = process.env.OUTPUT || `./results/${pair}_backtest_results.jsonl`;
 
 import tradingService from "../services/trading.js";
 
-let m5CandleBuffer = [];
-const M5_BUFFER_SIZE = 10; // or whatever your strategy expects
+const MAX_BUF = 200;
+const MIN_BARS = 60;
+
+let m5Buffer = [];
+let m15Buffer = [];
+let h1Buffer = [];
+let h4Buffer = [];
 
 // --- Simulate trade result: check if SL or TP is hit first in future candles ---
 function simulateTradeResult(m5Buffer, entryIdx, params, signal) {
@@ -61,53 +67,93 @@ async function runBacktest() {
     const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
     const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
+    const startTime = new Date();
+    let wins = 0, losses = 0, totalDuration = 0;
+    const profitableFile = `./results/${pair}_profitable.jsonl`;
+    const profitableStream = fs.createWriteStream(profitableFile, { flags: "w" });
+
     let total = 0;
     let signals = 0;
     let balance = 1000;
     tradingService.setAccountBalance(balance);
     const results = [];
-    let allM5Candles = [];
+    let allLines = [];
 
     // --- Preload all candles for lookahead ---
-    let allLines = [];
     for await (const line of rl) {
         if (!line.trim()) continue;
         try {
             const data = JSON.parse(line);
             allLines.push(data);
             if (data.M5) {
-                allM5Candles.push(data.M5);
+                m5Buffer.push(data.M5);
+                if (m5Buffer.length > MAX_BUF) m5Buffer.shift();
+            }
+            if (data.M15) {
+                m15Buffer.push(data.M15);
+                if (m15Buffer.length > MAX_BUF) m15Buffer.shift();
+            }
+            if (data.H1) {
+                h1Buffer.push(data.H1);
+                if (h1Buffer.length > MAX_BUF) h1Buffer.shift();
+            }
+            if (data.H4) {
+                h4Buffer.push(data.H4);
+                if (h4Buffer.length > MAX_BUF) h4Buffer.shift();
             }
         } catch (err) {
             console.error("Error parsing line:", err);
         }
     }
 
-    // Now process with sliding buffer
-    m5CandleBuffer = [];
+    // Clear buffers for processing loop
+    m5Buffer = [];
+    m15Buffer = [];
+    h1Buffer = [];
+    h4Buffer = [];
+
     for (let idx = 0; idx < allLines.length; idx++) {
         const data = allLines[idx];
-        // --- Build rolling buffer for m5Candles ---
         if (data.M5) {
-            m5CandleBuffer.push(data.M5);
-            if (m5CandleBuffer.length > M5_BUFFER_SIZE) {
-                m5CandleBuffer.shift();
-            }
+            m5Buffer.push(data.M5);
+            if (m5Buffer.length > MAX_BUF) m5Buffer.shift();
+        }
+        if (data.M15) {
+            m15Buffer.push(data.M15);
+            if (m15Buffer.length > MAX_BUF) m15Buffer.shift();
+        }
+        if (data.H1) {
+            h1Buffer.push(data.H1);
+            if (h1Buffer.length > MAX_BUF) h1Buffer.shift();
+        }
+        if (data.H4) {
+            h4Buffer.push(data.H4);
+            if (h4Buffer.length > MAX_BUF) h4Buffer.shift();
+        }
+
+        if (
+            m5Buffer.length < MIN_BARS ||
+            m15Buffer.length < MIN_BARS ||
+            h1Buffer.length < MIN_BARS ||
+            h4Buffer.length < MIN_BARS
+        ) {
+            continue;
         }
 
         const indicators = {
-            m1: data.M1,
-            m5: data.M5,
-            m15: data.M15,
-            h1: data.H1,
-            h4: data.H4,
+            m1: data.M1 || null,
+            m5: await calcIndicators(m5Buffer, pair, "MINUTE_5"),
+            m15: await calcIndicators(m15Buffer, pair, "MINUTE_15"),
+            h1: await calcIndicators(h1Buffer, pair, "HOUR"),
+            h4: await calcIndicators(h4Buffer, pair, "HOUR_4"),
         };
 
         const candles = {
-            m5Candles: m5CandleBuffer.slice(),
-            m15Candles: [data.M15].filter(Boolean),
-            h1Candles: [data.H1].filter(Boolean),
-            m1Candles: [data.M1].filter(Boolean),
+            m5Candles: m5Buffer.slice(),
+            m15Candles: m15Buffer.slice(),
+            h1Candles: h1Buffer.slice(),
+            h4Candles: h4Buffer.slice(),
+            m1Candles: data.M1 ? [data.M1] : [],
         };
 
         const result = Strategy.getSignal({ symbol: pair, indicators, candles });
@@ -115,13 +161,10 @@ async function runBacktest() {
 
         if (result?.signal) {
             signals++;
-            // Entry price: use close of last candle in buffer
-            const entryIdx = allM5Candles.findIndex((c) => c.timestamp === data.M5.timestamp);
-            // Defensive: if not found, skip
+            const entryIdx = m5Buffer.findIndex((c) => c.timestamp === data.M5.timestamp);
             if (entryIdx === -1) continue;
             const bid = data.M5.close;
             const ask = data.M5.close;
-            // Calculate trade parameters
             const params = await tradingService.calculateTradeParameters(
                 result.signal,
                 pair,
@@ -130,11 +173,10 @@ async function runBacktest() {
                 candles,
                 result.context
             );
-            // Simulate trade result with lookahead (next 10 candles)
-            const lookahead = 10;
-            const m5LookaheadBuffer = allM5Candles.slice(entryIdx, entryIdx + lookahead + 1);
+            if (!params) continue;
+            const lookahead = 100;
+            const m5LookaheadBuffer = m5Buffer.slice(entryIdx, entryIdx + lookahead + 1);
             const simResult = simulateTradeResult(m5LookaheadBuffer, 0, params, result.signal);
-            // Update balance
             const risk = balance * tradingService.maxRiskPerTrade;
             if (simResult.outcome === "WIN") {
                 balance += risk * 2;
@@ -142,7 +184,6 @@ async function runBacktest() {
                 balance -= risk;
             }
             tradingService.setAccountBalance(balance);
-            // Save result
             const tradeResult = {
                 time: data.M5.timestamp,
                 signal: result.signal,
@@ -153,17 +194,63 @@ async function runBacktest() {
                 exitTime: simResult.hitTime,
                 balance,
             };
+
+            if (simResult.hitTime && data.M5?.timestamp) {
+                const durationMin = (new Date(simResult.hitTime) - new Date(data.M5.timestamp)) / 60000;
+                tradeResult.durationMin = durationMin;
+                totalDuration += durationMin;
+            }
+
+            // Optional M1 stop loss check
+            const m1Candles = data.M1Candles || data.M1 || [];
+            const slHitOnM1 = Array.isArray(m1Candles)
+                ? m1Candles.some(c =>
+                    (result.signal === "BUY" && c.low <= params.stopLossPrice) ||
+                    (result.signal === "SELL" && c.high >= params.stopLossPrice)
+                  )
+                : false;
+            if (slHitOnM1 && simResult.outcome === "WIN") simResult.outcome = "LOSS";
+
+            if (simResult.outcome === "WIN") {
+                wins++;
+                profitableStream.write(JSON.stringify(tradeResult) + "\n");
+            } else {
+                losses++;
+            }
+
             results.push(tradeResult);
             outputStream.write(JSON.stringify(tradeResult) + "\n");
         }
     }
 
     outputStream.end();
+    profitableStream.end();
+    const endTime = new Date();
+    const avgDuration = wins ? totalDuration / wins : 0;
+
+    // --- Additional summary metrics ---
+    const grossProfit = wins * (balance * tradingService.maxRiskPerTrade * 2);
+    const grossLoss = losses * (balance * tradingService.maxRiskPerTrade);
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : "N/A";
+    // Placeholder for max drawdown (not tracked here, would need equity curve)
+    const maxDrawdown = "N/A";
 
     console.log(`✅ Backtest finished for ${pair}`);
     console.log(`Processed: ${total} candles`);
     console.log(`Signals generated: ${signals}`);
     console.log(`Saved results to: ${outputFile}`);
+
+    console.log(`\n=== ${pair} BACKTEST SUMMARY ===`);
+    console.log(`Start: ${startTime.toISOString()}`);
+    console.log(`End: ${endTime.toISOString()}`);
+    console.log(`Signals: ${signals}`);
+    console.log(`Profitable: ${wins}`);
+    console.log(`Unprofitable: ${losses}`);
+    console.log(`Win Rate: ${(wins / (signals || 1) * 100).toFixed(2)}%`);
+    console.log(`Avg Hold: ${avgDuration.toFixed(2)} min`);
+    console.log(`Profit Factor: ${profitFactor}`);
+    console.log(`Max Drawdown: ${maxDrawdown}`);
+    console.log(`Profitable trades saved to: ${profitableFile}`);
 }
 
 runBacktest();

@@ -165,15 +165,7 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
     });
 }
 
-export async function updateTrailingStop(
-    positionId,
-    currentPrice,
-    entryPrice,
-    takeProfit,
-    direction,
-    symbol,
-    isTrailingEnabled
-) {
+export async function updateTrailingStop(positionId, currentPrice, entryPrice, takeProfit, direction, symbol, isTrailingEnabled) {
     const tpDistance = Math.abs(takeProfit - entryPrice);
     const thresholdPrice = direction.toUpperCase() === "BUY" ? entryPrice + 0.7 * tpDistance : entryPrice - 0.7 * tpDistance;
 
@@ -183,16 +175,32 @@ export async function updateTrailingStop(
         return; // keep the original SL until the threshold is hit
     }
 
-    // trailingDistance is the distance in price units (e.g. 0.0012 for EURUSD)
-    // Make sure it's a positive number
-    const trailingDistance = Math.abs(currentPrice - entryPrice) * 0.1 || 0.001; // fallback if calculation fails
+    // --- Calculate trailing distance ---
+    let trailingDistance = Math.abs(currentPrice - entryPrice) * 0.1 || 0.001; // fallback if calculation fails
+
+    // --- Get symbol-specific minimum stop distance ---
+    let minStopDistance = 0.0003; // default fallback
+    try {
+        const market = await getMarketDetails(symbol);
+        if (market?.dealingRules?.minStopDistance) {
+            minStopDistance = market.dealingRules.minStopDistance;
+        }
+    } catch (err) {
+        logger.warn(`[API] Could not fetch minStopDistance for ${symbol}, using fallback ${minStopDistance}`);
+    }
+
+    // --- Ensure distance is not too small ---
+    if (trailingDistance < minStopDistance) {
+        logger.warn(`[API] Trailing distance (${trailingDistance}) too small for ${symbol}. Using min allowed: ${minStopDistance}`);
+        trailingDistance = minStopDistance;
+    }
 
     try {
         const response = await axios.put(
             `${API.BASE_URL}/positions/${positionId}`,
             {
                 trailingStop: true,
-                stopDistance: trailingDistance, // <-- THIS IS REQUIRED
+                stopDistance: Number(trailingDistance.toFixed(6)), // round safely
             },
             { headers: getHeaders(true) }
         );

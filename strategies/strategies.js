@@ -210,7 +210,7 @@ class Strategy {
     //     }
     // }
     // Small helpers
-    
+
     trendFrom = (fast, slow, minGap = 0) => {
         if (fast == null || slow == null) return "neutral";
         const diff = fast - slow;
@@ -239,13 +239,28 @@ class Strategy {
         if (!m5m15Aligned) return { signal: null, reason: "m5_m15_not_aligned" };
 
         // H1 filter mode (choose one):
-        const STRICT_H1 = true; // set false if you want softer filter
+        const STRICT_H1 = false; // set false if you want softer filter
 
         // STRICT: H1 must match M5/M15
         // SOFT: H1 must not be opposite (neutral allowed)
         const h1Passes = STRICT_H1 ? h1Trend === m5Trend : h1Trend === m5Trend || h1Trend === "neutral";
 
         if (!h1Passes) return { signal: null, reason: "h1_filter_blocked" };
+
+        // --- ATR-based volatility filter (skip low volatility) ---
+        const atr = m5?.atr;
+        const minATR = symbol.includes("JPY") ? 0.06 : 0.0004;
+        if (!atr || atr < minATR) {
+            return { signal: null, reason: "low_atr_volatility" };
+        }
+
+        // --- Candle body-to-range filter for valid candle strength ---
+        const getBody = (c) => Math.abs(c.close - c.open);
+        const getRange = (c) => c.high - c.low;
+        const minBodyRatio = 0.25; // e.g., body must be at least 25% of range
+        if (getRange(last) === 0 || getBody(last) / getRange(last) < minBodyRatio) {
+            return { signal: null, reason: "weak_candle_body" };
+        }
 
         // Entry pattern on M5 (using closed candles only)
         const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern?.(last);
