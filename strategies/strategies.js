@@ -235,15 +235,11 @@ class Strategy {
         const m5Trend = this.trendFrom(m5?.ema20, m5?.ema50); // entry TF
 
         // Require M5 & M15 alignment first
-        const m5m15Aligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
-        if (!m5m15Aligned) return { signal: null, reason: "m5_m15_not_aligned" };
+        // const m5m15Aligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
+        // if (!m5m15Aligned) return { signal: null, reason: "m5_m15_not_aligned" };
 
-        // H1 filter mode (choose one):
-        const STRICT_H1 = false; // set false if you want softer filter
-
-        // STRICT: H1 must match M5/M15
-        // SOFT: H1 must not be opposite (neutral allowed)
-        const h1Passes = STRICT_H1 ? h1Trend === m5Trend : h1Trend === m5Trend || h1Trend === "neutral";
+        // H1 must match M5/M15
+        const h1Passes = h1Trend === m5Trend;
 
         if (!h1Passes) return { signal: null, reason: "h1_filter_blocked" };
 

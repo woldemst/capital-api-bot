@@ -41,38 +41,24 @@ class TradingService {
 
     async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
         const price = signal === "BUY" ? ask : bid;
-        const { last } = context; // previous closed candle (confirmation candle)
-        // ATR-based SL/TP
-        // Try to get ATR from m5 indicators if available
-        let atr = null;
-        if (candles?.m5Candles?.length) {
-            // Find ATR from last candle if available
-            const lastCandle = last || candles.m5Candles[candles.m5Candles.length - 2];
-            atr = lastCandle?.atr || null;
-        }
-        // Fallback: try context ATR or a default
-        if (!atr) atr =  symbol.includes("JPY") ? 0.10 : 0.001; // fallback default
-        // For JPY pairs, ATR is typically ~0.1-0.2, for others ~0.0005-0.001
+        const { last } = context; // previous closed candle
+        const buffer = symbol.includes("JPY") ? 0.08 : 0.0002;
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
-        // SL = 1.5 × ATR below/above signal candle
-        let stopLossPrice;
-        if (signal === "BUY") {
-            stopLossPrice = last.low - 1.5 * atr;
-        } else {
-            stopLossPrice = last.high + 1.5 * atr;
-        }
-        // TP = 3 × ATR from entry (risk:reward 1:2)
-        let takeProfitPrice;
-        if (signal === "BUY") {
-            takeProfitPrice = price + 3 * atr;
-        } else {
-            takeProfitPrice = price - 3 * atr;
-        }
-        // Round for JPY/other pairs
+
+        // --- Simple candle body size ---
+        const body = Math.abs(last.close - last.open);
+
+        // --- SL below/above previous candle ---
+        let stopLossPrice = signal === "BUY" ? last.low - buffer : last.high + buffer;
+
+        // --- TP exactly 2× body from entry ---
+        const takeProfitPrice = signal === "BUY" ? price + body * 2 : price - body * 2;
+
+        // --- Round ---
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
         const roundedTP = this.roundPrice(takeProfitPrice, symbol);
 
-        // Calculate position size
+        // --- Calculate position size ---
         const slDistance = Math.abs(price - stopLossPrice);
         const slPips = slDistance / pip;
         const pipValuePerUnit = pip / price;
@@ -85,7 +71,7 @@ class TradingService {
             Entry: ${price}
             SL: ${stopLossPrice}
             TP: ${roundedTP}
-            ATR: ${atr}
+            Body: ${body.toFixed(5)}
             RR: 2:1
             Size: ${size}
         `);
