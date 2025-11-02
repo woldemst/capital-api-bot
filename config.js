@@ -41,8 +41,8 @@ export const RISK = {
     PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     BUFFER_PIPS: 1, // Buffer for SL calculation
-    REWARD_RATIO: 2,   // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 45, // Maximum hold time in minutes
+    REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
+    MAX_HOLD_TIME: 60, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
@@ -66,7 +66,7 @@ export const ANALYSIS = {
         M5: "MINUTE_5", // 5-minute entry timeframe
         M1: "MINUTE", // 1-minute entry timeframe
     },
-    
+
     EMA: {
         TREND: {
             FAST: 50,
@@ -101,10 +101,22 @@ export const HISTORY = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 1 minute between analyses
-    MODE: true,
+    INTERVAL: 30 * 1000, // 1 minute between analyses
+    MODE: false,
 };
 
-export const PROD = {
-    INTERVAL: 60 * 1000, // 15 minutes between analyses (aligned with M15)
-};
+// export const PROD = {
+//     INTERVAL: (() => {
+//         const now = new Date();
+//         const msToNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+//         return msToNextMinute + 5000; // 5 seconds after the next minute
+//     })(),
+// };
+
+// 1 min
+export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
+
+// 5 min
+// export const PROD = {
+//     INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
+// };

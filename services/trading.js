@@ -39,74 +39,44 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
-    // --- Position size + achievable SL/TP for M1 ---
     async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
         const price = signal === "BUY" ? ask : bid;
-
-        const { prev, last } = context;
-
-        const buffer = symbol.includes("JPY") ? 0.08 : 0.0008;
+        const { last } = context; // previous closed candle
+        const buffer = symbol.includes("JPY") ? 0.08 : 0.0002;
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
 
+        // --- Simple candle body size ---
         const body = Math.abs(last.close - last.open);
-        let stopLossPrice, slDistance, takeProfitPrice;
 
-        if (signal === "BUY") {
-            // SL under previous candle low
-            stopLossPrice = prev.low - buffer;
+        // --- SL below/above previous candle ---
+        let stopLossPrice = signal === "BUY" ? last.low - buffer : last.high + buffer;
 
-            // TP = 2x candle body above entry
-            takeProfitPrice = price + body * 2;
-        } else {
-            // SL above previous candle high
-            stopLossPrice = prev.high + buffer;
+        // --- TP exactly 2× body from entry ---
+        const takeProfitPrice = signal === "BUY" ? price + body * 2 : price - body * 2;
 
-            // TP = 2x candle body below entry
-            takeProfitPrice = price - body * 2;
-        }
-
-        // const minSlPips = symbol.includes("JPY") ? 12 : 10;
-        // const minSl = minSlPips * pip;
-
-        // if (Math.abs(slDistance) < minSl) {
-        //     if (signal === "BUY") {
-        //         stopLossPrice = price - minSl;
-        //         slDistance = price - stopLossPrice;
-        //         takeProfitPrice = price + slDistance * 1.8;
-        //     } else {
-        //         stopLossPrice = price + minSl;
-        //         slDistance = stopLossPrice - price;
-        //         takeProfitPrice = price - slDistance * 1.8;
-        //     }
-        // }
-
-        // let size = (this.accountBalance * 0.02) / Math.abs(slDistance);
-        // size = Math.floor(size / 100) * 100;
-        // if (size < 100) size = 100;
-
-        // Round SL/TP to valid decimals
+        // --- Round ---
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+        const roundedTP = this.roundPrice(takeProfitPrice, symbol);
 
-        slDistance = Math.abs(price - stopLossPrice);
-        const slPips = Math.abs(slDistance / pip); // SL distance in pips
-        const pipValuePerUnit = pip / price; // pip value per unit (approx.)
-
-        const maxSimultaneousTrades = MAX_POSITIONS;
-        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / maxSimultaneousTrades;
-
+        // --- Calculate position size ---
+        const slDistance = Math.abs(price - stopLossPrice);
+        const slPips = slDistance / pip;
+        const pipValuePerUnit = pip / price;
+        const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
         let size = riskAmount / (slPips * pipValuePerUnit);
-        size = Math.floor(size / 100) * 100; // round down to nearest 100
-        if (size < 100) size = 100; // enforce minimum
+        size = Math.floor(size / 100) * 100;
+        if (size < 100) size = 100;
 
-        logger.info(`[Trade Parameters] ${symbol} ${signal}:
+        logger.info(`[Trade Params] ${symbol} ${signal}:
             Entry: ${price}
-            SL: ${stopLossPrice} (${slPips.toFixed(1)} pips)
-            TP: ${takeProfitPrice}
+            SL: ${stopLossPrice}
+            TP: ${roundedTP}
+            Body: ${body.toFixed(5)}
+            RR: 2:1
             Size: ${size}
-            PipValue/Unit: ${pipValuePerUnit.toFixed(8)} RiskAmount: ${riskAmount.toFixed(2)}`);
+        `);
 
-        return { size, price, stopLossPrice, takeProfitPrice };
+        return { size, price, stopLossPrice, takeProfitPrice: roundedTP };
     }
 
     // --- TP/SL validation (unchanged) ---
@@ -141,45 +111,28 @@ class TradingService {
     }
 
     async executeTrade(symbol, signal, bid, ask, indicators, candles, context) {
+        if (!context?.prev) {
+            logger.warn(`[${symbol}] Missing context for signal ${signal}, skipping trade.`);
+            return;
+        }
         try {
             const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles, context);
-            const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
-            const position = await placePosition(symbol, signal, size, price, SL, TP);
+            // const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
+            const position = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
             if (!position?.dealReference) {
                 logger.error(`[trading.js][Order] Deal reference is missing: ${JSON.stringify(position)}`);
                 return;
             }
-
             const confirmation = await getDealConfirmation(position.dealReference);
 
-            // Check the status of the deal confirmation
             if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
                 logger.error(`[trading.js][Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
+                this.openTrades.push(symbol);
             } else {
                 logger.info(
                     `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
                 );
-                // try {
-                //     const logPath = getCurrentTradesLogPath();
-                //     if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, "");
-                //     const logEntry = {
-                //         time: new Date().toISOString(),
-                //         id: position.dealReference,
-                //         symbol,
-                //         direction: signal.toLowerCase(),
-                //         entry: price,
-                //         sl: SL,
-                //         tp: TP,
-                //         size,
-                //         indicators,
-                //         result: null,
-                //     };
-                //     fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
-                //     logger.info(`[TradeLog] Logged opened trade ${position.dealReference}`);
-                // } catch (err) {
-                //     logger.error("[TradeLog] Failed to append opened trade:", err);
-                // }
             }
         } catch (error) {
             logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
@@ -241,19 +194,36 @@ class TradingService {
             return;
         }
 
-        // --- Activation logic: 60% of TP ---
+        // --- SOFT EXIT: if trend alignment breaks (M5 vs M15) ---
+        const { m5, m15 } = indicators || {};
+        if (m5 && m15) {
+            const m5Trend = Strategy.trendFrom(m5.ema20, m5.ema50);
+            const m15Trend = Strategy.trendFrom(m15.ema20, m15.ema50);
+
+            const alignmentBroken =
+                (direction === "BUY" && (m5Trend === "bearish" || m15Trend === "bearish")) ||
+                (direction === "SELL" && (m5Trend === "bullish" || m15Trend === "bullish"));
+
+            if (alignmentBroken) {
+                logger.info(`[SoftExit] ${symbol}: Trend misalignment detected (M5=${m5Trend}, M15=${m15Trend}). Closing position.`);
+                await this.closePosition(dealId, "soft_exit");
+                return;
+            }
+        }
+
+        // --- Activation logic: 70% of TP ---
         const tpDistance = Math.abs(takeProfit - entryPrice);
-        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.5 : entryPrice - tpDistance * 0.5;
+        const activationLevel = direction === "BUY" ? entryPrice + tpDistance * 0.7 : entryPrice - tpDistance * 0.7;
 
         const reachedActivation = direction === "BUY" ? currentPrice >= activationLevel : currentPrice <= activationLevel;
 
         if (!reachedActivation) {
-            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 50% TP activation.`);
+            logger.debug(`[TrailingStop] Position ${dealId} has not yet reached 70% TP activation.`);
             return;
         }
 
-        // --- Trailing stop at 10% of TP distance from current price ---
-        const trailDistance = tpDistance * 0.1;
+        // --- Trailing stop at 20% of TP distance from current price ---
+        const trailDistance = tpDistance * 0.2;
         let newStop;
         if (direction === "BUY") {
             newStop = currentPrice - trailDistance;
@@ -282,8 +252,10 @@ class TradingService {
 
     async closePartialPosition(dealId, size) {
         try {
-            // Add your broker's API call to close partial position
             await apiClosePosition(dealId, size);
+
+            // remove from internal list
+            this.openTrades = this.openTrades.filter((s) => s !== dealId && s !== symbol);
             logger.info(`[PartialTP] Successfully closed ${size} units for ${dealId}`);
         } catch (error) {
             logger.error(`[PartialTP] Failed to close partial position for ${dealId}:`, error);

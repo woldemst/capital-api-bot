@@ -1,10 +1,4 @@
-// strategies.js
 import logger from "../utils/logger.js";
-import { RISK, ANALYSIS } from "../config.js";
-
-const { RSI } = ANALYSIS;
-
-const { REQUIRED_SCORE } = RISK;
 
 class Strategy {
     constructor() {}
@@ -215,94 +209,72 @@ class Strategy {
     //         return { signal: null, reason: "error" };
     //     }
     // }
+    // Small helpers
 
-    getSignal = ({ symbol, indicators = {}, candles = {} }) => {
-        const { m1, m5, m15, h1 } = indicators;
+    trendFrom = (fast, slow, minGap = 0) => {
+        if (fast == null || slow == null) return "neutral";
+        const diff = fast - slow;
+        if (diff > minGap) return "bullish";
+        if (diff < -minGap) return "bearish";
+        return "neutral";
+    };
 
-        if (!h1 || h1.ema20 == null || h1.ema50 == null) {
-            logger.warn(`[${symbol}] Missing H1 EMA data`);
-            return { signal: null, reason: "missing_h1_ema" };
-        }
+    // --- Main signal with H1 filter ---
+    getSignal = ({ symbol, indicators, candles }) => {
+        const { m5, m15, h1 } = indicators || {};
+        const m5Candles = candles?.m5Candles || [];
 
-        if (!m5 || m5.ema20 == null || m5.ema50 == null) {
-            logger.warn(`[${symbol}] Missing M5 EMA data`);
-            return { signal: null, reason: "missing_m5_ema" };
-        }
-
-        if (!candles.m5Candles || candles.m5Candles.length < 4) {
-            logger.warn(`[${symbol}] Not enough m5Candles`);
-            return { signal: null, reason: "not_enough_m5_candles" };
-        }
-
-        const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
-        const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
-        const m15Trend = m15 && m15.ema20 != null && m15.ema50 != null ? (m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral") : null;
-
-        const alignedTrend = h1Trend === m5Trend && (h1Trend === "bullish" || h1Trend === "bearish");
-        if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
-
-        const prev = candles.m5Candles[candles.m5Candles.length - 3];
-        const last = candles.m5Candles[candles.m5Candles.length - 2];
+        // Use last two CLOSED M5 candles
+        const prev = m5Candles[m5Candles.length - 3];
+        const last = m5Candles[m5Candles.length - 2];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
-        const pattern = this.greenRedCandlePattern(m5Trend, prev, last);
+        // Trends (null-safe)
+        const h1Trend = this.trendFrom(h1?.ema50, h1?.ema200); // HTF filter
+        const m15Trend = this.trendFrom(m15?.ema20, m15?.ema50); // confirmation TF
+        const m5Trend = this.trendFrom(m5?.ema20, m5?.ema50); // entry TF
 
-        const m5RSI = m5.rsi;
-        const m5ADX = m5.adx?.adx;
-        const m5BBpb = m5.bb?.pb;
-        const m15ADX = m15?.adx?.adx;
-        const h1ADX = h1.adx?.adx;
-        const h1RSI = h1.rsi;
+        // Require M5 & M15 alignment first
+        // const m5m15Aligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
+        // if (!m5m15Aligned) return { signal: null, reason: "m5_m15_not_aligned" };
 
-        if (
-            pattern === "bearish" &&
-            m5Trend === "bearish" &&
-            alignedTrend &&
-            m5RSI > 45 &&
-            m5RSI < 65 &&
-            m5BBpb > 0.7 &&
-            ((m15ADX && m15ADX > 25) || (h1ADX && h1ADX > 25)) &&
-            h1RSI < 35
-        ) {
-            return {
-                signal: "SELL",
-                reason: "profitable_pattern_trend_alignment",
-                context: {
-                    prevHigh: prev.high,
-                    prevLow: prev.low,
-                    prevOpen: prev.open,
-                    prevClose: prev.close,
-                },
-            };
+        // H1 must match M5/M15
+        const h1Passes = h1Trend === m5Trend;
+
+        if (!h1Passes) return { signal: null, reason: "h1_filter_blocked" };
+
+        // --- ATR-based volatility filter (skip low volatility) ---
+        const atr = m5?.atr;
+        const minATR = symbol.includes("JPY") ? 0.06 : 0.0004;
+        if (!atr || atr < minATR) {
+            return { signal: null, reason: "low_atr_volatility" };
         }
 
-        if (
-            pattern === "bullish" &&
-            m5Trend === "bullish" &&
-            alignedTrend &&
-            m5RSI > 35 &&
-            m5RSI < 55 &&
-            m5BBpb < 0.3 &&
-            ((m15ADX && m15ADX > 25) || (h1ADX && h1ADX > 25)) &&
-            h1RSI > 65
-        ) {
-            return {
-                signal: "BUY",
-                reason: "profitable_pattern_trend_alignment",
-                context: {
-                    prevHigh: prev.high,
-                    prevLow: prev.low,
-                    prevOpen: prev.open,
-                    prevClose: prev.close,
-                },
-            };
+        // --- Candle body-to-range filter for valid candle strength ---
+        const getBody = (c) => Math.abs(c.close - c.open);
+        const getRange = (c) => c.high - c.low;
+        const minBodyRatio = 0.25; // e.g., body must be at least 25% of range
+        if (getRange(last) === 0 || getBody(last) / getRange(last) < minBodyRatio) {
+            return { signal: null, reason: "weak_candle_body" };
         }
 
-        return { signal: null, reason: "no_profitable_signal", context: { trend: { h1: h1Trend, m5: m5Trend, m15: m15Trend } } };
+        // Entry pattern on M5 (using closed candles only)
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern?.(last);
+        if (!pattern) return { signal: null, reason: "no_pattern" };
+
+        // Combine
+        if (pattern === "bullish" && m5Trend === "bullish") {
+            return { signal: "BUY", reason: "pattern+tf_alignment", context: { prev, last } };
+        }
+        if (pattern === "bearish" && m5Trend === "bearish") {
+            return { signal: "SELL", reason: "pattern+tf_alignment", context: { prev, last } };
+        }
+
+        return { signal: null, reason: "pattern_tf_mismatch" };
     };
 
     greenRedCandlePattern(trend, prev, last) {
-        if (!prev || !last || !trend) return false;
+        if (!prev || !last) return false;
         const getOpen = (c) => c.open;
         const getClose = (c) => c.close;
 
@@ -311,10 +283,10 @@ class Strategy {
         const isBullish = (c) => getClose(c) > getOpen(c);
         const isBearish = (c) => getClose(c) < getOpen(c);
 
-        const trendDirection = String(trend).toLowerCase();
+        // const trendDirection = String(trend).toLowerCase();
 
-        if (trendDirection === "bullish" && isBearish(prev) && isBullish(last)) return "bullish";
-        if (trendDirection === "bearish" && isBullish(prev) && isBearish(last)) return "bearish";
+        if (isBearish(prev) && isBullish(last)) return "bullish";
+        if (isBullish(prev) && isBearish(last)) return "bearish";
 
         return false;
     }
