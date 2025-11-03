@@ -239,16 +239,16 @@ class Strategy {
         // if (!m5m15Aligned) return { signal: null, reason: "m5_m15_not_aligned" };
 
         // H1 must match M5/M15
-        const h1Passes = h1Trend === m5Trend;
+        // const m15Passes = m15Trend === m5Trend;
 
-        if (!h1Passes) return { signal: null, reason: "h1_filter_blocked" };
+        // if (!m15Passes) return { signal: null, reason: "m15_filter_blocked" };
 
         // --- ATR-based volatility filter (skip low volatility) ---
-        const atr = m5?.atr;
-        const minATR = symbol.includes("JPY") ? 0.06 : 0.0004;
-        if (!atr || atr < minATR) {
-            return { signal: null, reason: "low_atr_volatility" };
-        }
+        // const atr = m5?.atr;
+        // const minATR = symbol.includes("JPY") ? 0.06 : 0.0004;
+        // if (!atr || atr < minATR) {
+        //     return { signal: null, reason: "low_atr_volatility" };
+        // }
 
         // --- Candle body-to-range filter for valid candle strength ---
         const getBody = (c) => Math.abs(c.close - c.open);
@@ -259,14 +259,14 @@ class Strategy {
         }
 
         // Entry pattern on M5 (using closed candles only)
-        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern?.(last);
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last);
         if (!pattern) return { signal: null, reason: "no_pattern" };
 
         // Combine
-        if (pattern === "bullish" && m5Trend === "bullish") {
+        if (pattern === "bullish") {
             return { signal: "BUY", reason: "pattern+tf_alignment", context: { prev, last } };
         }
-        if (pattern === "bearish" && m5Trend === "bearish") {
+        if (pattern === "bearish") {
             return { signal: "SELL", reason: "pattern+tf_alignment", context: { prev, last } };
         }
 
@@ -283,10 +283,10 @@ class Strategy {
         const isBullish = (c) => getClose(c) > getOpen(c);
         const isBearish = (c) => getClose(c) < getOpen(c);
 
-        // const trendDirection = String(trend).toLowerCase();
+        const trendDirection = String(trend).toLowerCase();
 
-        if (isBearish(prev) && isBullish(last)) return "bullish";
-        if (isBullish(prev) && isBearish(last)) return "bearish";
+        if (isBearish(prev) && isBullish(last) && trendDirection === "bullish") return "bullish";
+        if (isBullish(prev) && isBearish(last) && trendDirection === "bearish") return "bearish";
 
         return false;
     }

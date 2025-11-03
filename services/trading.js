@@ -41,28 +41,33 @@ class TradingService {
 
     async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
         const price = signal === "BUY" ? ask : bid;
-        const { last } = context; // previous closed candle
-        const buffer = symbol.includes("JPY") ? 0.08 : 0.0002;
+        const { last } = context; // signal candle
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
 
-        // --- Simple candle body size ---
+        // Candle properties
         const body = Math.abs(last.close - last.open);
+        const candleSize = last.high - last.low;
 
-        // --- SL below/above previous candle ---
-        let stopLossPrice = signal === "BUY" ? last.low - buffer : last.high + buffer;
+        // Define TP/SL relative to signal candle
+        let stopLossPrice, takeProfitPrice;
 
-        // --- TP exactly 2× body from entry ---
-        const takeProfitPrice = signal === "BUY" ? price + body * 2 : price - body * 2;
+        if (signal === "BUY") {
+            stopLossPrice = last.low - pip * 3; // just below the signal candle
+            takeProfitPrice = price + candleSize * 2; // realistic small goal
+        } else {
+            stopLossPrice = last.high + pip * 3; // just above the signal candle
+            takeProfitPrice = price - candleSize * 2; // small goal
+        }
 
-        // --- Round ---
+        // Round prices properly
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        const roundedTP = this.roundPrice(takeProfitPrice, symbol);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
-        // --- Calculate position size ---
+        // --- Risk management ---
         const slDistance = Math.abs(price - stopLossPrice);
-        const slPips = slDistance / pip;
-        const pipValuePerUnit = pip / price;
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
+        const pipValuePerUnit = pip / price;
+        const slPips = slDistance / pip;
         let size = riskAmount / (slPips * pipValuePerUnit);
         size = Math.floor(size / 100) * 100;
         if (size < 100) size = 100;
@@ -70,13 +75,13 @@ class TradingService {
         logger.info(`[Trade Params] ${symbol} ${signal}:
             Entry: ${price}
             SL: ${stopLossPrice}
-            TP: ${roundedTP}
+            TP: ${takeProfitPrice}
             Body: ${body.toFixed(5)}
-            RR: 2:1
+            RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
             Size: ${size}
         `);
 
-        return { size, price, stopLossPrice, takeProfitPrice: roundedTP };
+        return { size, price, stopLossPrice, takeProfitPrice };
     }
 
     // --- TP/SL validation (unchanged) ---
