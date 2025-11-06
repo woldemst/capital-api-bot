@@ -29,14 +29,14 @@ class Strategy {
 
         const m5Trend = this.pickTrend(m5);
         const m15Trend = this.pickTrend(m15);
+        const h1Trend = this.pickTrend(h1);
 
         if (m5Trend !== m15Trend || !["bullish", "bearish"].includes(m5Trend)) {
             return { signal: null, reason: "tf_misaligned", context: { m5Trend, m15Trend } };
         }
-        const h1Trend = this.pickTrend(h1, ["ema20", "emaFast", "ema21"], ["ema50", "emaSlow", "ema200", "ema100", "ema50"]);
 
         // allow trades when H1 is neutral or aligned
-        if (h1Trend !== "neutral" && h1Trend !== m5Trend) {
+        if (h1Trend !== "neutral" && h1Trend !== m5Trend && h1Trend !== m15Trend) {
             return { signal: null, reason: "h1_filter_blocked", context: { h1Trend } };
         }
 
