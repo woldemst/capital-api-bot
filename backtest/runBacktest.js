@@ -6,7 +6,7 @@ import Strategy from "../strategies/strategies.js";
 import { calcIndicators } from "../indicators.js";
 import tradingService from "../services/trading.js";
 
-const pair = process.env.PAIR || "AUDUSD";
+const pair = process.env.PAIR || "EURUSD";
 const inputFile = process.env.INPUT || `./analysis/${pair}_combined.jsonl`;
 const outputFile = process.env.OUTPUT || `./results/${pair}_backtest_results.jsonl`;
 const profitableFile = process.env.PROFITABLE || `./results/${pair}_profitable.jsonl`;

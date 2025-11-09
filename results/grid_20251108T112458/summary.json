@@ -1,0 +1,624 @@
+{
+  "runId": "grid_20251108T112458",
+  "generatedAt": "2025-11-08T11:25:57.346Z",
+  "symbols": [
+    {
+      "symbol": "AUDUSD",
+      "configId": "trend_off__atr_off__rsi_band__soft_aggressive__rr_2",
+      "metrics": {
+        "trades": 8,
+        "wins": 5,
+        "losses": 3,
+        "winRate": 62.5,
+        "profitFactor": 4.6,
+        "expectancy": 0.98,
+        "avgR": 0.98,
+        "maxDrawdown": {
+          "absolute": 2.18,
+          "percent": 54.38
+        },
+        "sharpe": 1.93,
+        "medianMAE": 0.65,
+        "medianMFE": 9.81,
+        "softExitSaveRate": 100,
+        "sessionDistribution": {
+          "asia": 4,
+          "london": 4
+        },
+        "hourDistribution": {
+          "0": 1,
+          "2": 2,
+          "3": 1,
+          "8": 1,
+          "11": 3
+        },
+        "weekdayDistribution": {
+          "1": 1,
+          "2": 2,
+          "4": 5
+        },
+        "netR": 7.82,
+        "grossProfit": 10,
+        "grossLoss": -2.18
+      },
+      "rejections": {
+        "rsi_long": 15,
+        "rsi_short": 27
+      }
+    },
+    {
+      "symbol": "EURJPY",
+      "configId": "trend_off__atr_band__rsi_off__soft_aggressive__rr_1.2",
+      "metrics": {
+        "trades": 11,
+        "wins": 8,
+        "losses": 3,
+        "winRate": 72.73,
+        "profitFactor": 15.85,
+        "expectancy": 0.76,
+        "avgR": 0.76,
+        "maxDrawdown": {
+          "absolute": 0.53,
+          "percent": 13.06
+        },
+        "sharpe": 3.88,
+        "medianMAE": 4,
+        "medianMFE": 8.9,
+        "softExitSaveRate": 75,
+        "sessionDistribution": {
+          "asia": 4,
+          "london": 3,
+          "new_york": 4
+        },
+        "hourDistribution": {
+          "4": 1,
+          "5": 2,
+          "6": 1,
+          "7": 1,
+          "13": 2,
+          "19": 4
+        },
+        "weekdayDistribution": {
+          "1": 1,
+          "2": 3,
+          "5": 7
+        },
+        "netR": 8.36,
+        "grossProfit": 8.92,
+        "grossLoss": -0.56
+      },
+      "rejections": {
+        "atr_band": 20
+      }
+    },
+    {
+      "symbol": "EURUSD",
+      "configId": "trend_off__atr_off__rsi_off__soft_aggressive__rr_2",
+      "metrics": {
+        "trades": 41,
+        "wins": 25,
+        "losses": 16,
+        "winRate": 60.98,
+        "profitFactor": 3.33,
+        "expectancy": 0.54,
+        "avgR": 0.54,
+        "maxDrawdown": {
+          "absolute": 6.47,
+          "percent": 136.58
+        },
+        "sharpe": 3.03,
+        "medianMAE": 4.5,
+        "medianMFE": 14.5,
+        "softExitSaveRate": 81.82,
+        "sessionDistribution": {
+          "london": 24,
+          "new_york": 1,
+          "asia": 16
+        },
+        "hourDistribution": {
+          "0": 3,
+          "1": 3,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 7,
+          "7": 5,
+          "8": 7,
+          "9": 5,
+          "10": 2,
+          "12": 1,
+          "13": 2,
+          "14": 2,
+          "16": 1
+        },
+        "weekdayDistribution": {
+          "1": 16,
+          "2": 12,
+          "3": 4,
+          "4": 9
+        },
+        "netR": 22.05,
+        "grossProfit": 31.52,
+        "grossLoss": -9.47
+      },
+      "rejections": {}
+    },
+    {
+      "symbol": "GBPJPY",
+      "configId": "trend_off__atr_off__rsi_off__soft_aggressive__rr_2",
+      "metrics": {
+        "trades": 41,
+        "wins": 18,
+        "losses": 23,
+        "winRate": 43.9,
+        "profitFactor": 2.19,
+        "expectancy": 0.37,
+        "avgR": 0.37,
+        "maxDrawdown": {
+          "absolute": 4.18,
+          "percent": 80.36
+        },
+        "sharpe": 1.99,
+        "medianMAE": 8,
+        "medianMFE": 8.2,
+        "softExitSaveRate": 84,
+        "sessionDistribution": {
+          "london": 19,
+          "new_york": 12,
+          "asia": 10
+        },
+        "hourDistribution": {
+          "1": 3,
+          "2": 1,
+          "4": 1,
+          "5": 4,
+          "6": 1,
+          "7": 3,
+          "8": 7,
+          "9": 2,
+          "10": 1,
+          "12": 3,
+          "15": 3,
+          "16": 2,
+          "18": 3,
+          "19": 3,
+          "20": 4
+        },
+        "weekdayDistribution": {
+          "1": 3,
+          "2": 8,
+          "3": 4,
+          "4": 2,
+          "5": 24
+        },
+        "netR": 15.06,
+        "grossProfit": 27.7,
+        "grossLoss": -12.64
+      },
+      "rejections": {}
+    },
+    {
+      "symbol": "GBPUSD",
+      "configId": "trend_off__atr_off__rsi_off__soft_aggressive__rr_1.2",
+      "metrics": {
+        "trades": 40,
+        "wins": 17,
+        "losses": 22,
+        "winRate": 42.5,
+        "profitFactor": 1.1,
+        "expectancy": 0.03,
+        "avgR": 0.03,
+        "maxDrawdown": {
+          "absolute": 7.51,
+          "percent": 751.31
+        },
+        "sharpe": 0.25,
+        "medianMAE": 5.35,
+        "medianMFE": 5.55,
+        "softExitSaveRate": 79.17,
+        "sessionDistribution": {
+          "asia": 12,
+          "london": 22,
+          "new_york": 6
+        },
+        "hourDistribution": {
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 3,
+          "5": 1,
+          "6": 3,
+          "7": 4,
+          "8": 7,
+          "9": 3,
+          "10": 2,
+          "11": 2,
+          "12": 2,
+          "14": 2,
+          "16": 2,
+          "17": 2,
+          "18": 1,
+          "20": 1,
+          "23": 2
+        },
+        "weekdayDistribution": {
+          "1": 15,
+          "2": 14,
+          "3": 8,
+          "4": 2,
+          "5": 1
+        },
+        "netR": 1.28,
+        "grossProfit": 14,
+        "grossLoss": -12.71
+      },
+      "rejections": {}
+    },
+    {
+      "symbol": "NZDUSD",
+      "configId": "trend_off__atr_off__rsi_off__soft_aggressive__rr_1.2",
+      "metrics": {
+        "trades": 50,
+        "wins": 24,
+        "losses": 24,
+        "winRate": 48,
+        "profitFactor": 1.11,
+        "expectancy": 0.03,
+        "avgR": 0.03,
+        "maxDrawdown": {
+          "absolute": 10.68,
+          "percent": 113.82
+        },
+        "sharpe": 0.3,
+        "medianMAE": 2.68,
+        "medianMFE": 3.82,
+        "softExitSaveRate": 60,
+        "sessionDistribution": {
+          "new_york": 13,
+          "asia": 16,
+          "london": 21
+        },
+        "hourDistribution": {
+          "1": 3,
+          "3": 1,
+          "4": 3,
+          "6": 6,
+          "7": 5,
+          "8": 1,
+          "9": 3,
+          "10": 2,
+          "11": 2,
+          "12": 2,
+          "13": 6,
+          "17": 6,
+          "18": 3,
+          "19": 2,
+          "20": 2,
+          "21": 2,
+          "22": 1
+        },
+        "weekdayDistribution": {
+          "1": 6,
+          "2": 12,
+          "3": 10,
+          "4": 7,
+          "5": 15
+        },
+        "netR": 1.73,
+        "grossProfit": 18.13,
+        "grossLoss": -16.4
+      },
+      "rejections": {}
+    },
+    {
+      "symbol": "USDCAD",
+      "configId": "trend_off__atr_off__rsi_off__soft_aggressive__rr_1.5",
+      "metrics": {
+        "trades": 8,
+        "wins": 1,
+        "losses": 7,
+        "winRate": 12.5,
+        "profitFactor": 0.29,
+        "expectancy": -0.46,
+        "avgR": -0.46,
+        "maxDrawdown": {
+          "absolute": 5.16,
+          "percent": 0
+        },
+        "sharpe": -1.55,
+        "medianMAE": 8.9,
+        "medianMFE": 3.15,
+        "softExitSaveRate": 100,
+        "sessionDistribution": {
+          "asia": 2,
+          "london": 5,
+          "new_york": 1
+        },
+        "hourDistribution": {
+          "5": 1,
+          "6": 1,
+          "12": 1,
+          "13": 1,
+          "14": 2,
+          "15": 1,
+          "20": 1
+        },
+        "weekdayDistribution": {
+          "1": 2,
+          "2": 2,
+          "3": 2,
+          "4": 2
+        },
+        "netR": -3.66,
+        "grossProfit": 1.5,
+        "grossLoss": -5.16
+      },
+      "rejections": {}
+    },
+    {
+      "symbol": "USDJPY",
+      "configId": "trend_off__atr_off__rsi_off__soft_off__rr_2",
+      "metrics": {
+        "trades": 23,
+        "wins": 11,
+        "losses": 12,
+        "winRate": 47.83,
+        "profitFactor": 1.46,
+        "expectancy": 0.24,
+        "avgR": 0.24,
+        "maxDrawdown": {
+          "absolute": 5,
+          "percent": 78.55
+        },
+        "sharpe": 0.81,
+        "medianMAE": 15.2,
+        "medianMFE": 11.6,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "london": 13,
+          "new_york": 6,
+          "asia": 4
+        },
+        "hourDistribution": {
+          "0": 2,
+          "2": 2,
+          "7": 3,
+          "8": 1,
+          "10": 2,
+          "13": 3,
+          "14": 2,
+          "15": 2,
+          "16": 2,
+          "18": 3,
+          "20": 1
+        },
+        "weekdayDistribution": {
+          "1": 1,
+          "2": 6,
+          "3": 10,
+          "4": 3,
+          "5": 3
+        },
+        "netR": 5.48,
+        "grossProfit": 17.48,
+        "grossLoss": -12
+      },
+      "rejections": {}
+    }
+  ],
+  "overall": {
+    "trades": 222,
+    "wins": 109,
+    "losses": 110,
+    "winRate": 49.1,
+    "profitFactor": 1.82,
+    "expectancy": 0.26,
+    "avgR": 0.26,
+    "maxDrawdown": {
+      "absolute": 12.95,
+      "percent": 20.24
+    },
+    "sharpe": 3.64,
+    "medianMAE": 5.65,
+    "medianMFE": 7.35,
+    "softExitSaveRate": 77.14,
+    "sessionDistribution": {
+      "asia": 68,
+      "london": 111,
+      "new_york": 43
+    },
+    "hourDistribution": {
+      "0": 6,
+      "1": 10,
+      "2": 6,
+      "3": 4,
+      "4": 9,
+      "5": 9,
+      "6": 19,
+      "7": 21,
+      "8": 24,
+      "9": 13,
+      "10": 9,
+      "11": 7,
+      "12": 9,
+      "13": 14,
+      "14": 8,
+      "15": 6,
+      "16": 7,
+      "17": 8,
+      "18": 10,
+      "19": 9,
+      "20": 9,
+      "21": 2,
+      "22": 1,
+      "23": 2
+    },
+    "weekdayDistribution": {
+      "1": 45,
+      "2": 59,
+      "3": 38,
+      "4": 30,
+      "5": 50
+    },
+    "netR": 58.12,
+    "grossProfit": 129.24,
+    "grossLoss": -71.11
+  },
+  "patterns": {
+    "h1Trend": {
+      "aligned": {
+        "winRate": 49.1,
+        "trades": 222
+      },
+      "counter": {
+        "winRate": 0,
+        "trades": 0
+      }
+    },
+    "m15Trend": {
+      "aligned": {
+        "winRate": 49.1,
+        "trades": 222
+      },
+      "counter": {
+        "winRate": 0,
+        "trades": 0
+      }
+    },
+    "h1RSI": {
+      "low": {
+        "winRate": 59.22,
+        "trades": 103
+      },
+      "mid": {
+        "winRate": 36.84,
+        "trades": 38
+      },
+      "high": {
+        "winRate": 41.98,
+        "trades": 81
+      }
+    },
+    "m15RSI": {
+      "low": {
+        "winRate": 57.8,
+        "trades": 109
+      },
+      "mid": {
+        "winRate": 36.17,
+        "trades": 47
+      },
+      "high": {
+        "winRate": 43.94,
+        "trades": 66
+      }
+    },
+    "h1ATR": {
+      "low": {
+        "winRate": 0,
+        "trades": 0
+      },
+      "mid": {
+        "winRate": 50.48,
+        "trades": 105
+      },
+      "high": {
+        "winRate": 47.86,
+        "trades": 117
+      }
+    },
+    "sessions": {
+      "asia": {
+        "winRate": 60.29,
+        "trades": 68
+      },
+      "london": {
+        "winRate": 41.44,
+        "trades": 111
+      },
+      "new_york": {
+        "winRate": 51.16,
+        "trades": 43
+      }
+    },
+    "softExit": {
+      "triggered": 105,
+      "saved": 81,
+      "saveRate": 77.14
+    },
+    "pairNuances": {
+      "AUDUSD": {
+        "winRate": 62.5,
+        "trades": 8,
+        "sessionBias": {
+          "asia": 4,
+          "london": 4,
+          "new_york": 0
+        }
+      },
+      "EURJPY": {
+        "winRate": 72.73,
+        "trades": 11,
+        "sessionBias": {
+          "asia": 4,
+          "london": 3,
+          "new_york": 4
+        }
+      },
+      "EURUSD": {
+        "winRate": 60.98,
+        "trades": 41,
+        "sessionBias": {
+          "asia": 16,
+          "london": 24,
+          "new_york": 1
+        }
+      },
+      "GBPJPY": {
+        "winRate": 43.9,
+        "trades": 41,
+        "sessionBias": {
+          "asia": 10,
+          "london": 19,
+          "new_york": 12
+        }
+      },
+      "GBPUSD": {
+        "winRate": 42.5,
+        "trades": 40,
+        "sessionBias": {
+          "asia": 12,
+          "london": 22,
+          "new_york": 6
+        }
+      },
+      "NZDUSD": {
+        "winRate": 48,
+        "trades": 50,
+        "sessionBias": {
+          "asia": 16,
+          "london": 21,
+          "new_york": 13
+        }
+      },
+      "USDCAD": {
+        "winRate": 12.5,
+        "trades": 8,
+        "sessionBias": {
+          "asia": 2,
+          "london": 5,
+          "new_york": 1
+        }
+      },
+      "USDJPY": {
+        "winRate": 47.83,
+        "trades": 23,
+        "sessionBias": {
+          "asia": 4,
+          "london": 13,
+          "new_york": 6
+        }
+      }
+    }
+  }
+}

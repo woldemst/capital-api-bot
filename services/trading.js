@@ -1,11 +1,11 @@
-import { RISK } from "../config.js";
-import { placeOrder, placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition } from "../api.js";
+import { ANALYSIS, RISK } from "../config.js";
+import { placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition, getHistorical } from "../api.js";
 import logger from "../utils/logger.js";
-import { logTradeResult, getCurrentTradesLogPath } from "../utils/tradeLogger.js";
-import fs from "fs";
+import { recordTradeOpen, recordTradeClose } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
+const { TIMEFRAMES } = ANALYSIS;
 
 class TradingService {
     constructor() {
@@ -16,6 +16,8 @@ class TradingService {
         this.maxRiskPerTrade = PER_TRADE;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
+        this.tradeSnapshots = new Map();
+        this.pendingClosures = new Set();
     }
 
     setAccountBalance(balance) {
@@ -39,32 +41,227 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
-        const price = signal === "BUY" ? ask : bid;
-        const { last } = context; // signal candle
-        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+    getPipSize(symbol = "") {
+        return symbol.includes("JPY") ? 0.01 : 0.0001;
+    }
 
-        // Candle properties
-        const body = Math.abs(last.close - last.open);
-        const candleSize = last.high - last.low;
+    cloneCandles(series = []) {
+        if (!Array.isArray(series)) return [];
+        return series.map((candle) => ({ ...candle }));
+    }
 
-        // Define TP/SL relative to signal candle
-        let stopLossPrice, takeProfitPrice;
+    getLastCandle(series = []) {
+        if (!Array.isArray(series) || !series.length) return null;
+        return series[series.length - 1];
+    }
 
-        if (signal === "BUY") {
-            stopLossPrice = last.low - pip * 2; // just below the signal candle
-            takeProfitPrice = price + candleSize * 2; // realistic small goal
-        } else {
-            stopLossPrice = last.high + pip * 2; // just above the signal candle
-            takeProfitPrice = price - candleSize * 2; // small goal
+    buildEntrySnapshot(candles = {}) {
+        return {
+            m5Series: this.cloneCandles(candles?.m5Candles ?? []),
+            m15Candle: this.getLastCandle(candles?.m15Candles ?? []),
+            h1Candle: this.getLastCandle(candles?.h1Candles ?? []),
+        };
+    }
+
+    async captureCloseSnapshot(symbol) {
+        if (!symbol) {
+            return { m5Series: [], m15Candle: null, h1Candle: null };
         }
 
-        // Round prices properly
-        // stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        // takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+        try {
+            const [m5Data, m15Data, h1Data] = await Promise.all([
+                getHistorical(symbol, TIMEFRAMES.M5, 50),
+                getHistorical(symbol, TIMEFRAMES.M15, 10),
+                getHistorical(symbol, TIMEFRAMES.H1, 10),
+            ]);
+            return {
+                m5Series: m5Data?.prices ?? [],
+                m15Candle: this.getLastCandle(m15Data?.prices ?? []),
+                h1Candle: this.getLastCandle(h1Data?.prices ?? []),
+            };
+        } catch (error) {
+            logger.error(`[TradeLog] Failed to capture close snapshot for ${symbol}:`, error);
+            return { m5Series: [], m15Candle: null, h1Candle: null };
+        }
+    }
 
-        // --- Risk management ---
+    buildProfitSummary(trade, closePrice) {
+        if (!trade || closePrice == null || trade.entryPrice == null) {
+            return { priceDiff: null, pips: null, result: "UNKNOWN" };
+        }
+
+        const direction = (trade.direction || "BUY").toUpperCase();
+        const pipSize = this.getPipSize(trade.symbol || "");
+        const directionalDiff = direction === "BUY" ? closePrice - trade.entryPrice : trade.entryPrice - closePrice;
+        const priceDiff = Number.isFinite(directionalDiff) ? Number(directionalDiff.toFixed(6)) : null;
+        const pips = priceDiff != null && pipSize ? Number((priceDiff / pipSize).toFixed(2)) : null;
+        let result = "UNKNOWN";
+        if (priceDiff != null) {
+            if (priceDiff > 0) result = "PROFIT";
+            else if (priceDiff < 0) result = "LOSS";
+            else result = "BREAKEVEN";
+        }
+
+        return { priceDiff, pips, result };
+    }
+
+    inferCloseReason(trade, closePrice, providedReason) {
+        if (providedReason) return providedReason;
+        if (!trade || closePrice == null) return "UNKNOWN";
+
+        const tolerance = this.getPipSize(trade.symbol || "") * 2;
+        if (trade.takeProfit != null && Math.abs(closePrice - trade.takeProfit) <= tolerance) {
+            return "TP";
+        }
+        if (trade.stopLoss != null && Math.abs(closePrice - trade.stopLoss) <= tolerance) {
+            return "SL";
+        }
+        return "UNKNOWN";
+    }
+
+    registerTradeSnapshot({ dealId, symbol, direction, size, entryPrice, stopLossPrice, takeProfitPrice, candles, context }) {
+        if (!dealId || !symbol) {
+            logger.warn("[TradeLog] Unable to register trade snapshot: missing dealId or symbol.");
+            return;
+        }
+
+        const entrySnapshot = this.buildEntrySnapshot(candles);
+        const entryRecord = {
+            id: dealId,
+            symbol,
+            direction,
+            size,
+            entry: {
+                time: new Date().toISOString(),
+                price: entryPrice,
+                stopLoss: stopLossPrice,
+                takeProfit: takeProfitPrice,
+                candles: {
+                    m5: entrySnapshot.m5Series,
+                    m15: entrySnapshot.m15Candle,
+                    h1: entrySnapshot.h1Candle,
+                },
+                strategyContext: context ?? null,
+            },
+            close: null,
+        };
+
+        try {
+            recordTradeOpen(entryRecord);
+            logger.info(`[TradeLog] Recorded entry for ${symbol} (${dealId})`);
+        } catch (error) {
+            logger.error(`[TradeLog] Failed to record entry for ${symbol} (${dealId}):`, error);
+        }
+
+        this.tradeSnapshots.set(dealId, {
+            symbol,
+            direction,
+            size,
+            entryPrice,
+            stopLoss: stopLossPrice,
+            takeProfit: takeProfitPrice,
+            entryTime: entryRecord.entry.time,
+        });
+    }
+
+    async finalizeTrade(dealId, { reason, closePrice, source = "monitor_loop" } = {}) {
+        if (!dealId) return;
+        if (this.pendingClosures.has(dealId)) return;
+
+        const snapshot = this.tradeSnapshots.get(dealId);
+        if (!snapshot) {
+            logger.warn(`[TradeLog] No snapshot found for deal ${dealId}, skipping close log.`);
+            return;
+        }
+
+        this.pendingClosures.add(dealId);
+        try {
+            const closeSnapshot = await this.captureCloseSnapshot(snapshot.symbol);
+            const latestM5 = this.getLastCandle(closeSnapshot.m5Series);
+            const resolvedClosePrice = closePrice ?? latestM5?.close ?? null;
+            const closeRecord = {
+                time: new Date().toISOString(),
+                price: resolvedClosePrice,
+                reason: this.inferCloseReason(snapshot, resolvedClosePrice, reason),
+                candles: {
+                    m5: latestM5,
+                    m15: closeSnapshot.m15Candle,
+                    h1: closeSnapshot.h1Candle,
+                },
+                profit: this.buildProfitSummary(snapshot, resolvedClosePrice),
+                meta: {
+                    source,
+                },
+            };
+
+            recordTradeClose(dealId, closeRecord);
+            logger.info(`[TradeLog] Recorded close for ${snapshot.symbol} (${dealId}) via ${closeRecord.reason || "UNKNOWN"}`);
+        } catch (error) {
+            logger.error(`[TradeLog] Failed to finalize trade ${dealId}:`, error);
+        } finally {
+            this.pendingClosures.delete(dealId);
+            this.tradeSnapshots.delete(dealId);
+        }
+    }
+
+    async handleDetectedClosedTrade(meta = {}) {
+        const dealId = meta?.dealId;
+        if (!dealId) return;
+        if (!this.tradeSnapshots.has(dealId) || this.pendingClosures.has(dealId)) {
+            return;
+        }
+        await this.finalizeTrade(dealId, { source: meta?.source || "monitor_loop" });
+    }
+
+    async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
+        const pip = this.getPipSize(symbol);
+        const recommended = context?.entrySetup;
+        const { last } = recommended ?? context ?? {};
+
+        let price = recommended?.entryPrice ?? (signal === "BUY" ? ask : bid);
+        let stopLossPrice = recommended?.stopLoss;
+        let takeProfitPrice = recommended?.takeProfit;
+
+        if (stopLossPrice == null || takeProfitPrice == null) {
+            // Fallback to candle-referenced SL/TP when no recommendation is provided
+            if (!last) {
+                throw new Error("Missing candle context for parameter calculation");
+            }
+            const candleSize = Math.max(last.high - last.low, pip * 6);
+            if (signal === "BUY") {
+                stopLossPrice = last.low - pip * 2;
+                takeProfitPrice = price + candleSize * 2;
+            } else {
+                stopLossPrice = last.high + pip * 2;
+                takeProfitPrice = price - candleSize * 2;
+            }
+        } else {
+            // Guard against inverted SL/TP from context
+            const minDistance = pip * 3;
+            if (signal === "BUY") {
+                if (stopLossPrice >= price - minDistance) {
+                    stopLossPrice = price - minDistance;
+                }
+                if (takeProfitPrice <= price + minDistance) {
+                    const rr = recommended?.rr ?? 1.8;
+                    takeProfitPrice = price + Math.abs(price - stopLossPrice) * rr;
+                }
+            } else {
+                if (stopLossPrice <= price + minDistance) {
+                    stopLossPrice = price + minDistance;
+                }
+                if (takeProfitPrice >= price - minDistance) {
+                    const rr = recommended?.rr ?? 1.8;
+                    takeProfitPrice = price - Math.abs(price - stopLossPrice) * rr;
+                }
+            }
+        }
+
         const slDistance = Math.abs(price - stopLossPrice);
+        if (slDistance < pip * 3) {
+            throw new Error("Stop loss distance too tight for position sizing");
+        }
+
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
         const pipValuePerUnit = pip / price;
         const slPips = slDistance / pip;
@@ -72,12 +269,12 @@ class TradingService {
         size = Math.floor(size / 100) * 100;
         if (size < 100) size = 100;
 
+        const rrRatio = Math.abs(takeProfitPrice - price) / slDistance;
         logger.info(`[Trade Params] ${symbol} ${signal}:
             Entry: ${price}
             SL: ${stopLossPrice}
             TP: ${takeProfitPrice}
-            Body: ${body.toFixed(5)}
-            RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
+            RR: ${rrRatio.toFixed(2)}:1
             Size: ${size}
         `);
 
@@ -138,6 +335,22 @@ class TradingService {
                 logger.info(
                     `[trading.js][Order] Placed position: ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} ref=${position.dealReference}`
                 );
+                const dealId = confirmation.dealId || confirmation.dealReference || position.dealReference;
+                if (dealId) {
+                    this.registerTradeSnapshot({
+                        dealId,
+                        symbol,
+                        direction: signal?.toUpperCase(),
+                        size,
+                        entryPrice: price,
+                        stopLossPrice,
+                        takeProfitPrice,
+                        candles,
+                        context,
+                    });
+                } else {
+                    logger.warn(`[TradeLog] Missing dealId for ${symbol} ${signal}, unable to log entry.`);
+                }
             }
         } catch (error) {
             logger.error(`[trading.js][Order] Error placing trade for ${symbol}:`, error);
@@ -269,24 +482,21 @@ class TradingService {
 
     // --- Close position by dealId ---
     async closePosition(dealId, result) {
+        const metadata =
+            typeof result === "string"
+                ? { reason: result, type: result }
+                : result && typeof result === "object"
+                ? result
+                : {};
+
         try {
             await apiClosePosition(dealId);
             logger.info(`[API] Closed position for dealId: ${dealId}`);
-            // if (result) logTradeResult(dealId, result);
-            try {
-                const logPath = getCurrentTradesLogPath();
-                const closeEntry = {
-                    time: new Date().toISOString(),
-                    id: dealId,
-                    resultType: result?.type || result,
-                    closePrice: result?.closePrice || null,
-                    profitPips: result?.profitPips || null,
-                };
-                fs.appendFileSync(logPath, JSON.stringify(closeEntry) + "\n");
-                logger.info(`[TradeLog] Logged closed trade result for ${dealId}: ${result?.type || result}`);
-            } catch (err) {
-                logger.error("[TradeLog] Failed to log trade result:", err);
-            }
+            await this.finalizeTrade(dealId, {
+                reason: metadata.type || metadata.reason,
+                closePrice: metadata.closePrice,
+                source: metadata.source || "manual_close",
+            });
         } catch (error) {
             logger.error(`[trading.js][API] Failed to close position for dealId: ${dealId}`, error);
         }

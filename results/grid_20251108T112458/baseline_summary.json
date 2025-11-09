@@ -1,0 +1,473 @@
+{
+  "runId": "grid_20251108T112458",
+  "config": "baseline",
+  "overall": {
+    "trades": 284,
+    "wins": 105,
+    "losses": 179,
+    "winRate": 36.97,
+    "profitFactor": 0.98,
+    "expectancy": -0.01,
+    "avgR": -0.01,
+    "maxDrawdown": {
+      "absolute": 39.56,
+      "percent": 133.21
+    },
+    "sharpe": -0.15,
+    "medianMAE": 8,
+    "medianMFE": 8.24,
+    "softExitSaveRate": 100,
+    "sessionDistribution": {
+      "asia": 88,
+      "london": 135,
+      "new_york": 61
+    },
+    "hourDistribution": {
+      "0": 8,
+      "1": 14,
+      "2": 9,
+      "3": 5,
+      "4": 12,
+      "5": 10,
+      "6": 24,
+      "7": 25,
+      "8": 27,
+      "9": 15,
+      "10": 13,
+      "11": 9,
+      "12": 9,
+      "13": 21,
+      "14": 8,
+      "15": 8,
+      "16": 10,
+      "17": 14,
+      "18": 12,
+      "19": 12,
+      "20": 13,
+      "21": 2,
+      "22": 1,
+      "23": 3
+    },
+    "weekdayDistribution": {
+      "0": 1,
+      "1": 54,
+      "2": 80,
+      "3": 46,
+      "4": 36,
+      "5": 67
+    },
+    "netR": -3.23,
+    "grossProfit": 172,
+    "grossLoss": -175.23
+  },
+  "symbols": [
+    {
+      "pair": "AUDUSD",
+      "metrics": {
+        "trades": 50,
+        "wins": 18,
+        "losses": 32,
+        "winRate": 36,
+        "profitFactor": 1.06,
+        "expectancy": 0.04,
+        "avgR": 0.04,
+        "maxDrawdown": {
+          "absolute": 19.44,
+          "percent": 359.91
+        },
+        "sharpe": 0.19,
+        "medianMAE": 4.81,
+        "medianMFE": 4.34,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "asia": 20,
+          "london": 23,
+          "new_york": 7
+        },
+        "hourDistribution": {
+          "0": 3,
+          "1": 4,
+          "2": 5,
+          "3": 2,
+          "4": 3,
+          "5": 1,
+          "6": 2,
+          "7": 3,
+          "8": 2,
+          "9": 2,
+          "10": 4,
+          "11": 5,
+          "13": 6,
+          "15": 1,
+          "16": 2,
+          "17": 2,
+          "18": 1,
+          "19": 1,
+          "20": 1
+        },
+        "weekdayDistribution": {
+          "1": 9,
+          "2": 14,
+          "3": 7,
+          "4": 11,
+          "5": 9
+        },
+        "netR": 1.8,
+        "grossProfit": 32.4,
+        "grossLoss": -30.6
+      }
+    },
+    {
+      "pair": "EURJPY",
+      "metrics": {
+        "trades": 31,
+        "wins": 17,
+        "losses": 14,
+        "winRate": 54.84,
+        "profitFactor": 1.95,
+        "expectancy": 0.43,
+        "avgR": 0.43,
+        "maxDrawdown": {
+          "absolute": 6,
+          "percent": 333.33
+        },
+        "sharpe": 1.75,
+        "medianMAE": 9.8,
+        "medianMFE": 15.8,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "asia": 8,
+          "london": 8,
+          "new_york": 15
+        },
+        "hourDistribution": {
+          "4": 1,
+          "5": 2,
+          "6": 4,
+          "7": 2,
+          "8": 2,
+          "13": 3,
+          "15": 1,
+          "16": 1,
+          "17": 4,
+          "18": 1,
+          "19": 6,
+          "20": 3,
+          "23": 1
+        },
+        "weekdayDistribution": {
+          "0": 1,
+          "1": 2,
+          "2": 12,
+          "3": 1,
+          "5": 15
+        },
+        "netR": 13.33,
+        "grossProfit": 27.33,
+        "grossLoss": -14
+      }
+    },
+    {
+      "pair": "EURUSD",
+      "metrics": {
+        "trades": 41,
+        "wins": 17,
+        "losses": 24,
+        "winRate": 41.46,
+        "profitFactor": 1.28,
+        "expectancy": 0.16,
+        "avgR": 0.16,
+        "maxDrawdown": {
+          "absolute": 12.6,
+          "percent": 0
+        },
+        "sharpe": 0.74,
+        "medianMAE": 9.1,
+        "medianMFE": 14.7,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "london": 24,
+          "new_york": 1,
+          "asia": 16
+        },
+        "hourDistribution": {
+          "0": 3,
+          "1": 3,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 7,
+          "7": 5,
+          "8": 7,
+          "9": 5,
+          "10": 2,
+          "12": 1,
+          "13": 2,
+          "14": 2,
+          "16": 1
+        },
+        "weekdayDistribution": {
+          "1": 16,
+          "2": 12,
+          "3": 4,
+          "4": 9
+        },
+        "netR": 6.6,
+        "grossProfit": 30.6,
+        "grossLoss": -24
+      }
+    },
+    {
+      "pair": "GBPJPY",
+      "metrics": {
+        "trades": 41,
+        "wins": 17,
+        "losses": 24,
+        "winRate": 41.46,
+        "profitFactor": 1.26,
+        "expectancy": 0.15,
+        "avgR": 0.15,
+        "maxDrawdown": {
+          "absolute": 7.2,
+          "percent": 0
+        },
+        "sharpe": 0.71,
+        "medianMAE": 12.4,
+        "medianMFE": 10.8,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "london": 19,
+          "new_york": 12,
+          "asia": 10
+        },
+        "hourDistribution": {
+          "1": 3,
+          "2": 1,
+          "4": 1,
+          "5": 4,
+          "6": 1,
+          "7": 3,
+          "8": 7,
+          "9": 2,
+          "10": 1,
+          "12": 3,
+          "15": 3,
+          "16": 2,
+          "18": 3,
+          "19": 3,
+          "20": 4
+        },
+        "weekdayDistribution": {
+          "1": 3,
+          "2": 8,
+          "3": 4,
+          "4": 2,
+          "5": 24
+        },
+        "netR": 6.16,
+        "grossProfit": 29.41,
+        "grossLoss": -23.26
+      }
+    },
+    {
+      "pair": "GBPUSD",
+      "metrics": {
+        "trades": 40,
+        "wins": 7,
+        "losses": 33,
+        "winRate": 17.5,
+        "profitFactor": 0.39,
+        "expectancy": -0.49,
+        "avgR": -0.49,
+        "maxDrawdown": {
+          "absolute": 25.71,
+          "percent": 1428.35
+        },
+        "sharpe": -2.9,
+        "medianMAE": 9.35,
+        "medianMFE": 8.05,
+        "softExitSaveRate": 100,
+        "sessionDistribution": {
+          "asia": 12,
+          "london": 22,
+          "new_york": 6
+        },
+        "hourDistribution": {
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 3,
+          "5": 1,
+          "6": 3,
+          "7": 4,
+          "8": 7,
+          "9": 3,
+          "10": 2,
+          "11": 2,
+          "12": 2,
+          "14": 2,
+          "16": 2,
+          "17": 2,
+          "18": 1,
+          "20": 1,
+          "23": 2
+        },
+        "weekdayDistribution": {
+          "1": 15,
+          "2": 14,
+          "3": 8,
+          "4": 2,
+          "5": 1
+        },
+        "netR": -19.71,
+        "grossProfit": 12.6,
+        "grossLoss": -32.31
+      }
+    },
+    {
+      "pair": "NZDUSD",
+      "metrics": {
+        "trades": 50,
+        "wins": 17,
+        "losses": 33,
+        "winRate": 34,
+        "profitFactor": 0.66,
+        "expectancy": -0.22,
+        "avgR": -0.22,
+        "maxDrawdown": {
+          "absolute": 16.37,
+          "percent": 0
+        },
+        "sharpe": -1.37,
+        "medianMAE": 5.9,
+        "medianMFE": 5.22,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "new_york": 13,
+          "asia": 16,
+          "london": 21
+        },
+        "hourDistribution": {
+          "1": 3,
+          "3": 1,
+          "4": 3,
+          "6": 6,
+          "7": 5,
+          "8": 1,
+          "9": 3,
+          "10": 2,
+          "11": 2,
+          "12": 2,
+          "13": 6,
+          "17": 6,
+          "18": 3,
+          "19": 2,
+          "20": 2,
+          "21": 2,
+          "22": 1
+        },
+        "weekdayDistribution": {
+          "1": 6,
+          "2": 12,
+          "3": 10,
+          "4": 7,
+          "5": 15
+        },
+        "netR": -11.05,
+        "grossProfit": 21.02,
+        "grossLoss": -32.07
+      }
+    },
+    {
+      "pair": "USDCAD",
+      "metrics": {
+        "trades": 8,
+        "wins": 1,
+        "losses": 7,
+        "winRate": 12.5,
+        "profitFactor": 0.26,
+        "expectancy": -0.65,
+        "avgR": -0.65,
+        "maxDrawdown": {
+          "absolute": 7,
+          "percent": 0
+        },
+        "sharpe": -1.86,
+        "medianMAE": 11.15,
+        "medianMFE": 3.15,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "asia": 2,
+          "london": 5,
+          "new_york": 1
+        },
+        "hourDistribution": {
+          "5": 1,
+          "6": 1,
+          "12": 1,
+          "13": 1,
+          "14": 2,
+          "15": 1,
+          "20": 1
+        },
+        "weekdayDistribution": {
+          "1": 2,
+          "2": 2,
+          "3": 2,
+          "4": 2
+        },
+        "netR": -5.2,
+        "grossProfit": 1.8,
+        "grossLoss": -7
+      }
+    },
+    {
+      "pair": "USDJPY",
+      "metrics": {
+        "trades": 23,
+        "wins": 11,
+        "losses": 12,
+        "winRate": 47.83,
+        "profitFactor": 1.4,
+        "expectancy": 0.21,
+        "avgR": 0.21,
+        "maxDrawdown": {
+          "absolute": 5,
+          "percent": 81.68
+        },
+        "sharpe": 0.74,
+        "medianMAE": 15.2,
+        "medianMFE": 11.6,
+        "softExitSaveRate": null,
+        "sessionDistribution": {
+          "london": 13,
+          "new_york": 6,
+          "asia": 4
+        },
+        "hourDistribution": {
+          "0": 2,
+          "2": 2,
+          "7": 3,
+          "8": 1,
+          "10": 2,
+          "13": 3,
+          "14": 2,
+          "15": 2,
+          "16": 2,
+          "18": 3,
+          "20": 1
+        },
+        "weekdayDistribution": {
+          "1": 1,
+          "2": 6,
+          "3": 10,
+          "4": 3,
+          "5": 3
+        },
+        "netR": 4.83,
+        "grossProfit": 16.83,
+        "grossLoss": -12
+      }
+    }
+  ]
+}

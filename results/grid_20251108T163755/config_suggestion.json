@@ -1,0 +1,159 @@
+{
+  "runId": "grid_20251108T163755",
+  "generatedAt": "2025-11-08T16:38:55.388Z",
+  "defaults": {
+    "id": "trend_off__atr_off__rsi_off__soft_aggressive__rr_2",
+    "label": "trend_off | atr_off | rsi_off | soft_aggressive | rr_2",
+    "trendAlignment": false,
+    "atrGate": {
+      "mode": "off",
+      "scope": "H1",
+      "minPips": null,
+      "maxPips": null
+    },
+    "rsiGate": {
+      "mode": "off",
+      "scope": "H1",
+      "longRange": null,
+      "shortRange": null
+    },
+    "softExit": "aggressive",
+    "softExitWarmup": 1,
+    "riskReward": 2,
+    "maxCandles": 120
+  },
+  "overrides": {
+    "AUDUSD": {
+      "id": "trend_off__atr_off__rsi_band__soft_aggressive__rr_2",
+      "label": "trend_off | atr_off | rsi_band | soft_aggressive | rr_2",
+      "trendAlignment": false,
+      "atrGate": {
+        "mode": "off",
+        "scope": "H1",
+        "minPips": null,
+        "maxPips": null
+      },
+      "rsiGate": {
+        "mode": "band",
+        "scope": "M15",
+        "longRange": [
+          32,
+          55
+        ],
+        "shortRange": [
+          45,
+          68
+        ]
+      },
+      "softExit": "aggressive",
+      "softExitWarmup": 1,
+      "riskReward": 2,
+      "maxCandles": 120
+    },
+    "EURJPY": {
+      "id": "trend_off__atr_band__rsi_off__soft_aggressive__rr_1.2",
+      "label": "trend_off | atr_band | rsi_off | soft_aggressive | rr_1.2",
+      "trendAlignment": false,
+      "atrGate": {
+        "mode": "band",
+        "scope": "H1",
+        "minPips": 4,
+        "maxPips": 18
+      },
+      "rsiGate": {
+        "mode": "off",
+        "scope": "H1",
+        "longRange": null,
+        "shortRange": null
+      },
+      "softExit": "aggressive",
+      "softExitWarmup": 1,
+      "riskReward": 1.2,
+      "maxCandles": 120
+    },
+    "GBPUSD": {
+      "id": "trend_off__atr_off__rsi_off__soft_aggressive__rr_1.2",
+      "label": "trend_off | atr_off | rsi_off | soft_aggressive | rr_1.2",
+      "trendAlignment": false,
+      "atrGate": {
+        "mode": "off",
+        "scope": "H1",
+        "minPips": null,
+        "maxPips": null
+      },
+      "rsiGate": {
+        "mode": "off",
+        "scope": "H1",
+        "longRange": null,
+        "shortRange": null
+      },
+      "softExit": "aggressive",
+      "softExitWarmup": 1,
+      "riskReward": 1.2,
+      "maxCandles": 120
+    },
+    "NZDUSD": {
+      "id": "trend_off__atr_off__rsi_off__soft_aggressive__rr_1.2",
+      "label": "trend_off | atr_off | rsi_off | soft_aggressive | rr_1.2",
+      "trendAlignment": false,
+      "atrGate": {
+        "mode": "off",
+        "scope": "H1",
+        "minPips": null,
+        "maxPips": null
+      },
+      "rsiGate": {
+        "mode": "off",
+        "scope": "H1",
+        "longRange": null,
+        "shortRange": null
+      },
+      "softExit": "aggressive",
+      "softExitWarmup": 1,
+      "riskReward": 1.2,
+      "maxCandles": 120
+    },
+    "USDCAD": {
+      "id": "trend_off__atr_off__rsi_off__soft_aggressive__rr_1.5",
+      "label": "trend_off | atr_off | rsi_off | soft_aggressive | rr_1.5",
+      "trendAlignment": false,
+      "atrGate": {
+        "mode": "off",
+        "scope": "H1",
+        "minPips": null,
+        "maxPips": null
+      },
+      "rsiGate": {
+        "mode": "off",
+        "scope": "H1",
+        "longRange": null,
+        "shortRange": null
+      },
+      "softExit": "aggressive",
+      "softExitWarmup": 1,
+      "riskReward": 1.5,
+      "maxCandles": 120
+    },
+    "USDJPY": {
+      "id": "trend_off__atr_off__rsi_off__soft_off__rr_2",
+      "label": "trend_off | atr_off | rsi_off | soft_off | rr_2",
+      "trendAlignment": false,
+      "atrGate": {
+        "mode": "off",
+        "scope": "H1",
+        "minPips": null,
+        "maxPips": null
+      },
+      "rsiGate": {
+        "mode": "off",
+        "scope": "H1",
+        "longRange": null,
+        "shortRange": null
+      },
+      "softExit": "off",
+      "softExitWarmup": 2,
+      "riskReward": 2,
+      "maxCandles": 120
+    }
+  }
+}

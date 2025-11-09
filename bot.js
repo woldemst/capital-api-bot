@@ -18,7 +18,8 @@ class TradingBot {
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 200; // Rolling window size for indicators
-        this.openedPositions = {}; // Track opened positions
+        this.openedPositions = 0; // Track opened positions
+        this.livePositions = new Map();
 
         // Define allowed trading windows (UTC, Berlin time for example)
         this.allowedTradingWindows = [
@@ -277,33 +278,83 @@ class TradingBot {
         webSocketService.disconnect();
     }
 
+    normalizePositionRecord(position) {
+        const dealId = position?.position?.dealId;
+        const symbol = position?.market?.epic || position?.position?.epic || position?.market?.instrumentName;
+        if (!dealId || !symbol) return null;
+
+        return {
+            dealId,
+            symbol,
+            direction: position.position.direction,
+            size: position.position.size,
+            leverage: position.position.leverage,
+            entryPrice: position.position.level,
+            takeProfit: position.position.profitLevel,
+            stopLoss: position.position.stopLevel,
+            currentPrice: position.market?.bid ?? position.market?.offer ?? null,
+            trailingStop: position.position.trailingStop,
+            currency: position.position.currency,
+            openTime: position.position.openTime ?? position.position.createdDate ?? position.openTime ?? null,
+        };
+    }
+
+    async detectClosedTrades(currentPositions = []) {
+        const latestMap = new Map();
+        currentPositions.forEach((pos) => latestMap.set(pos.dealId, pos));
+
+        const closed = [];
+        for (const [dealId, meta] of this.livePositions.entries()) {
+            if (!latestMap.has(dealId)) {
+                closed.push(meta);
+            }
+        }
+
+        this.livePositions = latestMap;
+
+        for (const meta of closed) {
+            try {
+                await tradingService.handleDetectedClosedTrade({ ...meta, source: "monitor_loop" });
+            } catch (error) {
+                logger.error(`[Monitoring] Failed to log closed trade ${meta?.symbol || meta?.dealId}:`, error);
+            }
+        }
+    }
+
     async startMonitorOpenTrades() {
         logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
         try {
             const positions = await getOpenPositions();
-            for (const pos of positions.positions) {
-                const symbol = pos.market ? pos.market.epic : pos.position.epic;
+            const list = Array.isArray(positions?.positions) ? positions.positions : [];
+            const normalized = list.map((pos) => this.normalizePositionRecord(pos)).filter(Boolean);
 
-                // Fetch recent candles for the symbol (e.g. M15)
-                const m15Data = await getHistorical(symbol, "MINUTE_15", 50);
+            this.openedPositions = normalized.length;
+            await this.detectClosedTrades(normalized);
+
+            for (const positionData of normalized) {
+                const m15Data = await getHistorical(positionData.symbol, "MINUTE_15", 50);
+                if (!m15Data?.prices?.length) {
+                    logger.warn(`[Monitoring] Missing M15 data for ${positionData.symbol}, skipping trailing stop update.`);
+                    continue;
+                }
                 const indicators = await calcIndicators(m15Data.prices);
 
-                const positionData = {
-                    symbol,
-                    dealId: pos.position.dealId,
-                    currency: pos.position.currency,
-                    direction: pos.position.direction,
-                    size: pos.position.size,
-                    leverage: pos.position.leverage,
-                    entryPrice: pos.position.level,
-                    takeProfit: pos.position.profitLevel,
-                    stopLoss: pos.position.stopLevel,
-                    currentPrice: pos.market.bid,
-                    trailingStop: pos.position.trailingStop,
-                };
-
-                // Pass indicators to trailing stop logic
-                await tradingService.updateTrailingStopIfNeeded(positionData, indicators);
+                await tradingService.updateTrailingStopIfNeeded(
+                    {
+                        symbol: positionData.symbol,
+                        dealId: positionData.dealId,
+                        currency: positionData.currency,
+                        direction: positionData.direction,
+                        size: positionData.size,
+                        leverage: positionData.leverage,
+                        entryPrice: positionData.entryPrice,
+                        takeProfit: positionData.takeProfit,
+                        stopLoss: positionData.stopLoss,
+                        currentPrice: positionData.currentPrice,
+                        trailingStop: positionData.trailingStop,
+                    },
+                    indicators
+                );
             }
         } catch (error) {
             logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
