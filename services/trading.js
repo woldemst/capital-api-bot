@@ -52,16 +52,16 @@ class TradingService {
         let stopLossPrice, takeProfitPrice;
 
         if (signal === "BUY") {
-            stopLossPrice = last.low - pip * 3; // just below the signal candle
+            stopLossPrice = last.low - pip * 2; // just below the signal candle
             takeProfitPrice = price + candleSize * 2; // realistic small goal
         } else {
-            stopLossPrice = last.high + pip * 3; // just above the signal candle
+            stopLossPrice = last.high + pip * 2; // just above the signal candle
             takeProfitPrice = price - candleSize * 2; // small goal
         }
 
         // Round prices properly
-        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
+        // stopLossPrice = this.roundPrice(stopLossPrice, symbol);
+        // takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
         // --- Risk management ---
         const slDistance = Math.abs(price - stopLossPrice);

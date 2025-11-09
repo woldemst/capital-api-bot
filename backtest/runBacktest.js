@@ -1,44 +1,66 @@
 import fs from "fs";
-import path from "path";
 import readline from "readline";
-import { fileURLToPath } from "url";
-import Strategy from "../strategies/strategies.js";
+import path from "path";
 import logger from "../utils/logger.js";
 import Strategy from "../strategies/strategies.js";
 import { calcIndicators } from "../indicators.js";
+import tradingService from "../services/trading.js";
 
 const pair = process.env.PAIR || "AUDUSD";
 const inputFile = process.env.INPUT || `./analysis/${pair}_combined.jsonl`;
 const outputFile = process.env.OUTPUT || `./results/${pair}_backtest_results.jsonl`;
-
-import tradingService from "../services/trading.js";
+const profitableFile = process.env.PROFITABLE || `./results/${pair}_profitable.jsonl`;
+const summaryFile = process.env.SUMMARY || `./results/${pair}_backtest_summary.json`;
 
 const MAX_BUF = 200;
 const MIN_BARS = 60;
+const LOOKAHEAD_CANDLES = 120;
 
-let m5Buffer = [];
-let m15Buffer = [];
-let h1Buffer = [];
-let h4Buffer = [];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const ensureDir = (filePath) => {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+};
 
-// --- Simulate trade result: check if SL or TP is hit first in future candles ---
-function simulateTradeResult(m5Buffer, entryIdx, params, signal) {
-    // m5Buffer: array of candles (each with open, high, low, close, timestamp)
-    // entryIdx: index of entry candle in buffer
-    // params: { price, stopLossPrice, takeProfitPrice }
-    // signal: "BUY" or "SELL"
-    // Returns: { outcome: "WIN"|"LOSS", hitTime }
+function pushUnique(buffer, candle) {
+    if (!candle || !candle.timestamp) {
+        return false;
+    }
+    const last = buffer[buffer.length - 1];
+    if (last && last.timestamp === candle.timestamp) {
+        return false;
+    }
+    buffer.push(candle);
+    if (buffer.length > MAX_BUF) buffer.shift();
+    return true;
+}
+
+function buildUniqueM5Series(allLines, startIdx, limit = LOOKAHEAD_CANDLES + 1) {
+    const series = [];
+    let lastTs = null;
+    for (let i = startIdx; i < allLines.length; i++) {
+        const candle = allLines[i]?.M5;
+        if (!candle || !candle.timestamp) continue;
+        if (candle.timestamp === lastTs) continue;
+        series.push(candle);
+        lastTs = candle.timestamp;
+        if (series.length >= limit) break;
+    }
+    return series;
+}
+
+function simulateTradeResult(m5Series, entryIdx, params, signal) {
     const { price, stopLossPrice, takeProfitPrice } = params;
-    // Look ahead after entry candle
-    for (let i = entryIdx + 1; i < m5Buffer.length; i++) {
-        const candle = m5Buffer[i];
+    for (let i = entryIdx + 1; i < m5Series.length; i++) {
+        const candle = m5Series[i];
         if (!candle) continue;
-        const high = candle.high;
-        const low = candle.low;
+        const { high, low } = candle;
         if (signal === "BUY") {
-            // TP hit if high >= TP, SL hit if low <= SL
             if (low <= stopLossPrice && high >= takeProfitPrice) {
-                // both hit in same candle: assume SL first (conservative)
                 return { outcome: "LOSS", hitTime: candle.timestamp };
             }
             if (high >= takeProfitPrice) {
@@ -48,9 +70,7 @@ function simulateTradeResult(m5Buffer, entryIdx, params, signal) {
                 return { outcome: "LOSS", hitTime: candle.timestamp };
             }
         } else if (signal === "SELL") {
-            // TP hit if low <= TP, SL hit if high >= SL
             if (high >= stopLossPrice && low <= takeProfitPrice) {
-                // both hit: SL first
                 return { outcome: "LOSS", hitTime: candle.timestamp };
             }
             if (low <= takeProfitPrice) {
@@ -61,250 +81,283 @@ function simulateTradeResult(m5Buffer, entryIdx, params, signal) {
             }
         }
     }
-    // If neither hit in lookahead, treat as "open" or "LOSS" (conservative: loss)
     return { outcome: "LOSS", hitTime: null };
 }
 
-const fileStream = fs.createReadStream(inputFile);
-const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
-const startTime = new Date();
-let wins = 0,
-    losses = 0,
-    totalDuration = 0;
-const profitableFile = `./results/${pair}_profitable.jsonl`;
-const profitableStream = fs.createWriteStream(profitableFile, { flags: "w" });
-
-let total = 0;
-let signals = 0;
-let balance = 1000;
-tradingService.setAccountBalance(balance);
-const results = [];
-let allLines = [];
-
-// --- Preload all candles for lookahead ---
-for await (const line of rl) {
-    if (!line.trim()) continue;
-    let data;
-    try {
-        const data = JSON.parse(line);
-        allLines.push(data);
-        if (data.M5) {
-            m5Buffer.push(data.M5);
-            if (m5Buffer.length > MAX_BUF) m5Buffer.shift();
+function calculateMaxDrawdown(equityCurve) {
+    let peak = equityCurve[0] ?? 0;
+    let maxDrop = 0;
+    for (const value of equityCurve) {
+        if (value > peak) {
+            peak = value;
+            continue;
         }
-        if (data.M15) {
-            m15Buffer.push(data.M15);
-            if (m15Buffer.length > MAX_BUF) m15Buffer.shift();
-        }
-        if (data.H1) {
-            h1Buffer.push(data.H1);
-            if (h1Buffer.length > MAX_BUF) h1Buffer.shift();
-        }
-        if (data.H4) {
-            h4Buffer.push(data.H4);
-            if (h4Buffer.length > MAX_BUF) h4Buffer.shift();
-        }
-    } catch (err) {
-        logger.error(`[Backtest] Failed to parse line for ${pair}: ${err.message}`);
-        continue;
+        const drop = peak - value;
+        if (drop > maxDrop) maxDrop = drop;
     }
-
-    if (data.M5) {
-        m5Buffer.push(data.M5);
-        if (m5Buffer.length > M5_BUFFER_SIZE) {
-            m5Buffer.shift();
-        }
-    }
-
-    const indicators = { m1: data.M1, m5: data.M5, m15: data.M15, h1: data.H1, h4: data.H4 };
-    const candles = {
-        m5Candles: m5Buffer.slice(),
-        m15Candles: [data.M15].filter(Boolean),
-        h1Candles: [data.H1].filter(Boolean),
-        m1Candles: [data.M1].filter(Boolean),
-    };
-
-    const decision = Strategy.getSignal({ symbol: pair, indicators, candles }) || { signal: null, reason: "no_decision" };
-    const indicatorSnapshot = buildIndicatorSnapshot(indicators);
-    const timestamp = getTimestamp(data);
-    const tookTrade = Boolean(decision.signal);
-    const context = decision.context && !decision.context.trend ? decision.context : undefined;
-    const trendContext = decision.context?.trend;
-
-    const decisionRecord = {
-        time: timestamp,
-        tookTrade,
-        signal: decision.signal,
-        reason: decision.reason,
-        trend: trendContext,
-        indicators: indicatorSnapshot,
-        ...(context ? { context } : {}),
-    };
-
-    decisionStream.write(JSON.stringify(decisionRecord) + "\n");
-
-    stats.processed += 1;
-
-    if (tookTrade) {
-        stats.signals += 1;
-        if (stats.signalBreakdown[decision.signal] != null) {
-            stats.signalBreakdown[decision.signal] += 1;
-        }
-
-        Object.entries(FEATURE_SELECTORS).forEach(([key, selector]) => {
-            const value = selector(indicatorSnapshot);
-            recordFeature(stats.featureStats, key, value);
-        });
-
-        signalStream.write(
-            JSON.stringify({
-                time: timestamp,
-                signal: decision.signal,
-                reason: decision.reason,
-                indicators: indicatorSnapshot,
-                ...(context ? { context } : {}),
-            }) + "\n"
-        );
-    } else {
-        const reasonKey = decision.reason || "unknown";
-        stats.rejectionReasons[reasonKey] = (stats.rejectionReasons[reasonKey] || 0) + 1;
-    }
+    const peakValue = Math.max(...equityCurve);
+    const ddPct = peakValue ? (maxDrop / peakValue) * 100 : 0;
+    return { absolute: maxDrop, percent: ddPct };
 }
 
-// Clear buffers for processing loop
-m5Buffer = [];
-m15Buffer = [];
-h1Buffer = [];
-h4Buffer = [];
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+async function runBacktest() {
+    ensureDir(outputFile);
+    ensureDir(profitableFile);
+    ensureDir(summaryFile);
 
-for (let idx = 0; idx < allLines.length; idx++) {
-    const data = allLines[idx];
-    if (data.M5) {
-        m5Buffer.push(data.M5);
-        if (m5Buffer.length > MAX_BUF) m5Buffer.shift();
-    }
-    if (data.M15) {
-        m15Buffer.push(data.M15);
-        if (m15Buffer.length > MAX_BUF) m15Buffer.shift();
-    }
-    if (data.H1) {
-        h1Buffer.push(data.H1);
-        if (h1Buffer.length > MAX_BUF) h1Buffer.shift();
-    }
-    if (data.H4) {
-        h4Buffer.push(data.H4);
-        if (h4Buffer.length > MAX_BUF) h4Buffer.shift();
+    const fileStream = fs.createReadStream(inputFile);
+    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+
+    const allLines = [];
+    for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+            allLines.push(JSON.parse(line));
+        } catch (err) {
+            logger.error(`[Backtest] Failed to parse JSON: ${err.message}`);
+        }
     }
 
-    if (m5Buffer.length < MIN_BARS || m15Buffer.length < MIN_BARS || h1Buffer.length < MIN_BARS || h4Buffer.length < MIN_BARS) {
-        continue;
+    if (!allLines.length) {
+        logger.error(`[Backtest] No data loaded from ${inputFile}`);
+        return;
     }
 
-    const indicators = {
-        m1: data.M1 || null,
-        m5: await calcIndicators(m5Buffer, pair, "MINUTE_5"),
-        m15: await calcIndicators(m15Buffer, pair, "MINUTE_15"),
-        h1: await calcIndicators(h1Buffer, pair, "HOUR"),
-        h4: await calcIndicators(h4Buffer, pair, "HOUR_4"),
-    };
+    const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
+    const profitableStream = fs.createWriteStream(profitableFile, { flags: "w" });
 
-    const candles = {
-        m5Candles: m5Buffer.slice(),
-        m15Candles: m15Buffer.slice(),
-        h1Candles: h1Buffer.slice(),
-        h4Candles: h4Buffer.slice(),
-        m1Candles: data.M1 ? [data.M1] : [],
-    };
+    let m5Buffer = [];
+    let m15Buffer = [];
+    let h1Buffer = [];
+    let h4Buffer = [];
 
-    const result = Strategy.getSignal({ symbol: pair, indicators, candles });
-    total++;
+    const indicatorCache = { m5: null, m15: null, h1: null, h4: null };
 
-    if (result?.signal) {
+    const startTime = new Date();
+    let processedCandles = 0;
+    let signals = 0;
+    let wins = 0;
+    let losses = 0;
+    let totalDuration = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    let balance = 1000;
+    tradingService.setAccountBalance(balance);
+    const equityCurve = [balance];
+    const rejectionReasons = {};
+    const directionCounts = { BUY: 0, SELL: 0 };
+    const results = [];
+
+    for (let idx = 0; idx < allLines.length; idx++) {
+        const data = allLines[idx];
+
+        const m5Updated = pushUnique(m5Buffer, data.M5);
+        const m15Updated = pushUnique(m15Buffer, data.M15);
+        const h1Updated = pushUnique(h1Buffer, data.H1);
+        const h4Updated = pushUnique(h4Buffer, data.H4);
+
+        if (!m5Updated) continue;
+
+        processedCandles++;
+
+        if (
+            m5Buffer.length < MIN_BARS ||
+            m15Buffer.length < MIN_BARS ||
+            h1Buffer.length < MIN_BARS ||
+            h4Buffer.length < MIN_BARS
+        ) {
+            continue;
+        }
+
+        try {
+            if (m5Updated) indicatorCache.m5 = await calcIndicators(m5Buffer);
+            if (m15Updated || !indicatorCache.m15) indicatorCache.m15 = await calcIndicators(m15Buffer);
+            if (h1Updated || !indicatorCache.h1) indicatorCache.h1 = await calcIndicators(h1Buffer);
+            if (h4Updated || !indicatorCache.h4) indicatorCache.h4 = await calcIndicators(h4Buffer);
+        } catch (indicatorErr) {
+            logger.warn(`[Backtest] Indicator calculation failed: ${indicatorErr.message}`);
+            continue;
+        }
+
+        if (!indicatorCache.m5 || !indicatorCache.m15 || !indicatorCache.h1 || !indicatorCache.h4) {
+            continue;
+        }
+
+        const indicators = {
+            m1: data.M1 || null,
+            m5: indicatorCache.m5,
+            m15: indicatorCache.m15,
+            h1: indicatorCache.h1,
+            h4: indicatorCache.h4,
+        };
+
+        const candles = {
+            m5Candles: m5Buffer.slice(),
+            m15Candles: m15Buffer.slice(),
+            h1Candles: h1Buffer.slice(),
+            h4Candles: h4Buffer.slice(),
+            m1Candles: data.M1 ? [data.M1] : [],
+        };
+
+        const result = Strategy.getSignal({ symbol: pair, indicators, candles });
+        if (!result?.signal) {
+            const reason = result?.reason || "no_signal";
+            rejectionReasons[reason] = (rejectionReasons[reason] || 0) + 1;
+            continue;
+        }
+
+        const entryCandle = candles.m5Candles[candles.m5Candles.length - 1];
+        if (!entryCandle?.timestamp) {
+            rejectionReasons["missing_entry_timestamp"] = (rejectionReasons["missing_entry_timestamp"] || 0) + 1;
+            continue;
+        }
+
         signals++;
-        const entryIdx = m5Buffer.findIndex((c) => c.timestamp === data.M5.timestamp);
-        if (entryIdx === -1) continue;
-        const bid = data.M5.close;
-        const ask = data.M5.close;
-        const params = await tradingService.calculateTradeParameters(result.signal, pair, bid, ask, candles, result.context);
-        if (!params) continue;
-        const lookahead = 100;
-        const m5LookaheadBuffer = m5Buffer.slice(entryIdx, entryIdx + lookahead + 1);
-        const simResult = simulateTradeResult(m5LookaheadBuffer, 0, params, result.signal);
+        directionCounts[result.signal] = (directionCounts[result.signal] || 0) + 1;
+
+        const bid = entryCandle.close;
+        const ask = entryCandle.close;
+
+        let params;
+        try {
+            params = await tradingService.calculateTradeParameters(
+                result.signal,
+                pair,
+                bid,
+                ask,
+                candles,
+                result.context
+            );
+        } catch (calcErr) {
+            logger.error(`[Backtest] Failed to calculate trade params: ${calcErr.message}`);
+            continue;
+        }
+
+        if (!params) {
+            rejectionReasons["param_calc_failed"] = (rejectionReasons["param_calc_failed"] || 0) + 1;
+            continue;
+        }
+
+        const futureSeries = buildUniqueM5Series(allLines, idx, LOOKAHEAD_CANDLES + 1);
+        if (futureSeries.length < 2) {
+            rejectionReasons["insufficient_lookahead"] = (rejectionReasons["insufficient_lookahead"] || 0) + 1;
+            continue;
+        }
+
+        const simResult = simulateTradeResult(futureSeries, 0, params, result.signal);
+
+        const slDistance = Math.abs(params.price - params.stopLossPrice);
+        const tpDistance = Math.abs(params.takeProfitPrice - params.price);
+        const rr = slDistance > 0 ? tpDistance / slDistance : 0;
         const risk = balance * tradingService.maxRiskPerTrade;
+        const reward = risk * rr;
+
         if (simResult.outcome === "WIN") {
-            balance += risk * 2;
+            balance += reward;
+            grossProfit += reward;
+            wins++;
         } else {
             balance -= risk;
+            grossLoss += risk;
+            losses++;
         }
+
+        balance = Number(balance.toFixed(2));
         tradingService.setAccountBalance(balance);
+        equityCurve.push(balance);
+
         const tradeResult = {
-            time: data.M5.timestamp,
+            time: entryCandle.timestamp,
             signal: result.signal,
             entry: params.price,
             SL: params.stopLossPrice,
             TP: params.takeProfitPrice,
+            rr: Number(rr.toFixed(2)),
+            risk,
+            reward,
             outcome: simResult.outcome,
             exitTime: simResult.hitTime,
             balance,
         };
 
-        if (simResult.hitTime && data.M5?.timestamp) {
-            const durationMin = (new Date(simResult.hitTime) - new Date(data.M5.timestamp)) / 60000;
-            tradeResult.durationMin = durationMin;
-            totalDuration += durationMin;
+        if (simResult.hitTime) {
+            const durationMin = (new Date(simResult.hitTime) - new Date(entryCandle.timestamp)) / 60000;
+            if (!Number.isNaN(durationMin)) {
+                tradeResult.durationMin = durationMin;
+                if (simResult.outcome === "WIN") {
+                    totalDuration += durationMin;
+                }
+            }
         }
 
-        // Optional M1 stop loss check
-        const m1Candles = data.M1Candles || data.M1 || [];
-        const slHitOnM1 = Array.isArray(m1Candles)
-            ? m1Candles.some((c) => (result.signal === "BUY" && c.low <= params.stopLossPrice) || (result.signal === "SELL" && c.high >= params.stopLossPrice))
-            : false;
-        if (slHitOnM1 && simResult.outcome === "WIN") simResult.outcome = "LOSS";
-
         if (simResult.outcome === "WIN") {
-            wins++;
             profitableStream.write(JSON.stringify(tradeResult) + "\n");
-        } else {
-            losses++;
         }
 
         results.push(tradeResult);
         outputStream.write(JSON.stringify(tradeResult) + "\n");
     }
+
+    outputStream.end();
+    profitableStream.end();
+
+    const endTime = new Date();
+    const avgDuration = wins ? totalDuration / wins : 0;
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : null;
+    const drawdown = calculateMaxDrawdown(equityCurve);
+
+    const summary = {
+        pair,
+        processedCandles,
+        signals,
+        wins,
+        losses,
+        winRate: signals ? (wins / signals) * 100 : 0,
+        riskPerTrade: tradingService.maxRiskPerTrade,
+        finalBalance: balance,
+        grossProfit: Number(grossProfit.toFixed(2)),
+        grossLoss: Number(grossLoss.toFixed(2)),
+        profitFactor: profitFactor != null ? Number(profitFactor.toFixed(2)) : null,
+        avgHoldMinutes: Number(avgDuration.toFixed(2)),
+        maxDrawdown: {
+            absolute: Number(drawdown.absolute.toFixed(2)),
+            percent: Number(drawdown.percent.toFixed(2)),
+        },
+        rejections: rejectionReasons,
+        directions: directionCounts,
+        files: {
+            trades: outputFile,
+            profitable: profitableFile,
+        },
+        startedAt: startTime.toISOString(),
+        finishedAt: endTime.toISOString(),
+        equitySamples: equityCurve.length,
+    };
+
+    fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+
+    console.log(`✅ Backtest finished for ${pair}`);
+    console.log(`Processed (unique M5): ${processedCandles}`);
+    console.log(`Signals generated: ${signals}`);
+    console.log(`Saved results to: ${outputFile}`);
+
+    console.log(`\n=== ${pair} BACKTEST SUMMARY ===`);
+    console.log(`Start: ${startTime.toISOString()}`);
+    console.log(`End: ${endTime.toISOString()}`);
+    console.log(`Signals: ${signals}`);
+    console.log(`Profitable: ${wins}`);
+    console.log(`Unprofitable: ${losses}`);
+    console.log(`Win Rate: ${summary.winRate.toFixed(2)}%`);
+    console.log(`Avg Hold: ${summary.avgHoldMinutes.toFixed(2)} min`);
+    console.log(`Profit Factor: ${summary.profitFactor ?? "N/A"}`);
+    console.log(
+        `Max Drawdown: ${summary.maxDrawdown.absolute.toFixed(2)} (${summary.maxDrawdown.percent.toFixed(2)}%)`
+    );
+    console.log(`Profitable trades saved to: ${profitableFile}`);
+    console.log(`Summary saved to: ${summaryFile}`);
 }
 
-outputStream.end();
-profitableStream.end();
-const endTime = new Date();
-const avgDuration = wins ? totalDuration / wins : 0;
-
-// --- Additional summary metrics ---
-const grossProfit = wins * (balance * tradingService.maxRiskPerTrade * 2);
-const grossLoss = losses * (balance * tradingService.maxRiskPerTrade);
-const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : "N/A";
-// Placeholder for max drawdown (not tracked here, would need equity curve)
-const maxDrawdown = "N/A";
-
-console.log(`✅ Backtest finished for ${pair}`);
-console.log(`Processed: ${total} candles`);
-console.log(`Signals generated: ${signals}`);
-console.log(`Saved results to: ${outputFile}`);
-
-console.log(`\n=== ${pair} BACKTEST SUMMARY ===`);
-console.log(`Start: ${startTime.toISOString()}`);
-console.log(`End: ${endTime.toISOString()}`);
-console.log(`Signals: ${signals}`);
-console.log(`Profitable: ${wins}`);
-console.log(`Unprofitable: ${losses}`);
-console.log(`Win Rate: ${((wins / (signals || 1)) * 100).toFixed(2)}%`);
-console.log(`Avg Hold: ${avgDuration.toFixed(2)} min`);
-console.log(`Profit Factor: ${profitFactor}`);
-console.log(`Max Drawdown: ${maxDrawdown}`);
-console.log(`Profitable trades saved to: ${profitableFile}`);
-
-runBacktests().catch((err) => {
-    logger.error(`[Backtest] Failed: ${err.stack || err.message}`);
-    process.exitCode = 1;
-});
+runBacktest();
