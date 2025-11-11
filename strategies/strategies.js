@@ -1,9 +1,7 @@
-import logger from "../utils/logger.js";
-
 class Strategy {
     constructor() {}
 
-    trendFrom = (fast, slow, minGap = 0) => {
+    trendFrom = (fast, slow, minGap = 0.1 * Math.abs(slow)) => {
         if (fast == null || slow == null) return "neutral";
         const diff = fast - slow;
         if (diff > minGap) return "bullish";
@@ -17,12 +15,10 @@ class Strategy {
         return this.trendFrom(fastVal, slowVal);
     }
 
-    // --- Main signal with H1 filter ---
     getSignal = ({ symbol, indicators, candles }) => {
         const { m5, m15, h1 } = indicators || {};
         const m5Candles = candles?.m5Candles || [];
 
-        // Use last two CLOSED M5 candles
         const prev = m5Candles[m5Candles.length - 2];
         const last = m5Candles[m5Candles.length - 1];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
@@ -35,20 +31,36 @@ class Strategy {
             return { signal: null, reason: "tf_misaligned", context: { m5Trend, m15Trend } };
         }
 
-        // allow trades when H1 is neutral or aligned
         if (h1Trend !== "neutral" && h1Trend !== m5Trend && h1Trend !== m15Trend) {
             return { signal: null, reason: "h1_filter_blocked", context: { h1Trend } };
         }
 
-        // Entry pattern on M5 (using closed candles only)
         const pattern = this.greenRedCandlePattern(m5Trend, prev, last);
-        if (!pattern) return { signal: null, reason: "no_pattern" };
+        const engulfing = this.engulfingPattern(prev, last);
+        const pinBar = this.pinBarPattern(last);
 
-        const decision = pattern === "bullish" ? "BUY" : "SELL";
+        const finalPattern = [pattern, engulfing, pinBar].find((p) => p === m5Trend);
+        if (!finalPattern) return { signal: null, reason: "no_valid_pattern", context: { pattern, engulfing, pinBar } };
+
+        // Optional: Volume filter
+        if (last.volume != null && prev.volume != null && last.volume < prev.volume * 0.8) {
+            return { signal: null, reason: "low_volume" };
+        }
+
+        const decision = m5Trend === "bullish" ? "BUY" : "SELL";
         return {
             signal: decision,
             reason: "pattern+tf_alignment",
-            context: { prev, last },
+            context: {
+                m5Trend,
+                m15Trend,
+                h1Trend,
+                pattern,
+                engulfing,
+                pinBar,
+                prev,
+                last,
+            },
         };
     };
 
@@ -59,41 +71,23 @@ class Strategy {
 
         const bodySize = Math.abs(last.close - last.open);
         const range = last.high - last.low;
-        const minBodyRatio = 0.3; // require body ≥ 30% of total range
+        const minBodyRatio = 0.3;
 
         const trendDirection = String(trend).toLowerCase();
-
-        // Only strong candle in direction of trend counts
         const strongCandle = range > 0 && bodySize / range >= minBodyRatio;
 
-        if (isBearish(prev) && isBullish(last) && trendDirection === "bullish" && strongCandle) {
-            return "bullish";
-        }
-
-        if (isBullish(prev) && isBearish(last) && trendDirection === "bearish" && strongCandle) {
-            return "bearish";
-        }
+        if (isBearish(prev) && isBullish(last) && trendDirection === "bullish" && strongCandle) return "bullish";
+        if (isBullish(prev) && isBearish(last) && trendDirection === "bearish" && strongCandle) return "bearish";
 
         return false;
     }
 
     engulfingPattern(prev, last) {
-        const getOpen = (c) => c.open;
-        const getClose = (c) => c.close;
-
         if (!prev || !last) return null;
 
-        const prevOpen = getOpen(prev);
-        const prevClose = getClose(prev);
+        if (last.close > last.open && prev.close < prev.open && last.close > prev.open && last.open < prev.close) return "bullish";
 
-        const lastOpen = getOpen(last);
-        const lastClose = getClose(last);
-
-        // Bullish engulfing
-        if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) return "bullish";
-
-        // Bearish engulfing
-        if (lastClose < lastOpen && prevClose > prevOpen && lastClose < prevOpen && lastOpen > prevClose) return "bearish";
+        if (last.close < last.open && prev.close > prev.open && last.close < prev.open && last.open > prev.close) return "bearish";
 
         return null;
     }
@@ -109,10 +103,7 @@ class Strategy {
         const upperWick = high - Math.max(open, close);
         const lowerWick = Math.min(open, close) - low;
 
-        // Bullish pin bar: long lower wick (≥2× body)
         if (lowerWick > body * 2) return "bullish";
-
-        // Bearish pin bar: long upper wick (≥2× body)
         if (upperWick > body * 2) return "bearish";
 
         return null;
