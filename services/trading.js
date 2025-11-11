@@ -39,47 +39,53 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask, candles, context) {
+    async calculateTradeParameters(signal, symbol, bid, ask, context) {
         const price = signal === "BUY" ? ask : bid;
-        const { last } = context; // signal candle
+        const { last } = context;
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
 
-        // Candle properties
-        const body = Math.abs(last.close - last.open);
+        // Candle characteristics
         const candleSize = last.high - last.low;
+        const spread = Math.abs(ask - bid);
+        const bufferPips = 2;
+        const buffer = bufferPips * pip;
 
-        // Define TP/SL relative to signal candle
+        // --- Dynamic SL buffer: 25% candle size + spread + buffer ---
+        const slBuffer = candleSize * 0.25 + spread + buffer;
+
         let stopLossPrice, takeProfitPrice;
 
         if (signal === "BUY") {
-            stopLossPrice = last.low - pip * 2; // just below the signal candle
-            takeProfitPrice = price + candleSize * 2; // realistic small goal
+            stopLossPrice = last.low - slBuffer;
+            const rr = 1.5;
+            takeProfitPrice = price + (price - stopLossPrice) * rr;
         } else {
-            stopLossPrice = last.high + pip * 2; // just above the signal candle
-            takeProfitPrice = price - candleSize * 2; // small goal
+            stopLossPrice = last.high + slBuffer;
+            const rr = 1.5;
+            takeProfitPrice = price - (stopLossPrice - price) * rr;
         }
 
-        // Round prices properly
-        // stopLossPrice = this.roundPrice(stopLossPrice, symbol);
-        // takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
-
-        // --- Risk management ---
+        // Risk management
         const slDistance = Math.abs(price - stopLossPrice);
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
+
+        // pip value per unit (simplified spot FX model)
         const pipValuePerUnit = pip / price;
         const slPips = slDistance / pip;
+
         let size = riskAmount / (slPips * pipValuePerUnit);
         size = Math.floor(size / 100) * 100;
         if (size < 100) size = 100;
 
         logger.info(`[Trade Params] ${symbol} ${signal}:
-            Entry: ${price}
-            SL: ${stopLossPrice}
-            TP: ${takeProfitPrice}
-            Body: ${body.toFixed(5)}
-            RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
-            Size: ${size}
-        `);
+        Entry: ${price}
+        SL: ${stopLossPrice}
+        TP: ${takeProfitPrice}
+        CandleSize: ${candleSize}
+        Spread: ${spread}
+        RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
+        Size: ${size}
+    `);
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
@@ -121,7 +127,7 @@ class TradingService {
             return;
         }
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, candles, context);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context);
             // const { SL, TP } = await this.validateTPandSL(symbol, signal, price, stopLossPrice, takeProfitPrice);
             const position = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
