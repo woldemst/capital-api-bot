@@ -39,9 +39,8 @@ class Strategy {
         const engulfing = this.engulfingPattern(prev, last);
         const pinBar = this.pinBarPattern(last);
 
-        const finalPattern = [pattern, engulfing, pinBar].find((p) => p === m5Trend);
-        if (!finalPattern) return { signal: null, reason: "no_valid_pattern", context: { pattern, engulfing, pinBar } };
-
+        const finalPattern = pattern || engulfing || pinBar;
+        if (finalPattern !== m5Trend) return { signal: null, reason: "pattern_mismatch" };
         // Optional: Volume filter
         if (last.volume != null && prev.volume != null && last.volume < prev.volume * 0.8) {
             return { signal: null, reason: "low_volume" };

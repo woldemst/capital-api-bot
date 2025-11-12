@@ -78,14 +78,14 @@ class TradingService {
         if (size < 100) size = 100;
 
         logger.info(`[Trade Params] ${symbol} ${signal}:
-        Entry: ${price}
-        SL: ${stopLossPrice}
-        TP: ${takeProfitPrice}
-        CandleSize: ${candleSize}
-        Spread: ${spread}
-        RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
-        Size: ${size}
-    `);
+            Entry: ${price}
+            SL: ${stopLossPrice}
+            TP: ${takeProfitPrice}
+            CandleSize: ${candleSize}
+            Spread: ${spread}
+            RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
+            Size: ${size}
+        `);
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
