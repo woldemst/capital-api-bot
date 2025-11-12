@@ -1,0 +1,339 @@
+{
+  "pair": "EURJPY",
+  "summary": {
+    "tradesAnalyzed": 132,
+    "closureReasons": {
+      "take_profit_hit": 28,
+      "stop_loss_hit": 78,
+      "soft_exit_timeout": 26
+    },
+    "missedTrades": {
+      "h1_filter_blocked": 328,
+      "tf_misaligned": 1544,
+      "h4_filter_blocked": 760,
+      "pattern_mismatch": 227
+    },
+    "higherTimeframeInsights": {
+      "h1": {
+        "trades": 132,
+        "fullAlignmentWinRate": 21.71
+      },
+      "h4": {
+        "partialWinRate": 0,
+        "divergentShare": 0
+      },
+      "filteredReasons": {
+        "tf_misaligned": 1544,
+        "h1_filter_blocked": 328
+      }
+    }
+  },
+  "strategyWeaknesses": [
+    {
+      "issue": "Stops are hit before price reaches targets",
+      "evidence": "75.0% of losses triggered at stop_loss",
+      "interpretation": "SL buffer may be too tight for EURJPY volatility or entries occur after exhaustion."
+    },
+    {
+      "issue": "Trades frequently stall without reaching TP",
+      "evidence": "25.0% of losses exit via soft timeout",
+      "interpretation": "Entry timing or RR may not match pair's structure."
+    }
+  ],
+  "missedTradeReasons": [
+    {
+      "reason": "h1_filter_blocked",
+      "count": 328
+    },
+    {
+      "reason": "tf_misaligned",
+      "count": 1544
+    },
+    {
+      "reason": "h4_filter_blocked",
+      "count": 760
+    },
+    {
+      "reason": "pattern_mismatch",
+      "count": 227
+    }
+  ],
+  "missedTradeSamples": {
+    "h1_filter_blocked": [
+      {
+        "time": "2025-09-26T05:00:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "h1Trend": "bullish",
+          "rationale": "trend_bullish"
+        }
+      },
+      {
+        "time": "2025-09-26T05:05:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "h1Trend": "bullish",
+          "rationale": "trend_bullish"
+        }
+      },
+      {
+        "time": "2025-09-26T05:10:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "h1Trend": "bullish",
+          "rationale": "trend_bullish"
+        }
+      },
+      {
+        "time": "2025-09-26T05:15:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "h1Trend": "bullish",
+          "rationale": "trend_bullish"
+        }
+      },
+      {
+        "time": "2025-09-26T05:20:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "h1Trend": "bullish",
+          "rationale": "trend_bullish"
+        }
+      }
+    ],
+    "tf_misaligned": [
+      {
+        "time": "2025-09-26T05:30:00.000Z",
+        "m5Trend": "neutral",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "m5Trend": "neutral",
+          "m15Trend": "neutral"
+        }
+      },
+      {
+        "time": "2025-09-26T05:35:00.000Z",
+        "m5Trend": "neutral",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "m5Trend": "neutral",
+          "m15Trend": "neutral"
+        }
+      },
+      {
+        "time": "2025-09-26T05:40:00.000Z",
+        "m5Trend": "neutral",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "m5Trend": "neutral",
+          "m15Trend": "neutral"
+        }
+      },
+      {
+        "time": "2025-09-26T05:45:00.000Z",
+        "m5Trend": "neutral",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "m5Trend": "neutral",
+          "m15Trend": "neutral"
+        }
+      },
+      {
+        "time": "2025-09-26T05:50:00.000Z",
+        "m5Trend": "neutral",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "neutral",
+        "details": {
+          "m5Trend": "neutral",
+          "m15Trend": "neutral"
+        }
+      }
+    ],
+    "h4_filter_blocked": [
+      {
+        "time": "2025-09-26T09:15:00.000Z",
+        "m5Trend": "bullish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "bearish",
+        "details": {
+          "h4Trend": "bearish",
+          "rationale": "trend_bearish"
+        }
+      },
+      {
+        "time": "2025-09-26T09:20:00.000Z",
+        "m5Trend": "bullish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "bearish",
+        "details": {
+          "h4Trend": "bearish",
+          "rationale": "trend_bearish"
+        }
+      },
+      {
+        "time": "2025-09-26T09:25:00.000Z",
+        "m5Trend": "bullish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "bearish",
+        "details": {
+          "h4Trend": "bearish",
+          "rationale": "trend_bearish"
+        }
+      },
+      {
+        "time": "2025-09-26T09:30:00.000Z",
+        "m5Trend": "bullish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "bearish",
+        "details": {
+          "h4Trend": "bearish",
+          "rationale": "trend_bearish"
+        }
+      },
+      {
+        "time": "2025-09-26T09:35:00.000Z",
+        "m5Trend": "bullish",
+        "m15Trend": "neutral",
+        "h1Trend": "bullish",
+        "h4Trend": "bearish",
+        "details": {
+          "h4Trend": "bearish",
+          "rationale": "trend_bearish"
+        }
+      }
+    ],
+    "pattern_mismatch": [
+      {
+        "time": "2025-10-01T15:45:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "neutral",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish",
+        "details": null
+      },
+      {
+        "time": "2025-10-01T20:40:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "bearish",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish",
+        "details": null
+      },
+      {
+        "time": "2025-10-01T20:45:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "bearish",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish",
+        "details": null
+      },
+      {
+        "time": "2025-10-01T20:55:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "bearish",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish",
+        "details": null
+      },
+      {
+        "time": "2025-10-01T21:00:00.000Z",
+        "m5Trend": "bearish",
+        "m15Trend": "bearish",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish",
+        "details": null
+      }
+    ]
+  },
+  "recommendations": [
+    {
+      "timeframe": "H1/H4",
+      "suggestion": "Require EMA alignment with entry direction before allowing new trades.",
+      "rationale": "Full alignment win rate 21.7% vs 0.0% when divergent."
+    },
+    {
+      "timeframe": "M5/M15",
+      "suggestion": "Reduce EMA gap requirement for JPY pairs to avoid excessive TF misalignment rejections.",
+      "rationale": "tf_misaligned prevented 1544 setups, dominating missed signals."
+    },
+    {
+      "timeframe": "Pair-specific",
+      "suggestion": "Widen SL buffer or incorporate ATR multiplier tuned for JPY volatility.",
+      "rationale": "Stop-loss hits account for majority of losses; ATR median indicates higher noise."
+    }
+  ],
+  "higherTimeframePatterns": {
+    "profitableAlignment": {
+      "h1": {
+        "trades": 132,
+        "fullAlignmentWinRate": 21.71
+      },
+      "h4": {
+        "partialWinRate": 0,
+        "divergentShare": 0
+      },
+      "filteredReasons": {
+        "tf_misaligned": 1544,
+        "h1_filter_blocked": 328
+      }
+    },
+    "filteredSignals": {
+      "tf_misaligned": 1544,
+      "h1_filter_blocked": 328
+    }
+  },
+  "keepPairDecision": {
+    "keep": false,
+    "rationale": "Net performance negative; remove until alignment filters added."
+  },
+  "structureNotes": {
+    "totalRows": 29081,
+    "timerange": {
+      "start": "2025-09-12T08:08:00.000Z",
+      "end": "2025-10-10T21:29:00.000Z"
+    },
+    "uniqueM5": 5788,
+    "fieldsPerTimeframe": {
+      "M1": 44,
+      "M15": 44,
+      "H1": 44,
+      "H4": 44,
+      "M5": 44
+    },
+    "missingPerTimeframe": {
+      "M1": 0,
+      "M5": 2,
+      "M15": 0,
+      "H1": 0,
+      "H4": 0
+    }
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "pair": "EURJPY",
+  "dataset": {
+    "totalRows": 29081,
+    "timerange": {
+      "start": "2025-09-12T08:08:00.000Z",
+      "end": "2025-10-10T21:29:00.000Z"
+    },
+    "uniqueM5": 5788,
+    "fieldsPerTimeframe": {
+      "M1": 44,
+      "M15": 44,
+      "H1": 44,
+      "H4": 44,
+      "M5": 44
+    },
+    "missingPerTimeframe": {
+      "M1": 0,
+      "M5": 2,
+      "M15": 0,
+      "H1": 0,
+      "H4": 0
+    }
+  },
+  "performance": {
+    "trades": 132,
+    "wins": 28,
+    "losses": 104,
+    "winRate": 21.21,
+    "finalBalance": 779.33,
+    "startingBalance": 1000,
+    "grossProfit": 151.74,
+    "grossLoss": 372.43,
+    "profitFactor": 0.41,
+    "avgHoldMinutes": 32.05,
+    "closureReasons": {
+      "take_profit_hit": 28,
+      "stop_loss_hit": 78,
+      "soft_exit_timeout": 26
+    },
+    "directionSplit": {
+      "BUY": 124,
+      "SELL": 8
+    },
+    "rejectionReasons": {
+      "h1_filter_blocked": 328,
+      "tf_misaligned": 1544,
+      "h4_filter_blocked": 760,
+      "pattern_mismatch": 227
+    },
+    "patternSummary": {
+      "bearish": {
+        "trades": 8,
+        "winRate": 25
+      },
+      "bullish": {
+        "trades": 124,
+        "winRate": 20.97
+      }
+    },
+    "higherTimeframeAlignment": {
+      "full": {
+        "trades": 129,
+        "wins": 28,
+        "winRate": 21.71
+      },
+      "partial": {
+        "trades": 3,
+        "wins": 0,
+        "winRate": 0
+      },
+      "divergent": {
+        "trades": 0,
+        "wins": 0,
+        "winRate": 0
+      }
+    },
+    "maxDrawdown": {
+      "absolute": 232.7,
+      "percent": 22.99
+    },
+    "volatility": {
+      "m5Atr": {
+        "samples": 132,
+        "average": 0.0972,
+        "min": 0.0369,
+        "max": 0.2611
+      },
+      "m15Atr": {
+        "samples": 132,
+        "average": 0.1824,
+        "min": 0.1008,
+        "max": 0.3767
+      },
+      "h1Atr": {
+        "samples": 132,
+        "average": 0.6341,
+        "min": 0.246,
+        "max": 1.1899
+      },
+      "h4Atr": {
+        "samples": 132,
+        "average": 1.2318,
+        "min": 0.4839,
+        "max": 1.4271
+      },
+      "entryRange": {
+        "samples": 132,
+        "average": 0.0774,
+        "min": 0.026,
+        "max": 0.248
+      }
+    }
+  },
+  "tradeSamples": [
+    {
+      "time": "2025-10-01T20:35:00.000Z",
+      "signal": "SELL",
+      "outcome": "WIN",
+      "reason": "take_profit_hit",
+      "rr": 1.5,
+      "durationMin": 20
+    },
+    {
+      "time": "2025-10-01T20:50:00.000Z",
+      "signal": "SELL",
+      "outcome": "WIN",
+      "reason": "take_profit_hit",
+      "rr": 1.5,
+      "durationMin": 15
+    },
+    {
+      "time": "2025-10-01T21:20:00.000Z",
+      "signal": "SELL",
+      "outcome": "LOSS",
+      "reason": "stop_loss_hit",
+      "rr": 1.5,
+      "durationMin": 40
+    },
+    {
+      "time": "2025-10-01T21:25:00.000Z",
+      "signal": "SELL",
+      "outcome": "LOSS",
+      "reason": "soft_exit_timeout",
+      "rr": 1.5,
+      "durationMin": 60
+    },
+    {
+      "time": "2025-10-01T21:30:00.000Z",
+      "signal": "SELL",
+      "outcome": "LOSS",
+      "reason": "soft_exit_timeout",
+      "rr": 1.5,
+      "durationMin": 60
+    }
+  ],
+  "notableTrades": {
+    "best": {
+      "time": "2025-10-01T20:50:00.000Z",
+      "signal": "SELL",
+      "entry": 172.513,
+      "entryHigh": 172.53799,
+      "entryLow": 172.50301,
+      "stopLoss": 172.577,
+      "takeProfit": 172.417,
+      "rr": 1.5,
+      "risk": 4.02,
+      "reward": 6.03,
+      "outcome": "WIN",
+      "exitReason": "take_profit_hit",
+      "exitTime": "2025-10-01T21:05:00.000Z",
+      "durationMin": 15,
+      "entryTrends": {
+        "m5Trend": "bearish",
+        "m15Trend": "bearish",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish"
+      },
+      "pattern": "bearish"
+    },
+    "worst": {
+      "time": "2025-10-01T21:20:00.000Z",
+      "signal": "SELL",
+      "entry": 172.423,
+      "entryHigh": 172.51199,
+      "entryLow": 172.40401,
+      "stopLoss": 172.569,
+      "takeProfit": 172.204,
+      "rr": 1.5,
+      "risk": 4.05,
+      "reward": 6.07,
+      "outcome": "LOSS",
+      "exitReason": "stop_loss_hit",
+      "exitTime": "2025-10-01T22:00:00.000Z",
+      "durationMin": 40,
+      "entryTrends": {
+        "m5Trend": "bearish",
+        "m15Trend": "bearish",
+        "h1Trend": "bearish",
+        "h4Trend": "bearish"
+      },
+      "pattern": "bearish"
+    }
+  }
+}
