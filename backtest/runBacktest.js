@@ -1,16 +1,25 @@
 import fs from "fs";
 import readline from "readline";
 import path from "path";
+import { fileURLToPath } from "url";
 import logger from "../utils/logger.js";
-import Strategy from "../strategies/strategies.js";
+import Strategy, { setPairRuleOverrides, clearPairRuleOverrides, getPairRules } from "../strategies/strategies.js";
 import { calcIndicators } from "../indicators.js";
 import tradingService from "../services/trading.js";
+import { readJsonSafe, integratePendingSuggestions, buildResultPayload, buildImprovementsPayload } from "./evolutionEngine.js";
 
 const pair = process.env.PAIR || "AUDUSD";
 const inputFile = process.env.INPUT || `./analysis/${pair}_combined.jsonl`;
 const outputFile = process.env.OUTPUT || `./results/${pair}_backtest_results.jsonl`;
 const profitableFile = process.env.PROFITABLE || `./results/${pair}_profitable.jsonl`;
 const summaryFile = process.env.SUMMARY || `./results/${pair}_backtest_summary.json`;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const defaultEvolutionDir = path.resolve(__dirname, "results");
+const evolutionDir = process.env.EVOLUTION_DIR ? path.resolve(process.env.EVOLUTION_DIR) : defaultEvolutionDir;
+const pairSlug = pair.replace(/[^\w]/g, "");
+const evolutionResultFile = path.resolve(evolutionDir, `result_${pairSlug}.json`);
+const evolutionImprovementFile = path.resolve(evolutionDir, `improvements_${pairSlug}.json`);
 
 const MAX_BUF = 200;
 const MIN_BARS = 60;
@@ -61,28 +70,65 @@ function simulateTradeResult(m5Series, entryIdx, params, signal) {
         const { high, low } = candle;
         if (signal === "BUY") {
             if (low <= stopLossPrice && high >= takeProfitPrice) {
-                return { outcome: "LOSS", hitTime: candle.timestamp };
+                return { outcome: "LOSS", hitTime: candle.timestamp, exitReason: "sl_hit" };
             }
             if (high >= takeProfitPrice) {
-                return { outcome: "WIN", hitTime: candle.timestamp };
+                return { outcome: "WIN", hitTime: candle.timestamp, exitReason: "tp_hit" };
             }
             if (low <= stopLossPrice) {
-                return { outcome: "LOSS", hitTime: candle.timestamp };
+                return { outcome: "LOSS", hitTime: candle.timestamp, exitReason: "sl_hit" };
             }
         } else if (signal === "SELL") {
             if (high >= stopLossPrice && low <= takeProfitPrice) {
-                return { outcome: "LOSS", hitTime: candle.timestamp };
+                return { outcome: "LOSS", hitTime: candle.timestamp, exitReason: "sl_hit" };
             }
             if (low <= takeProfitPrice) {
-                return { outcome: "WIN", hitTime: candle.timestamp };
+                return { outcome: "WIN", hitTime: candle.timestamp, exitReason: "tp_hit" };
             }
             if (high >= stopLossPrice) {
-                return { outcome: "LOSS", hitTime: candle.timestamp };
+                return { outcome: "LOSS", hitTime: candle.timestamp, exitReason: "sl_hit" };
             }
         }
     }
-    return { outcome: "LOSS", hitTime: null };
+    return { outcome: "LOSS", hitTime: null, exitReason: "soft_exit" };
 }
+
+function classifyAlignment(context = {}, decision = "") {
+    const desired =
+        context.m5Trend ||
+        (decision === "BUY" ? "bullish" : decision === "SELL" ? "bearish" : null);
+
+    if (!desired) {
+        return {
+            type: "unknown",
+            desired: null,
+            matches: 0,
+            context: { m15: context.m15Trend, h1: context.h1Trend, h4: context.h4Trend },
+        };
+    }
+
+    const matches = ["m15Trend", "h1Trend", "h4Trend"].reduce((acc, key) => (context[key] === desired ? acc + 1 : acc), 0);
+    const type = matches === 3 ? "full" : matches >= 2 ? "partial" : "divergent";
+
+    return {
+        type,
+        desired,
+        matches,
+        context: {
+            m5: desired,
+            m15: context.m15Trend,
+            h1: context.h1Trend,
+            h4: context.h4Trend,
+        },
+    };
+}
+
+const getPatternLabel = (context = {}) => {
+    if (context.pattern) return "momentum_flip";
+    if (context.engulfing) return "engulfing";
+    if (context.pinBar) return "pin_bar";
+    return "none";
+};
 
 function calculateMaxDrawdown(equityCurve) {
     let peak = equityCurve[0] ?? 0;
@@ -107,6 +153,26 @@ async function runBacktest() {
     ensureDir(outputFile);
     ensureDir(profitableFile);
     ensureDir(summaryFile);
+    ensureDir(evolutionResultFile);
+    ensureDir(evolutionImprovementFile);
+
+    const previousResult = readJsonSafe(evolutionResultFile);
+    const previousImprovementsRaw = readJsonSafe(evolutionImprovementFile);
+    const { overrides: suggestionOverrides, snapshot: previousImprovements, integrationLog } = integratePendingSuggestions(previousImprovementsRaw);
+
+    if (suggestionOverrides && Object.keys(suggestionOverrides).length) {
+        setPairRuleOverrides(pair, suggestionOverrides);
+        logger.info(
+            `[Backtest] Applied ${Object.keys(suggestionOverrides).length} suggestion override block(s) from improvements for ${pair}`
+        );
+    }
+
+    const iterationNumber = previousResult ? (previousResult.iteration ?? 0) + 1 : 1;
+    const hasHistory = Boolean(previousResult && previousImprovementsRaw);
+    const iterationLabel = hasHistory ? `iteration ${iterationNumber}` : "first-generation";
+    logger.info(`[Backtest] Starting ${iterationLabel} run for ${pair}`);
+    console.log(`\n--- PHASE 1: ${hasHistory ? "Analysis of previous generation" : "Genesis run"} ---`);
+    const improvementsBaseline = previousImprovements || previousImprovementsRaw;
 
     const fileStream = fs.createReadStream(inputFile);
     const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
@@ -125,6 +191,8 @@ async function runBacktest() {
         logger.error(`[Backtest] No data loaded from ${inputFile}`);
         return;
     }
+
+    console.log("\n--- PHASE 2: Backtest execution ---");
 
     const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
     const profitableStream = fs.createWriteStream(profitableFile, { flags: "w" });
@@ -223,14 +291,10 @@ async function runBacktest() {
 
         let params;
         try {
-            params = await tradingService.calculateTradeParameters(
-                result.signal,
-                pair,
-                bid,
-                ask,
-                candles,
-                result.context
-            );
+            params = await tradingService.calculateTradeParameters(result.signal, pair, bid, ask, {
+                last: entryCandle,
+                indicators,
+            });
         } catch (calcErr) {
             logger.error(`[Backtest] Failed to calculate trade params: ${calcErr.message}`);
             continue;
@@ -248,12 +312,17 @@ async function runBacktest() {
         }
 
         const simResult = simulateTradeResult(futureSeries, 0, params, result.signal);
+        const signalContext = result.context || {};
+        const alignmentMeta = classifyAlignment(signalContext, result.signal);
+        const patternLabel = getPatternLabel(signalContext);
+        const exitReason = simResult.exitReason || (simResult.outcome === "WIN" ? "tp_hit" : "sl_hit");
 
         const slDistance = Math.abs(params.price - params.stopLossPrice);
         const tpDistance = Math.abs(params.takeProfitPrice - params.price);
         const rr = slDistance > 0 ? tpDistance / slDistance : 0;
         const risk = balance * tradingService.maxRiskPerTrade;
         const reward = risk * rr;
+        const pnl = simResult.outcome === "WIN" ? reward : -risk;
 
         if (simResult.outcome === "WIN") {
             balance += reward;
@@ -279,8 +348,21 @@ async function runBacktest() {
             risk,
             reward,
             outcome: simResult.outcome,
+            exitReason,
             exitTime: simResult.hitTime,
             balance,
+            pnl: Number(pnl.toFixed(2)),
+            patternLabel,
+            alignment: alignmentMeta,
+            atr: indicators.m5?.atr ?? null,
+            h1Atr: indicators.h1?.atr ?? null,
+            entryReason: result.reason || "pattern+tf_alignment",
+            signalContext: {
+                m5Trend: signalContext.m5Trend ?? null,
+                m15Trend: signalContext.m15Trend ?? null,
+                h1Trend: signalContext.h1Trend ?? null,
+                h4Trend: signalContext.h4Trend ?? null,
+            },
         };
 
         if (simResult.hitTime) {
@@ -331,6 +413,9 @@ async function runBacktest() {
         files: {
             trades: outputFile,
             profitable: profitableFile,
+            summary: summaryFile,
+            evolutionResult: evolutionResultFile,
+            improvements: evolutionImprovementFile,
         },
         startedAt: startTime.toISOString(),
         finishedAt: endTime.toISOString(),
@@ -338,6 +423,30 @@ async function runBacktest() {
     };
 
     fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+    const resultPayload = buildResultPayload({
+        pair,
+        trades: results,
+        summary,
+        equityCurve,
+        previousResult,
+        iteration: iterationNumber,
+    });
+    const activeRules = getPairRules(pair);
+    const improvementsPayload = buildImprovementsPayload({
+        pair,
+        iteration: resultPayload.iteration,
+        previousImprovements: improvementsBaseline,
+        previousResult,
+        newResult: resultPayload,
+        integrationLog,
+        activeRules,
+    });
+
+    fs.writeFileSync(evolutionResultFile, JSON.stringify(resultPayload, null, 2));
+    fs.writeFileSync(evolutionImprovementFile, JSON.stringify(improvementsPayload, null, 2));
+    console.log("\n--- PHASE 3: Evolved reporting ---");
+    console.log(`Result journal: ${evolutionResultFile}`);
+    console.log(`Improvement plan: ${evolutionImprovementFile}`);
 
     console.log(`✅ Backtest finished for ${pair}`);
     console.log(`Processed (unique M5): ${processedCandles}`);
@@ -358,6 +467,7 @@ async function runBacktest() {
     );
     console.log(`Profitable trades saved to: ${profitableFile}`);
     console.log(`Summary saved to: ${summaryFile}`);
+    clearPairRuleOverrides(pair);
 }
 
 runBacktest();

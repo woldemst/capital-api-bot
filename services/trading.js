@@ -4,7 +4,7 @@ import { placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRan
 import logger from "../utils/logger.js";
 import { getCurrentTradesLogPath } from "../utils/tradeLogger.js";
 import fs from "fs";
-import Strategy from "../strategies/strategies.js";
+import Strategy, { getPairRules } from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
 
@@ -40,18 +40,24 @@ class TradingService {
     // ============================================================
     //               ATR-Based Trade Parameters
     // ============================================================
-    async calculateTradeParameters(signal, symbol, bid, ask, context) {
+    async calculateTradeParameters(signal, symbol, bid, ask, context = {}) {
         const price = signal === "BUY" ? ask : bid;
         const { last, indicators } = context;
+        const pairRules = getPairRules(symbol);
 
-        const atr = indicators?.m5?.atr ?? 0;
         const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const baseRange = Math.abs((last?.high ?? price) - (last?.low ?? price)) || pip * (symbol.includes("JPY") ? 6 : 15);
+        const rawAtr = indicators?.m5?.atr;
+        const atr = rawAtr && Number.isFinite(rawAtr) && rawAtr > 0 ? rawAtr : baseRange;
 
-        // ------------------------------------------------------------
-        //               ATR-Based SL (main reason: 75% SL hits)
-        // ------------------------------------------------------------
-        const slDistance = atr * 1.2; // Minimum SL
-        const tpDistance = slDistance * 1.2; // 1.2R
+        const isJpy = symbol.includes("JPY");
+        const atrRules = pairRules?.atr || {};
+        const slMultiplier = atrRules.slMultiplier ?? (isJpy ? 1.4 : 1.15);
+        const tpMultiplier = atrRules.tpMultiplier ?? (isJpy ? 1.05 : 1.25);
+        const minPipDistance = pip * (symbol.includes("JPY") ? 8 : 15);
+
+        const slDistance = Math.max(atr * slMultiplier, minPipDistance);
+        const tpDistance = slDistance * tpMultiplier;
 
         let stopLossPrice, takeProfitPrice;
 
@@ -74,6 +80,8 @@ class TradingService {
         size = Math.floor(size / 100) * 100;
         if (size < 100) size = 100;
 
+        const rr = tpDistance / slDistance;
+
         logger.info(
             `[TradeParams] ${symbol} ${signal}
              Entry: ${price}
@@ -81,10 +89,11 @@ class TradingService {
              TP: ${takeProfitPrice}
              ATR: ${atr}
              SLdist(pips): ${slPips.toFixed(2)}
+             RR: ${rr.toFixed(2)}
              Size: ${size}`
         );
 
-        return { size, price, stopLossPrice, takeProfitPrice, atr };
+        return { size, price, stopLossPrice, takeProfitPrice, atr, rr, pairRules };
     }
 
     // ============================================================

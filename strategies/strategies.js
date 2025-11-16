@@ -1,3 +1,134 @@
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, "..");
+const EVOLUTION_DIR = process.env.EVOLUTION_DIR ? path.resolve(process.env.EVOLUTION_DIR) : path.resolve(repoRoot, "backtest", "results");
+
+const runtimeOverrides = new Map();
+const diskOverridesCache = new Map();
+
+const baseDefaults = () => ({
+    ema: {
+        minM15Gap: 0,
+        toleranceMultiplier: 0.6,
+        minDistanceAtrMultiplier: 1.0,
+    },
+    atr: { slMultiplier: 1.25, tpMultiplier: 1.4 },
+    session: { enabled: false, startHour: 0, endHour: 24 },
+    volatility: {},
+    sellQualification: null,
+    rr: { min: 1.0, target: 1.5, max: 2.4 },
+});
+
+const baseRulesByPair = {
+    EURJPY: () =>
+        mergeRules(baseDefaults(), {
+            ema: { minM15Gap: 0.08, toleranceMultiplier: 0.42, minDistanceAtrMultiplier: 1.4 },
+            atr: { slMultiplier: 1.55, tpMultiplier: 1.15 },
+            session: { enabled: true, startHour: 6, endHour: 20 },
+            volatility: { minH1Atr: 0.08 },
+            sellQualification: { maxH4Gap: 0.22, maxH1Slope: 0.05 },
+            rr: { min: 1.2, target: 1.45, max: 1.9 },
+        }),
+    GBPJPY: () =>
+        mergeRules(baseDefaults(), {
+            ema: { minM15Gap: 0.09, toleranceMultiplier: 0.38, minDistanceAtrMultiplier: 1.5 },
+            atr: { slMultiplier: 1.7, tpMultiplier: 1.2 },
+            session: { enabled: true, startHour: 7, endHour: 21 },
+            volatility: { minH1Atr: 0.09 },
+            sellQualification: { maxH4Gap: 0.2, maxH1Slope: 0.06 },
+            rr: { min: 1.25, target: 1.55, max: 2.0 },
+        }),
+    EURUSD: () =>
+        mergeRules(baseDefaults(), {
+            ema: { minM15Gap: 0.00025, toleranceMultiplier: 0.55, minDistanceAtrMultiplier: 0.9 },
+            atr: { slMultiplier: 1.2, tpMultiplier: 1.6 },
+            session: { enabled: true, startHour: 7, endHour: 22 },
+            volatility: { minH1Atr: 0.00018 },
+            rr: { min: 1.1, target: 1.8, max: 2.5 },
+        }),
+};
+
+function mergeRules(...layers) {
+    return layers.reduce((acc, layer) => deepMerge(acc, layer), {});
+}
+
+function deepMerge(target = {}, source = {}) {
+    const output = { ...target };
+    if (!source || typeof source !== "object") return output;
+    for (const [key, value] of Object.entries(source)) {
+        if (Array.isArray(value)) {
+            output[key] = value.slice();
+        } else if (value && typeof value === "object") {
+            output[key] = deepMerge(output[key] || {}, value);
+        } else if (value !== undefined) {
+            output[key] = value;
+        }
+    }
+    return output;
+}
+
+function getBaseRules(symbol = "") {
+    const upper = (symbol || "").toUpperCase();
+    return (baseRulesByPair[upper] || baseDefaults)();
+}
+
+function getPairSlug(symbol = "") {
+    return (symbol || "default").replace(/[^\w]/g, "").toUpperCase();
+}
+
+function loadDiskOverrides(symbol = "") {
+    const slug = getPairSlug(symbol);
+    const cached = diskOverridesCache.get(slug);
+    const filePath = path.join(EVOLUTION_DIR, `improvements_${slug}.json`);
+
+    if (!fs.existsSync(filePath)) {
+        diskOverridesCache.set(slug, { overrides: null, mtime: null });
+        return null;
+    }
+
+    try {
+        const stats = fs.statSync(filePath);
+        if (cached && cached.mtime === stats.mtimeMs) {
+            return cached.overrides;
+        }
+        const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+        const overrides = raw?.rules ?? null;
+        diskOverridesCache.set(slug, { overrides, mtime: stats.mtimeMs });
+        return overrides;
+    } catch (error) {
+        return cached?.overrides ?? null;
+    }
+}
+
+export function setPairRuleOverrides(symbol, overrides = {}) {
+    if (!symbol) return;
+    const slug = getPairSlug(symbol);
+    const existing = runtimeOverrides.get(slug);
+    runtimeOverrides.set(slug, mergeRules(existing ?? {}, overrides ?? {}));
+}
+
+export function clearPairRuleOverrides(symbol) {
+    if (!symbol) {
+        runtimeOverrides.clear();
+        return;
+    }
+    runtimeOverrides.delete(getPairSlug(symbol));
+}
+
+export function getPairRules(symbol = "") {
+    const slug = getPairSlug(symbol);
+    const base = mergeRules(getBaseRules(symbol));
+    const disk = loadDiskOverrides(symbol);
+    const runtime = runtimeOverrides.get(slug);
+
+    return mergeRules(base, disk, runtime);
+}
+
 class Strategy {
     constructor() {}
 
@@ -81,11 +212,32 @@ class Strategy {
     getSignal = ({ symbol, indicators, candles }) => {
         const { m5, m15, h1, h4 } = indicators || {};
         const atr = m5?.atr ?? 0;
+        const pairRules = getPairRules(symbol);
 
         const m5Candles = candles?.m5Candles || [];
         const prev = m5Candles[m5Candles.length - 2];
         const last = m5Candles[m5Candles.length - 1];
         if (!prev || !last) return { signal: null, reason: "no_candle_data" };
+
+        const activeTimestamp = m5?.timestamp || last?.timestamp || prev?.timestamp;
+        if (pairRules.session?.enabled && activeTimestamp) {
+            const hour = new Date(activeTimestamp).getUTCHours();
+            const { startHour = 0, endHour = 24 } = pairRules.session;
+            if (hour < startHour || hour >= endHour) {
+                return {
+                    signal: null,
+                    reason: "session_blocked",
+                    context: { hour, window: `${startHour}-${endHour}` },
+                };
+            }
+        }
+        if (pairRules.volatility?.minH1Atr && (h1?.atr ?? 0) < pairRules.volatility.minH1Atr) {
+            return {
+                signal: null,
+                reason: "volatility_blocked",
+                context: { h1Atr: h1?.atr ?? null, min: pairRules.volatility.minH1Atr },
+            };
+        }
 
         // --- Trend detection ---
         const m5Trend = this.pickTrend(m5, { symbol, timeframe: "M5", atr });
@@ -95,10 +247,23 @@ class Strategy {
 
         const desired = m5Trend;
 
+        const requiredGap = pairRules.ema?.minM15Gap ?? 0;
+        if (requiredGap) {
+            const m15Gap = Math.abs((m15?.ema20 ?? 0) - (m15?.ema50 ?? 0));
+            if (m15Gap < requiredGap) {
+                return {
+                    signal: null,
+                    reason: "m15_gap_insufficient",
+                    context: { m15Gap, requiredGap },
+                };
+            }
+        }
+
         // ------------------------------------------------------------
         //                1. M15 Alignment (ATR-based)
         // ------------------------------------------------------------
-        const tolerance = atr * 0.6;
+        const toleranceMultiplier = pairRules.ema?.toleranceMultiplier ?? 0.6;
+        const tolerance = atr * toleranceMultiplier;
 
         const m15Aligned =
             desired === m15Trend || (m15Trend === "neutral" && this.slopeSupports(m15, desired, "M15", symbol)) || Math.abs(m5.ema20 - m15.ema20) < tolerance;
@@ -128,8 +293,13 @@ class Strategy {
         //      3. Avoid late entries → Minimum distance to EMA50
         // ------------------------------------------------------------
         const emaDistance = Math.abs(last.close - (m5?.ema50 ?? last.close));
-        if (emaDistance < atr * 1.0) {
-            return { signal: null, reason: "too_close_to_ema50" };
+        const emaDistanceMultiplier = pairRules.ema?.minDistanceAtrMultiplier ?? 1.0;
+        if (emaDistance < atr * emaDistanceMultiplier) {
+            return {
+                signal: null,
+                reason: "too_close_to_ema50",
+                context: { emaDistance, minDistance: atr * emaDistanceMultiplier },
+            };
         }
 
         // ------------------------------------------------------------
@@ -150,6 +320,19 @@ class Strategy {
         }
 
         const decision = desired === "bullish" ? "BUY" : "SELL";
+
+        if (decision === "SELL" && pairRules.sellQualification) {
+            const h4Gap = (h4?.ema20 ?? 0) - (h4?.ema50 ?? 0);
+            const h1Slope = h1?.ema20Slope ?? (h1?.ema20 != null && h1?.ema20Prev != null ? h1.ema20 - h1.ema20Prev : 0);
+            const { maxH4Gap, maxH1Slope } = pairRules.sellQualification;
+            if ((maxH4Gap != null && h4Gap > maxH4Gap) || (maxH1Slope != null && h1Slope > maxH1Slope)) {
+                return {
+                    signal: null,
+                    reason: "sell_filter_blocked",
+                    context: { h4Gap, h1Slope, thresholds: pairRules.sellQualification },
+                };
+            }
+        }
 
         return {
             signal: decision,
