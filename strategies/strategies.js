@@ -1,5 +1,3 @@
-
-
 class Strategy {
     constructor() {}
     // ------------------------------------------------------------
@@ -8,115 +6,38 @@ class Strategy {
     getSignal = ({ symbol, indicators, candles, bid, ask }) => {
         const { m5, m15, h1, h4 } = indicators || {};
 
-        // Execution timeframe = M5 (as in original script: suggested chart timeframe 5m)
-        const m5Candles = candles?.m5Candles || [];
-        const prev = m5Candles[m5Candles.length - 2];
-        const last = m5Candles[m5Candles.length - 1];
+        // --- Basic sanity checks ---
+        if (!m15 || !h1) return { signal: null, reason: "missing_tf_indicators" };
 
-        if (!prev || !last) {
-            return { signal: null, reason: "no_candle_data" };
-        }
+        // --- Multi-timeframe trends ---
+        const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+        const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
+        // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
 
-        // Need higher TF indicators
-        if (!m5 || !m15 || !h1 || !h4) {
-            return { signal: null, reason: "missing_tf_indicators" };
-        }
+        // --- Check alignment between higher timeframes ---
+        const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
+        if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
 
-        // --- Helpers ---
-        const safeClose = (c) => c?.close ?? c?.Close ?? c?.closePrice?.bid ?? null;
-        const pip = symbol && symbol.includes("JPY") ? 0.01 : 0.0001;
+        // --- Candle data ---
+        const prev = candles.m5Candles[candles.m5Candles.length - 3];
+        const last = candles.m5Candles[candles.m5Candles.length - 2];
+        if (!prev || !last) return { signal: null, reason: "no_candle_data" };
 
-        // In the original script: tf1=D, tf2=H4, tf3=H1 on a 5m chart.
-        // Here we approximate with: tf1 = H4, tf2 = H1, tf3 = M15 (we don't fetch D1 in analyzeSymbol).
-        const isAboveCenter = (frame) =>
-            frame && typeof frame.lastClose === "number" && typeof frame.ema50 === "number"
-                ? frame.lastClose > frame.ema50
-                : false;
+        // --- Pattern recognition ---
+        const pattern = this.greenRedCandlePattern(m5Trend, prev, last) || this.pinBarPattern(last);
+        if (!pattern) return { signal: null, reason: "no_pattern" };
 
-        const isBelowCenter = (frame) =>
-            frame && typeof frame.lastClose === "number" && typeof frame.ema50 === "number"
-                ? frame.lastClose < frame.ema50
-                : false;
+        // --- Candle body strength check ---
+        const body = Math.abs(last.close - last.open);
+        const avgBody = Math.abs(prev.close - prev.open);
+        if (body < avgBody * 0.8) return { signal: null, reason: "weak_candle" };
 
-        const ltf1 = isAboveCenter(h4);
-        const ltf2 = isAboveCenter(h1);
-        const ltf3 = isAboveCenter(m15);
+        // --- Combine all signals ---
+        if (pattern === "bullish" && alignedTrend) return { signal: "BUY", reason: "pattern_trend_alignment", context: { prev, last } };
 
-        const stf1 = isBelowCenter(h4);
-        const stf2 = isBelowCenter(h1);
-        const stf3 = isBelowCenter(m15);
+        if (pattern === "bearish" && alignedTrend) return { signal: "SELL", reason: "pattern_trend_alignment", context: { prev, last } };
 
-        const longAligned = ltf1 && ltf2 && ltf3;
-        const shortAligned = stf1 && stf2 && stf3;
-
-        // Center EMA on execution timeframe (Pine: ctfsrc = ema(src, lengthCenter))
-        const centerEma = typeof m5.ema50 === "number" ? m5.ema50 : null;
-        const prevCenterEma = typeof m5.ema50Prev === "number" ? m5.ema50Prev : centerEma;
-
-        if (centerEma == null) {
-            return { signal: null, reason: "no_center_ema" };
-        }
-
-        const lastClose = safeClose(last);
-        const prevClose = safeClose(prev);
-
-        if (lastClose == null || prevClose == null) {
-            return { signal: null, reason: "invalid_closes" };
-        }
-
-        // inrange(ctfsrc) => center EMA inside current candle's range
-        const inRangeCenter = centerEma >= last.low && centerEma <= last.high;
-
-        // cross(src, ctfsrc) approximate: price crosses center EMA between prev and last
-        const crossedCenter =
-            (prevClose < prevCenterEma && lastClose > centerEma) ||
-            (prevClose > prevCenterEma && lastClose < centerEma);
-
-        // src == ctfsrc in float world → treat as "close enough", say within 0.1 pip
-        const touchesCenter = Math.abs(lastClose - centerEma) <= pip * 0.1;
-
-        const longSetup = longAligned && (touchesCenter || crossedCenter || inRangeCenter);
-        const shortSetup = shortAligned && (touchesCenter || crossedCenter || inRangeCenter);
-
-        let signal = null;
-        let reason = "no_setup";
-
-        if (longSetup && !shortSetup) {
-            signal = "BUY";
-            reason = "pipcollector_long";
-        } else if (shortSetup && !longSetup) {
-            signal = "SELL";
-            reason = "pipcollector_short";
-        }
-
-        return {
-            signal,
-            reason,
-            context: {
-                symbol,
-                pip,
-                tfAlignment: {
-                    longAligned,
-                    shortAligned,
-                    ltf1,
-                    ltf2,
-                    ltf3,
-                    stf1,
-                    stf2,
-                    stf3,
-                },
-                centerEma,
-                prevCenterEma,
-                lastClose,
-                prevClose,
-                inRangeCenter,
-                crossedCenter,
-                touchesCenter,
-                last,
-                prev,
-                timeframe: "M5",
-            },
-        };
+        return { signal: null, reason: "no_signal" };
     };
 
     // ------------------------------------------------------------

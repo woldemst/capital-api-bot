@@ -1,5 +1,4 @@
 
-
 // BackQuant Fourier For Loop indicator ported from Pine Script to JavaScript
 // Original idea: "Fourier For Loop [BackQuant]" (TradingView Pine Script v5)
 
