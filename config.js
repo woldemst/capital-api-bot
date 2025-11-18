@@ -50,9 +50,7 @@ export const RISK = {
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
-    REQUIRED_SCORE: 4, // Must have total score or more
-    REQUIRED_PRIMARY_SCORE: 1, // Must have at least 3 primary conditions
-    REQUIRED_SECONDARY_SCORE: 1, // Must have total score of 4 or more
+    REQUIRED_SCORE: 3, // Must have total score or more
 };
 
 // Technical Analysis Configuration
@@ -91,18 +89,22 @@ export const ANALYSIS = {
         START_DATE: "2024-01-01",
         END_DATE: "2025-12-31",
     },
-};
 
-export const HISTORY = {
-    D1_BARS: 50, // For EMA50 calculation
-    H4_BARS: 50, // For EMA50 calculation
-    H1_BARS: 50, // For EMA21 and RSI
+    RANGE_FILTER: {
+        ENABLED: true,
+        // Minimum ATR as a percentage of price (e.g. 0.0005 ≈ 0.05%)
+        MIN_ATR_PCT: 0.0005,
+        // Minimum Bollinger Band width as a percentage of price
+        MIN_BB_WIDTH_PCT: 0.0007,
+        // Minimum EMA distance (fast vs slow) as a percentage of price
+        MIN_EMA_DIST_PCT: 0.0003,
+    },
 };
 
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 15 seconds between analyses
-    MODE: true,
+    MODE: false,
 };
 
 // export const PROD = {
