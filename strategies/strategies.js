@@ -6,7 +6,7 @@ class Strategy {
     //                      MAIN SIGNAL LOGIC
     // ------------------------------------------------------------
     getSignal = ({ symbol, indicators, candles, bid, ask }) => {
-        const { m5, m15, h1, h4 } = indicators || {};
+        const {m5, m15, h1, h4 } = indicators || {};
 
         // --- Basic sanity checks ---
         if (!m5 || !m15 || !h1) return { signal: null, reason: "missing_tf_indicators" };
@@ -14,9 +14,9 @@ class Strategy {
         const price = (bid + ask) / 2;
 
         // --- Range filter check ---
-        if (!this.passesRangeFilter(m15, price, ANALYSIS.RANGE_FILTER)) {
-            return { signal: null, reason: "range_filter_block" };
-        }
+        // if (!this.passesRangeFilter(m15, price, ANALYSIS.RANGE_FILTER)) {
+        //     return { signal: null, reason: "range_filter_block" };
+        // }
 
         // --- Multi-TF condition scoring ---
         const buyConditions = this.generateBuyConditions(h4, h1, m15, price);
@@ -28,7 +28,7 @@ class Strategy {
         // --- Multi-timeframe trends ---
         const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
         const m5Trend = m5.ema20 > m5.ema50 ? "bullish" : m5.ema20 < m5.ema50 ? "bearish" : "neutral";
-        const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
+        // const m1Trend = m1.ema20 > m1.ema50 ? "bullish" : m1.ema20 < m1.ema50 ? "bearish" : "neutral";
 
         // --- Check alignment between higher timeframes ---
         const alignedTrend = m15Trend === m5Trend && (m15Trend === "bullish" || m15Trend === "bearish");
@@ -47,7 +47,7 @@ class Strategy {
         // --- Candle body strength check ---
         const body = Math.abs(last.close - last.open);
         const avgBody = Math.abs(prev.close - prev.open);
-        if (body < avgBody * 0.8) {
+        if (body < avgBody * 0.5) {
             return { signal: null, reason: "weak_candle" };
         }
         // --- Combine all signals ---
