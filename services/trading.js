@@ -1,5 +1,7 @@
 import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
+import logger from "../utils/logger.js";
+
 const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
 
 const RSI_CONFIG = {
@@ -22,6 +24,9 @@ class TradingService {
 
   setAccountBalance(balance) {
     this.accountBalance = balance;
+  }
+  setAvailableMargin(m) {
+    this.availableMargin = m;
   }
   setOpenTrades(trades) {
     this.openTrades = trades;
@@ -52,15 +57,6 @@ class TradingService {
     return true;
   }
 
-  logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-    // console.log(`\n=== Analyzing ${symbol} ===`);
-    // console.log("Current price:", { bid, ask });
-    // console.log("[H4] EMA Fast:", h4Indicators.emaFast, "EMA Slow:", h4Indicators.emaSlow, "MACD:", h4Indicators.macd?.histogram);
-    // console.log("[H1] EMA9:", h1Indicators.ema9, "EMA21:", h1Indicators.ema21, "RSI:", h1Indicators.rsi);
-    // console.log("[M15] EMA9:", m15Indicators.ema9, "EMA21:", m15Indicators.ema21, "RSI:", m15Indicators.rsi, "BB:", m15Indicators.bb);
-    // console.log("Trend:", trendAnalysis.h4Trend);
-  }
-
   evaluateSignals(buyConditions, sellConditions) {
     const buyScore = buyConditions.filter(Boolean).length;
     const sellScore = sellConditions.filter(Boolean).length;
@@ -74,7 +70,7 @@ class TradingService {
     }
     return { signal, buyScore, sellScore };
   }
-
+heck
   async generateAndValidateSignal(candle, message, symbol, bid, ask) {
     const indicators = candle.indicators || {};
     // Log all indicator values for debugging
@@ -83,7 +79,7 @@ class TradingService {
     // console.log("[Indicators] H1:", indicators.h1);
     // console.log("[Indicators] M15:", indicators.m15);
     const trendAnalysis = message.trendAnalysis;
-    const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, trendAnalysis, bid, ask);
+    const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, bid, ask);
     if (!result.signal) {
       console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
     } else {
@@ -91,7 +87,7 @@ class TradingService {
     }
     return result;
   }
-  generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid) {
+  generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, bid) {
     return [
       // H4 Trend conditions
       h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
@@ -108,7 +104,7 @@ class TradingService {
     ];
   }
 
-  generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask) {
+  generateSellConditions(h4Indicators, h1Indicators, m15Indicators, ask) {
     return [
       // H4 Trend conditions
       !h4Indicators.isBullishTrend,
@@ -184,7 +180,7 @@ class TradingService {
         // Fetch and log deal confirmation
         const { getDealConfirmation } = await import("../api.js");
         const confirmation = await getDealConfirmation(position.dealReference);
-        if (confirmation.dealStatus !== 'ACCEPTED' && confirmation.dealStatus !== 'OPEN') {
+        if (confirmation.dealStatus !== "ACCEPTED" && confirmation.dealStatus !== "OPEN") {
           console.error(`[Order] Not placed: ${confirmation.reason || confirmation.reasonCode}`);
         }
       }
@@ -193,25 +189,6 @@ class TradingService {
       console.error(`[Position] Failed for ${symbol}:`, error);
       throw error;
     }
-  }
-
-  async setupTrailingStop(symbol, signal, dealId, params) {
-    if (!dealId || !params?.trailingDistance) {
-      console.warn("[TrailingStop] Missing required parameters");
-      return;
-    }
-
-    setTimeout(async () => {
-      try {
-        const positions = await getOpenPositions();
-        const position = positions?.positions?.find((p) => p.market.epic === symbol);
-        if (position && position.profit > 0) {
-          await updateTrailingStop(dealId, params.trailingDistance);
-        }
-      } catch (error) {
-        console.error("[TrailingStop] Error:", error.message);
-      }
-    }, 5 * 60 * 1000);
   }
 
   async calculateATR(symbol) {
@@ -304,12 +281,16 @@ class TradingService {
     // Ensure margin for one trade is no more than 1/5 of available
     const maxMarginPerTrade = availableMargin / 5;
     if (marginRequired > maxMarginPerTrade) {
-        // Reduce size so marginRequired == maxMarginPerTrade
-        size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
-        if (size < 100) size = 100;
-        console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
+      // Reduce size so marginRequired == maxMarginPerTrade
+      size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+      if (size < 100) size = 100;
+      console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
     }
-    console.log(`[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`);
+    console.log(
+      `[PositionSize] Raw size: ${
+        riskAmount / (stopLossPips * pipValue)
+      }, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`
+    );
     return size;
   }
 
@@ -318,19 +299,79 @@ class TradingService {
     return symbol.includes("JPY") ? 0.01 : 0.0001;
   }
 
-  generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid, ask) {
-    if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis)) {
+  generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, bid, ask) {
+    if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators)) {
       return { signal: null };
     }
-    // this.logMarketConditions(symbol, bid, ask, h4Indicators, h1Indicators, m15Indicators, trendAnalysis);
-    const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, bid);
-    const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, trendAnalysis, ask);
+    const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, bid);
+    const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, ask);
     const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
     return {
       signal,
       buyScore,
       sellScore,
     };
+  }
+
+  // ============================================================
+  //               Trailing Stop (Improved)
+  // ============================================================
+  async updateTrailingStopIfNeeded(position, indicators) {
+    const { dealId, direction, entryPrice, stopLoss, takeProfit, currentPrice, symbol } = position;
+
+    if (!dealId) return;
+
+    // --- Trend misalignment → Breakeven exit ---
+    const m5 = indicators.m5;
+    const m15 = indicators.m15;
+    if (m5 && m15) {
+      const m5Trend = Strategy.pickTrend(m5, { symbol, timeframe: "M5", atr: m5.atr });
+      const m15Trend = Strategy.pickTrend(m15, { symbol, timeframe: "M15", atr: m15.atr });
+
+      const broken =
+        (direction === "BUY" && (m5Trend === "bearish" || m15Trend === "bearish")) ||
+        (direction === "SELL" && (m5Trend === "bullish" || m15Trend === "bullish"));
+
+      if (broken) {
+        await this.softExitToBreakeven(position);
+        return;
+      }
+    }
+
+    const tpDist = Math.abs(takeProfit - entryPrice);
+    const activation = direction === "BUY" ? entryPrice + tpDist * 0.7 : entryPrice - tpDist * 0.7;
+
+    const activated = (direction === "BUY" && currentPrice >= activation) || (direction === "SELL" && currentPrice <= activation);
+
+    if (!activated) return;
+
+    const trailDist = tpDist * 0.2;
+    let newSL = direction === "BUY" ? currentPrice - trailDist : currentPrice + trailDist;
+
+    if ((direction === "BUY" && newSL <= stopLoss) || (direction === "SELL" && newSL >= stopLoss)) return;
+
+    try {
+      await updateTrailingStop(dealId, currentPrice, newSL, null, direction.toUpperCase(), symbol, true);
+      logger.info(`[Trail] Updated SL → ${newSL} for ${dealId}`);
+    } catch (error) {
+      logger.error(`[Trail] Error updating trailing stop:`, error);
+    }
+  }
+
+  // ============================================================
+  //               Breakeven Soft Exit
+  // ============================================================
+  async softExitToBreakeven(position) {
+    const { dealId, entryPrice, direction, symbol } = position;
+
+    const newSL = entryPrice;
+    try {
+      await updateTrailingStop(dealId, entryPrice, newSL, null, direction, symbol, true);
+
+      logger.info(`[SoftExit] ${symbol}: misalignment → moved SL to breakeven for ${dealId}`);
+    } catch (e) {
+      logger.error(`[SoftExit] Error updating SL to breakeven:`, e);
+    }
   }
 }
 

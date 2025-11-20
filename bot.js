@@ -1,8 +1,9 @@
-import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens } from "./api.js";
-import { TRADING, MODE, DEV, ANALYSIS } from "./config.js";
+import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession } from "./api.js";
+import { TRADING, MODE, DEV, ANALYSIS, SESSIONS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators.js";
+import logger from "./utils/logger.js";
 
 const { SYMBOLS, MAX_POSITIONS } = TRADING;
 const { BACKTEST_MODE } = MODE;
@@ -16,40 +17,40 @@ class TradingBot {
     this.maxRetries = 3;
     this.retryDelay = 30000; // 30 seconds
     this.latestCandles = {}; // Store latest candles for each symbol
+
+    // Define allowed trading windows (UTC, Berlin time for example)
+    this.allowedTradingWindows = [
+      // London: 08:15–16:45
+      { start: 8 * 60 + 15, end: 16 * 60 + 45 },
+      // NY: 13:15–20:45
+      { start: 13 * 60 + 15, end: 20 * 60 + 45 },
+      // Sydney: 22:15–6:45 (overnight, so split into two ranges)
+      { start: 22 * 60 + 15, end: 23 * 60 + 59 },
+      { start: 0, end: 6 * 60 + 45 },
+      // Tokyo: 0:15–8:45
+      { start: 0 * 60 + 15, end: 8 * 60 + 45 },
+    ];
   }
 
   // Initialize the bot and start necessary services
   async initialize() {
-    let retryCount = 0;
-
-    while (retryCount < this.maxRetries) {
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
         await startSession();
         const tokens = getSessionTokens();
-
-        if (!tokens.cst || !tokens.xsecurity) {
-          console.warn(`[Bot] Invalid session tokens, attempt ${retryCount + 1}/${this.maxRetries}`);
-          throw new Error("Invalid session tokens");
-        }
-
-        if (!BACKTEST_MODE) {
-          await this.startLiveTrading(tokens);
-        } else {
-          await this.runBacktest();
-        }
-
-        return; // Success, exit the retry loop
+        if (!tokens.cst || !tokens.xsecurity) throw new Error("Invalid session tokens");
+        await this.startLiveTrading(tokens);
+        this.scheduleMidnightSessionRefresh();
+        return;
       } catch (error) {
-        retryCount++;
-        console.error(`[Bot] Initialization attempt ${retryCount} failed:`, error);
-
-        if (retryCount < this.maxRetries) {
-          console.log(`[Bot] Refreshing session and retrying in ${this.retryDelay / 1000}s...`);
-          await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
+        console.error(`[Bot] Initialization attempt ${attempt} failed:`, error);
+        if (attempt < this.maxRetries) {
+          console.info(`[Bot] Retrying in ${this.retryDelay / 1000}s...`);
+          await this.delay(this.retryDelay);
           await refreshSession();
         } else {
           console.error("[Bot] Max retry attempts reached. Shutting down.");
-          throw error;
+          process.exit(1);
         }
       }
     }
@@ -102,44 +103,63 @@ class TradingBot {
 
   // Start analysis interval
   startAnalysisInterval() {
-    const interval = MODE.DEV_MODE ? DEV.ANALYSIS_INTERVAL_MS : 15 * 60 * 1000;
-    if (MODE.DEV_MODE) {
-      console.log(`[DEV] Starting analysis interval: ${interval}s`);
-    } else {
-      console.log(`[PROD] Starting analysis interval: ${interval}s`);
-    }
-    this.analysisInterval = setInterval(async () => {
+    const getNextDelay = () =>
+      ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
+
+    const runAnalysis = async () => {
       try {
-        const now = new Date();
-        const date = now.toLocaleDateString();
-        const time = now.toLocaleTimeString();
-        console.log(`[${date} ${time}] Running scheduled analysis...`);
+        // if (!this.isTradingAllowed()) {
+        //     console.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+        //     return;
+        // }
         await this.updateAccountInfo();
         await this.analyzeAllSymbols();
+        await this.startMonitorOpenTrades();
       } catch (error) {
-        console.error("Analysis interval error:", error);
+        console.error("[bot.js] Analysis interval error:", error);
       }
+    };
+    // First run: align to next 5th minute + 5 seconds
+    const interval = DEV.MODE ? DEV.INTERVAL : getNextDelay();
+    console.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
+
+    setTimeout(() => {
+      runAnalysis();
+      // After first run, repeat every 5 minutes
+      this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
     }, interval);
   }
 
   // Update account information and positions
   async updateAccountInfo() {
-    try {
-      const accountData = await getAccountInfo();
-      if (accountData?.accounts?.[0]?.balance?.balance) {
-        tradingService.setAccountBalance(accountData.accounts[0].balance.balance);
-      } else {
-        throw new Error("Invalid account data structure");
-      }
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const accountData = await getAccountInfo();
+        if (accountData?.accounts?.[0]?.balance?.balance) {
+          tradingService.setAccountBalance(accountData.accounts[0].balance.balance);
+          if (typeof accountData.accounts[0].balance.available !== "undefined") {
+            tradingService.setAvailableMargin(accountData.accounts[0].balance.available);
+          }
 
-      const positions = await getOpenPositions();
-      if (positions?.positions) {
-        tradingService.setOpenTrades(positions.positions.map((p) => p.market.epic));
-        console.log(`Current open positions: ${positions.positions.length}`);
+          const positions = await getOpenPositions();
+          if (positions?.positions) {
+            tradingService.setOpenTrades(positions.positions.map((p) => p.market.epic));
+            this.openedPositions = positions.positions.length;
+            console.info(`Current open positions: ${positions.positions.length}`);
+          }
+          return; // Success - exit the method
+        }
+      } catch (error) {
+        retries--;
+        if (retries === 0) {
+          console.error("[bot.js] Failed to update account info after all retries:", error);
+          // Don't throw - just continue with old values
+          return;
+        }
+        console.warn(`Account info update failed, retrying... (${retries} attempts left)`);
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
       }
-    } catch (error) {
-      console.error("Failed to update account info:", error);
-      throw error;
     }
   }
 
@@ -177,12 +197,6 @@ class TradingBot {
       m15: await calcIndicators(m15Data.prices), // Entry/Exit timing
     };
 
-    // We don't need separate trend analysis anymore as it's part of the H4 indicators
-    const trendAnalysis = {
-      h4Trend: indicators.h4.isBullishTrend ? "bullish" : "bearish",
-      h4Indicators: indicators.h4,
-    };
-
     // Use the latest real-time candle for bid/ask
     const latestCandle = this.latestCandles[symbol];
     if (!latestCandle) {
@@ -194,7 +208,6 @@ class TradingBot {
         ...latestCandle,
         symbol: symbol,
         indicators,
-        trendAnalysis,
         h4Data: h4Data.prices,
         h1Data: h1Data.prices,
         m15Data: m15Data.prices,
@@ -203,25 +216,37 @@ class TradingBot {
     );
   }
 
-  // Analyze all symbols
-  async analyzeAllSymbols() {
-    for (const symbol of SYMBOLS) {
-      if (!this.latestCandles[symbol]) continue; // Only analyze if we have a candle
-      try {
-        await this.analyzeSymbol(symbol);
-      } catch (error) {
-        console.error(`Error analyzing ${symbol}:`, error.message);
-      }
-    }
+  getActiveSymbols() {
+    const now = new Date();
+    const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+
+    // Helper to check if hour is in session
+    const inSession = (start, end) => {
+      if (start < end) return hour >= start && hour < end;
+      return hour >= start || hour < end; // Overnight session
+    };
+
+    const activeSessions = [];
+    if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
+    if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
+    if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
+    if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
+
+    // Combine symbols from all active sessions, remove duplicates
+    let combined = [];
+    activeSessions.forEach((arr) => combined.push(...arr));
+    combined = [...new Set(combined)];
+
+    logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
+    return combined;
   }
 
-  // Run backtest mode
-  async runBacktest() {
-    try {
-      const m1Data = await getHistorical("USDCAD", "MINUTE", 50);
-      console.log(`Backtest data fetched for USDCAD: ${m1Data.prices.length} candles`);
-    } catch (error) {
-      console.error("Backtest error:", error.message);
+  // Analyzes all symbols in the trading universe.
+  async analyzeAllSymbols() {
+    const activeSymbols = this.getActiveSymbols();
+    for (const symbol of activeSymbols) {
+      await this.analyzeSymbol(symbol);
+      await this.delay(2000);
     }
   }
 
@@ -233,22 +258,108 @@ class TradingBot {
     webSocketService.disconnect();
   }
 
-  // Fetch and store minDealSize and dealSizeIncrement for all symbols
-  async fetchAndStoreSymbolMinSizes() {
-    const minSizes = {};
-    for (const symbol of SYMBOLS) {
-      try {
-        const details = await import("./api.js").then(api => api.getMarketDetails(symbol));
-        const minDealSize = details.instrument?.minDealSize || 1;
-        const dealSizeIncrement = details.instrument?.dealSizeIncrement || 1;
-        minSizes[symbol] = { minDealSize, dealSizeIncrement };
-        console.log(`[SymbolConfig] ${symbol}: minDealSize=${minDealSize}, dealSizeIncrement=${dealSizeIncrement}`);
-      } catch (e) {
-        console.warn(`[SymbolConfig] Could not fetch min size for ${symbol}:`, e.message);
-        minSizes[symbol] = { minDealSize: 1, dealSizeIncrement: 1 };
+  async startMonitorOpenTrades() {
+    console.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+    try {
+      const positions = await getOpenPositions();
+      for (const pos of positions.positions) {
+        const symbol = pos.market ? pos.market.epic : pos.position.epic;
+
+        // Fetch recent candles for the symbol (e.g. M15)
+        const m15Data = await getHistorical(symbol, "MINUTE_15", 50);
+        const indicators = await calcIndicators(m15Data.prices);
+
+        const positionData = {
+          symbol,
+          dealId: pos.position.dealId,
+          currency: pos.position.currency,
+          direction: pos.position.direction,
+          size: pos.position.size,
+          leverage: pos.position.leverage,
+          entryPrice: pos.position.level,
+          takeProfit: pos.position.profitLevel,
+          stopLoss: pos.position.stopLevel,
+          currentPrice: pos.market.bid,
+          trailingStop: pos.position.trailingStop,
+        };
+
+        // Pass indicators to trailing stop logic
+        await tradingService.updateTrailingStopIfNeeded(positionData, indicators);
       }
+    } catch (error) {
+      console.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
     }
-    tradingService.setSymbolMinSizes(minSizes);
+  }
+
+  isTradingAllowed() {
+    const now = new Date();
+
+    const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+    if (day === 0 || day === 6) {
+      logger.info("[Bot] Trading blocked: Weekend.");
+      return false;
+    }
+
+    // Get current time in minutes (Berlin time)
+    const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+    const minute = Number(now.toLocaleString("en-US", { minute: "2-digit", timeZone: "Europe/Berlin" }));
+    const currentMinutes = hour * 60 + minute;
+
+    // Check if current time is inside any allowed window
+    const allowed = this.allowedTradingWindows.some((win) => {
+      if (win.start <= win.end) {
+        return currentMinutes >= win.start && currentMinutes <= win.end;
+      } else {
+        // Overnight session (e.g. Sydney)
+        return currentMinutes >= win.start || currentMinutes <= win.end;
+      }
+    });
+
+    if (!allowed) {
+      logger.info("[Bot] Trading blocked: Not in allowed session window (first/last 15 min excluded).");
+      return false;
+    }
+    return true;
+  }
+
+  async closeAllPositions() {
+    console.info("[Bot] Closing all positions before weekend...");
+    try {
+      const positions = await getOpenPositions();
+      for (const pos of positions.positions) {
+        await tradingService.closePosition(pos.dealId);
+        console.info(`[Bot] Closed position: ${pos.market.epic}`);
+      }
+    } catch (error) {
+      console.error("[Bot] Error closing all positions:", error);
+    }
+  }
+
+  scheduleMidnightSessionRefresh() {
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0); // Next 00:00
+    const msUntilMidnight = nextMidnight - now;
+    setTimeout(() => {
+      this.refreshSessionAtMidnight();
+      // After first run, repeat every 24h
+      setInterval(() => this.refreshSessionAtMidnight(), 24 * 60 * 60 * 1000);
+    }, msUntilMidnight);
+    console.info(`[Bot] Scheduled session refresh at midnight in ${(msUntilMidnight / 1000 / 60).toFixed(2)} minutes.`);
+  }
+
+  async refreshSessionAtMidnight() {
+    try {
+      console.info("[Bot] Refreshing session at midnight...");
+      await refreshSession();
+      console.info("[Bot] Session refreshed at midnight.");
+    } catch (error) {
+      console.error("[bot.js][Bot] Midnight session refresh failed:", error);
+    }
+  }
+
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

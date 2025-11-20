@@ -95,10 +95,26 @@ export const ANALYSIS = {
 
 // Trading Sessions (UTC times)
 export const SESSIONS = {
-  LONDON_START: "08:00",
-  LONDON_END: "16:00",
-  NY_START: "13:00",
-  NY_END: "21:00",
+  LONDON: {
+    START: "08:00",
+    END: "17:00",
+    SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+  },
+  NY: {
+    START: "13:00",
+    END: "21:00",
+    SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+  },
+  SYDNEY: {
+    START: "22:00",
+    END: "07:00",
+    SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
+  },
+  TOKYO: {
+    START: "00:00",
+    END: "09:00",
+    SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
+  },
 };
 
 // Mode Configuration
@@ -114,7 +130,7 @@ export const DEV = {
     SETUP: "MINUTE_5", // Setup (was HOUR)
     ENTRY: "MINUTE", // Entry/Exit (was MINUTE_15)
   },
-  ANALYSIS_INTERVAL_MS: 60 * 1000, // 1 minute between analyses (was 15 min)
+  INTERVAL: 60 * 1000, // 1 minute between analyses (was 15 min)
 };
 
 // For convenience in error messages and logging

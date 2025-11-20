@@ -1,5 +1,6 @@
 import { API } from "./config.js";
 import axios from "axios";
+import logger from "./utils/logger.js";
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
@@ -26,33 +27,28 @@ export const startSession = async () => {
         encryptedPassword: false,
       },
       {
-        headers: getHeaders(true), // Include headers for the reques
+        headers: getHeaders(true),
       }
     );
 
-    const now = new Date();
-    const date = now.toLocaleDateString();
-    const time = now.toLocaleTimeString();
-    console.log(`<========= Session started at ${date} ${time} =========>\n`, response.data, "\n\n");
-
-    // Store the session tokens
+    console.log("");
+    logger.info("Session started");
     cst = response.headers["cst"];
     xsecurity = response.headers["x-security-token"];
 
     if (!cst || !xsecurity) {
-      console.error("Warning: Session tokens not received in response headers");
-      console.log("Response headers:", response.headers);
+      logger.warn("Session tokens not received in response headers");
+      logger.info("Response headers:", response.headers);
     }
 
-    console.log("cst:", cst, "\nxsecurity:", xsecurity, "\n");
+    // console.log(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
     return response.data;
   } catch (error) {
-    console.error("Failed to start session:", error.response ? error.response.data : error.message);
-    console.log("Request config:", error.config);
+    logger.error("[api.js] Failed to start session:", error.response ? error.response.data : error.message);
     if (error.response) {
-      console.log("Response status:", error.response.status);
-      console.log("Response headers:", error.response.headers);
+      logger.error("[api.js] Response status:", error.response.status);
+      logger.error("[api.js] Response headers:", error.response.headers);
     }
     throw error;
   }
@@ -176,7 +172,6 @@ export const getOpenPositions = async () => {
   }
 };
 
-
 export async function getHistorical(symbol, resolution, count, from = null, to = null) {
   try {
     const nowMs = Date.now();
@@ -275,26 +270,51 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
 }
 
 // Update trailing stop
-export async function updateTrailingStop(positionId, stopLevel) {
-  try {
-    console.log(`Updating trailing stop for position ${positionId} to ${stopLevel}`);
 
+export async function updateTrailingStop(positionId, currentPrice, entryPrice, takeProfit, direction, symbol, isTrailingEnabled) {
+  const tpDistance = Math.abs(takeProfit - entryPrice);
+  const thresholdPrice = direction.toUpperCase() === "BUY" ? entryPrice + 0.7 * tpDistance : entryPrice - 0.7 * tpDistance;
+
+  const thresholdMet = direction.toUpperCase() === "BUY" ? currentPrice >= thresholdPrice : currentPrice <= thresholdPrice;
+
+  if (!thresholdMet && !isTrailingEnabled) {
+    return; // keep the original SL until the threshold is hit
+  }
+
+  // --- Calculate trailing distance ---
+  let trailingDistance = Math.abs(currentPrice - entryPrice) * 0.4 || 0.001; // fallback if calculation fails
+
+  // --- Get symbol-specific minimum stop distance ---
+  let minStopDistance = 0.0003; // default fallback
+  try {
+    const market = await getMarketDetails(symbol);
+    if (market?.dealingRules?.minStopDistance) {
+      minStopDistance = market.dealingRules.minStopDistance;
+    }
+  } catch (err) {
+    console.warn(`[API] Could not fetch minStopDistance for ${symbol}, using fallback ${minStopDistance}`);
+  }
+
+  // --- Ensure distance is not too small ---
+  if (trailingDistance < minStopDistance) {
+    console.warn(`[API] Trailing distance (${trailingDistance}) too small for ${symbol}. Using min allowed: ${minStopDistance}`);
+    trailingDistance = minStopDistance;
+  }
+
+  try {
     const response = await axios.put(
       `${API.BASE_URL}/positions/${positionId}`,
       {
         trailingStop: true,
-        stopLevel,
+        stopDistance: Number(trailingDistance.toFixed(6)), // round safely
       },
-      {
-        headers: getHeaders(true),
-      }
+      { headers: getHeaders(true) }
     );
-
-    console.log("Trailing stop updated successfully:", response.data);
+    console.info(`[API] Trailing stop for ${positionId} set to distance ${trailingDistance}`);
     return response.data;
-  } catch (error) {
-    console.error(`Error updating trailing stop for position ${positionId}:`, error.response ? error.response.data : error.message);
-    throw error;
+  } catch (err) {
+    console.error(`[API] updateTrailingStop error for ${positionId}:`, err.response?.data || err.message);
+    throw err;
   }
 }
 
@@ -334,7 +354,7 @@ export async function getDealConfirmation(dealReference) {
   try {
     console.log(`Getting confirmation for deal: ${dealReference}`);
     const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
-    console.log('[DealConfirmation]', response.data);
+    console.log("[DealConfirmation]", response.data);
     return response.data;
   } catch (error) {
     console.error(`[DealConfirmation] Error for ${dealReference}:`, error.response?.data || error.message);
