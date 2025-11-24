@@ -2,7 +2,7 @@ import { TRADING, ANALYSIS } from "../config.js";
 import { placeOrder, placePosition, updateTrailingStop, getHistorical } from "../api.js";
 import logger from "../utils/logger.js";
 
-const { FOREX_MIN_SIZE, RISK_PER_TRADE } = TRADING;
+const { FOREX_MIN_SIZE, RISK_PER_TRADE, MAX_POSITIONS } = TRADING;
 
 const RSI_CONFIG = {
   OVERBOUGHT: 70,
@@ -41,16 +41,8 @@ class TradingService {
     return this.openTrades.includes(symbol);
   }
 
-  validatePrices(bid, ask, symbol) {
-    if (typeof bid !== "number" || typeof ask !== "number" || isNaN(bid) || isNaN(ask)) {
-      console.error(`[PriceValidation] Invalid prices for ${symbol}. Bid: ${bid}, Ask: ${ask}`);
-      return false;
-    }
-    return true;
-  }
-
-  validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators, trendAnalysis) {
-    if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators || !trendAnalysis) {
+  validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators) {
+    if (!h4Data || !h4Indicators || !h1Indicators || !m15Indicators) {
       console.log("[Signal] Missing required indicators data");
       return false;
     }
@@ -70,16 +62,9 @@ class TradingService {
     }
     return { signal, buyScore, sellScore };
   }
-heck
-  async generateAndValidateSignal(candle, message, symbol, bid, ask) {
-    const indicators = candle.indicators || {};
-    // Log all indicator values for debugging
-    // console.log(`[Signal] Generating signal for ${symbol}`);
-    // console.log("[Indicators] H4:", indicators.h4);
-    // console.log("[Indicators] H1:", indicators.h1);
-    // console.log("[Indicators] M15:", indicators.m15);
-    const trendAnalysis = message.trendAnalysis;
-    const result = this.generateSignals(symbol, message.h4Data, indicators.h4, indicators.h1, indicators.m15, bid, ask);
+
+  async generateAndValidateSignal(symbol, indicators, candles, bid, ask) {
+    const result = this.generateSignals(symbol, indicators, bid, ask);
     if (!result.signal) {
       console.log(`[Signal] No valid signal for ${symbol}. BuyScore: ${result.buyScore}, SellScore: ${result.sellScore}`);
     } else {
@@ -87,37 +72,40 @@ heck
     }
     return result;
   }
-  generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, bid) {
+
+  generateBuyConditions(symbol, indicators, candles, bid) {
+    const { h4, h1, m15 } = indicators;
+
     return [
       // H4 Trend conditions
-      h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
-      h4Indicators.macd?.histogram > 0, // Trend confirmation
+      h4.emaFast > h4.emaSlow, // Primary trend filter
+      h4.macd?.histogram > 0, // Trend confirmation
 
       // H1 Setup confirmation
-      h1Indicators.ema9 > h1Indicators.ema21,
-      h1Indicators.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
-
+      h1.ema9 > h1.ema21,
+      h1.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
       // M15 Entry conditions
-      m15Indicators.isBullishCross,
-      m15Indicators.rsi < RSI_CONFIG.OVERSOLD,
-      bid <= m15Indicators.bb?.lower,
+      m15.isBullishCross,
+      m15.rsi < RSI_CONFIG.OVERSOLD,
+      bid <= m15.bb?.lower,
     ];
   }
 
-  generateSellConditions(h4Indicators, h1Indicators, m15Indicators, ask) {
+  generateSellConditions(symbol, indicators, candles, ask) {
+    const { h4, h1, m15 } = indicators;
     return [
       // H4 Trend conditions
-      !h4Indicators.isBullishTrend,
-      h4Indicators.macd?.histogram < 0,
+      !h4.isBullishTrend,
+      h4.macd?.histogram < 0,
 
       // H1 Setup confirmation
-      h1Indicators.ema9 < h1Indicators.ema21,
-      h1Indicators.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
+      h1.ema9 < h1.ema21,
+      h1.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
 
       // M15 Entry conditions
-      m15Indicators.isBearishCross,
-      m15Indicators.rsi > RSI_CONFIG.OVERBOUGHT,
-      ask >= m15Indicators.bb?.upper,
+      m15.isBearishCross,
+      m15.rsi > RSI_CONFIG.OVERBOUGHT,
+      ask >= m15.bb?.upper,
     ];
   }
 
@@ -216,37 +204,30 @@ heck
     }
   }
 
-  async processPrice(message, maxOpenTrades) {
-    let symbol = null;
+  async processPrice({ symbol, indicators, candles, bid, ask }) {
     try {
-      if (!message) return;
-      const candle = message;
-      symbol = candle.symbol || candle.epic;
-      console.log(`\n=== Processing ${symbol} ===`);
-      console.log(`[ProcessPrice] Open trades: ${this.openTrades.length}/${maxOpenTrades} | Balance: ${this.accountBalance}€`);
-      if (this.openTrades.length >= maxOpenTrades) {
-        console.log(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
+      if (this.openTrades.length >= MAX_POSITIONS) {
+        logger.info(`[ProcessPrice] Max positions reached.`);
         return;
       }
       if (this.isSymbolTraded(symbol)) {
-        console.log(`[ProcessPrice] ${symbol} already has an open position.`);
+        logger.debug(`[ProcessPrice] ${symbol} already in market.`);
         return;
       }
-      // const hour = new Date().getUTCHours();
-      // if (hour < 6 || hour > 22) {
-      //   console.log(`[ProcessPrice] Outside main trading session. Skipping ${symbol}.`);
-      //   return;
-      // }
-      const bid = candle.bid || candle.closePrice?.bid || candle.c || candle.close;
-      const ask = candle.ask || candle.closePrice?.ask || candle.c || candle.close;
-      if (!this.validatePrices(bid, ask, symbol)) return;
 
-      // --- ADD THIS ---
-      const { signal } = await this.generateAndValidateSignal(candle, message, symbol, bid, ask);
+      const { signal } = this.generateSignals(symbol, indicators, candles, bid, ask);
+
+      if (!signal) {
+        logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
+        return;
+      }
+
       if (signal) {
         await this.executeTrade(signal, symbol, bid, ask);
       }
-      // ---------------
+
+      //   logger.info(`[Signal] ${symbol}: ${signal}`);
+      //   await this.executeTrade(symbol, signal, bid, ask, indicators, candles, context);
     } catch (error) {
       console.error(`[ProcessPrice] Error for ${symbol}:`, error);
     }
@@ -299,12 +280,9 @@ heck
     return symbol.includes("JPY") ? 0.01 : 0.0001;
   }
 
-  generateSignals(symbol, h4Data, h4Indicators, h1Indicators, m15Indicators, bid, ask) {
-    if (!this.validateIndicatorData(h4Data, h4Indicators, h1Indicators, m15Indicators)) {
-      return { signal: null };
-    }
-    const buyConditions = this.generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, bid);
-    const sellConditions = this.generateSellConditions(h4Indicators, h1Indicators, m15Indicators, ask);
+  generateSignals(symbol, indicators, candles, bid, ask) {
+    const buyConditions = this.generateBuyConditions(symbol, indicators, candles, bid);
+    const sellConditions = this.generateSellConditions(symbol, indicators, candles, ask);
     const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
     return {
       signal,

@@ -39,9 +39,12 @@ export const TRADING = {
 export const ANALYSIS = {
   // Multi-Timeframe Strategy
   TIMEFRAMES: {
-    TREND: "HOUR_4", // Trend direction
-    SETUP: "HOUR", // Trade setup
-    ENTRY: "MINUTE_15", // Entry/Exit timing
+    D1: "DAY", // Daily trend direction
+    H4: "HOUR_4", // 4-hour trend direction
+    H1: "HOUR", // 1-hour entry timeframe
+    M15: "MINUTE_15", // 15-minute entry timeframe
+    M5: "MINUTE_5", // 5-minute entry timeframe
+    M1: "MINUTE", // 1-minute entry timeframe
   },
 
   // EMAs for trend and entry
@@ -117,20 +120,10 @@ export const SESSIONS = {
   },
 };
 
-// Mode Configuration
-export const MODE = {
-  BACKTEST_MODE: false,
-  DEV_MODE: false, // Set to false in production
-};
-
 // Development overrides for faster testing
 export const DEV = {
-  TIMEFRAMES: {
-    TREND: "MINUTE_15", // Trend direction (was HOUR_4)
-    SETUP: "MINUTE_5", // Setup (was HOUR)
-    ENTRY: "MINUTE", // Entry/Exit (was MINUTE_15)
-  },
-  INTERVAL: 60 * 1000, // 1 minute between analyses (was 15 min)
+  MODE: false, // Set to false in production
+  INTERVAL: 30 * 1000, // 1 minute between analyses (was 15 min)
 };
 
 // For convenience in error messages and logging
