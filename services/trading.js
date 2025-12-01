@@ -76,6 +76,14 @@ class TradingService {
   generateBuyConditions(symbol, indicators, candles, bid) {
     const { h4, h1, m15 } = indicators;
 
+    // --- Multi-timeframe trends ---
+    const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
+    const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+
+    // --- Check alignment between higher timeframes ---
+    const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
+    if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
+
     return [
       // H4 Trend conditions
       h4.emaFast > h4.emaSlow, // Primary trend filter
@@ -93,6 +101,15 @@ class TradingService {
 
   generateSellConditions(symbol, indicators, candles, ask) {
     const { h4, h1, m15 } = indicators;
+
+    // --- Multi-timeframe trends ---
+    const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
+    const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
+
+    // --- Check alignment between higher timeframes ---
+    const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
+    if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
+
     return [
       // H4 Trend conditions
       !h4.isBullishTrend,
