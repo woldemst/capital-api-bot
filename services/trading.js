@@ -76,23 +76,14 @@ class TradingService {
   generateBuyConditions(symbol, indicators, candles, bid) {
     const { h4, h1, m15 } = indicators;
 
-    // --- Multi-timeframe trends ---
-    const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
-    const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
-
-    // --- Check alignment between higher timeframes ---
-    const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
-    if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
+    // const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
+    // if (h1Trend === "neutral") return []; // ✅ early return for neutral trend
 
     return [
-      // H4 Trend conditions
-      h4.emaFast > h4.emaSlow, // Primary trend filter
-      h4.macd?.histogram > 0, // Trend confirmation
-
-      // H1 Setup confirmation
+      h4.emaFast > h4.emaSlow,
+      h4.macd?.histogram > 0,
       h1.ema9 > h1.ema21,
-      h1.rsi < RSI_CONFIG.EXIT_OVERSOLD, // Slightly relaxed RSI
-      // M15 Entry conditions
+      h1.rsi < RSI_CONFIG.EXIT_OVERSOLD,
       m15.isBullishCross,
       m15.rsi < RSI_CONFIG.OVERSOLD,
       bid <= m15.bb?.lower,
@@ -102,24 +93,14 @@ class TradingService {
   generateSellConditions(symbol, indicators, candles, ask) {
     const { h4, h1, m15 } = indicators;
 
-    // --- Multi-timeframe trends ---
-    const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
-    const m15Trend = m15.ema20 > m15.ema50 ? "bullish" : m15.ema20 < m15.ema50 ? "bearish" : "neutral";
-
-    // --- Check alignment between higher timeframes ---
-    const alignedTrend = h1Trend === m15Trend && (h1Trend === "bullish" || h1Trend === "bearish");
-    if (!alignedTrend) return { signal: null, reason: "trend_not_aligned" };
+    // const h1Trend = h1.ema20 > h1.ema50 ? "bullish" : h1.ema20 < h1.ema50 ? "bearish" : "neutral";
+    // if (h1Trend === "neutral") return []; // ✅ early return for neutral trend
 
     return [
-      // H4 Trend conditions
       !h4.isBullishTrend,
       h4.macd?.histogram < 0,
-
-      // H1 Setup confirmation
       h1.ema9 < h1.ema21,
       h1.rsi > RSI_CONFIG.EXIT_OVERBOUGHT,
-
-      // M15 Entry conditions
       m15.isBearishCross,
       m15.rsi > RSI_CONFIG.OVERBOUGHT,
       ask >= m15.bb?.upper,
@@ -235,7 +216,7 @@ class TradingService {
       const { signal } = this.generateSignals(symbol, indicators, candles, bid, ask);
 
       if (!signal) {
-        logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
+        logger.debug(`[Signal] ${symbol}: no signal generated.`);
         return;
       }
 

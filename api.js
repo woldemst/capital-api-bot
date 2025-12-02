@@ -152,7 +152,7 @@ export const getMarkets = async () => {
 export async function getMarketDetails(symbol) {
   try {
     const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
-    console.log(`Market details for ${symbol}:`, response.data);
+    // console.log(`Market details for ${symbol}:`, response.data);
     return response.data;
   } catch (error) {
     console.error(`Error getting market details for ${symbol}:`, error.response ? error.response.data : error.message);
@@ -195,29 +195,12 @@ export async function getHistorical(symbol, resolution, count, from = null, to =
       from = formatIsoNoMs(new Date(fromMs));
     }
 
-    console.log(`from=${from} to=${to} in resolution=${resolution}`);
+    // console.log(`from=${from} to=${to} in resolution=${resolution}`);
 
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}&from=${from}&to=${to}`, {
       headers: getHeaders(true),
     });
 
-    // Log prices for each candle
-    // if (response.data.prices && response.data.prices.length > 0) {
-    //   console.log("\nCandle Prices:");
-    //   response.data.prices.forEach((candle, index) => {
-    //     console.log(`\nCandle ${index + 1} at ${candle.snapshotTime}:`);
-    //     console.log("Open Price - Bid:", candle.openPrice.bid);
-    //     console.log("Open Price - Ask:", candle.openPrice.ask);
-    //     console.log("Close Price - Bid:", candle.closePrice.bid);
-    //     console.log("Close Price - Ask:", candle.closePrice.ask);
-    //     console.log("High Price - Bid:", candle.highPrice.bid);
-    //     console.log("High Price - Ask:", candle.highPrice.ask);
-    //     console.log("Low Price - Bid:", candle.lowPrice.bid);
-    //     console.log("Low Price - Ask:", candle.lowPrice.ask);
-    //     console.log("Volume:", candle.lastTradedVolume);
-    //   });
-    // }
-    // return response.data;
     return {
       prices: response.data.prices.map((p) => ({
         close: p.closePrice?.bid,

@@ -122,9 +122,7 @@ export const SESSIONS = {
 
 // Development overrides for faster testing
 export const DEV = {
-  MODE: false, // Set to false in production
+  MODE: true, // Set to false in production
   INTERVAL: 30 * 1000, // 1 minute between analyses (was 15 min)
 };
 
-// For convenience in error messages and logging
-export const VERSION = "1.0.0";
