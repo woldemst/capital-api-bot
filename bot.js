@@ -40,7 +40,7 @@ class TradingBot {
                 await startSession();
                 const tokens = getSessionTokens();
                 if (!tokens.cst || !tokens.xsecurity) throw new Error("Invalid session tokens");
-                await this.startLiveTrading();
+                await this.startLiveTrading(tokens);
                 this.scheduleMidnightSessionRefresh();
                 return;
             } catch (error) {
@@ -59,7 +59,7 @@ class TradingBot {
 
     async startLiveTrading(tokens) {
         try {
-            // this.setupWebSocket(tokens); // just for 15, 5, 1 minute candles
+            this.setupWebSocket(tokens);
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMaxHoldMonitor();
@@ -71,22 +71,45 @@ class TradingBot {
     }
 
     // WebSocket connection is just for  5, 1 minute candles
-    // setupWebSocket(tokens) {
-    //     webSocketService.connect(tokens, DAY_SYMBOLS, (data) => {
-    //         try {
-    //             const message = JSON.parse(data.toString());
+    setupWebSocket(tokens) {
+        try {
+            const activeSymbols = this.getActiveSymbols();
+            // Initialize price tracker for all active symbols
+            this.latestPrices = {};
+            activeSymbols.forEach((symbol) => {
+                this.latestPrices[symbol] = { bid: null, ask: null, ts: null };
+            });
 
-    //             if (message.payload?.epic) {
-    //                 const candle = message.payload;
-    //                 const symbol = candle.epic;
-    //                 // Just store the latest candle for each symbol
-    //                 this.latestCandles[symbol] = { latest: candle };
-    //             }
-    //         } catch (error) {
-    //             logger.error("[bot.js] WebSocket message processing error:", error.message, data?.toString());
-    //         }
-    //     });
-    // }
+            webSocketService.connect(tokens, activeSymbols, (data) => {
+                const msg = JSON.parse(data.toString());
+                const { payload } = msg;
+                const epic = payload?.epic;
+                if (!epic) return;
+
+                this.latestCandles[epic] = { latest: payload };
+
+                // Update bid or ask based on priceType
+                if (!this.latestPrices[epic]) {
+                    this.latestPrices[epic] = { bid: null, ask: null, ts: null };
+                }
+
+                if (payload.priceType === "bid") {
+                    this.latestPrices[epic].bid = payload.c;
+                } else if (payload.priceType === "ask") {
+                    this.latestPrices[epic].ask = payload.c;
+                }
+
+                this.latestPrices[epic].ts = Date.now();
+
+                // Only log when we have both bid and ask
+                if (this.latestPrices[epic].bid !== null && this.latestPrices[epic].ask !== null) {
+                    logger.debug(`[WebSocket] ${epic} - bid: ${this.latestPrices[epic].bid}, ask: ${this.latestPrices[epic].ask}`);
+                }
+            });
+        } catch (error) {
+            logger.error("[bot.js] WebSocket message processing error:", error.message);
+        }
+    }
 
     startSessionPing() {
         this.sessionPingInterval = setInterval(async () => {
@@ -197,15 +220,16 @@ class TradingBot {
 
     async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
         try {
-            const [h4Data, h1Data, m15Data, m5Data] = await Promise.all([
+            const [d1Data, h4Data, h1Data, m15Data, m5Data, m1Data] = await Promise.all([
+                getHistorical(symbol, timeframes.D1, historyLength),
                 getHistorical(symbol, timeframes.H4, historyLength),
                 getHistorical(symbol, timeframes.H1, historyLength),
                 getHistorical(symbol, timeframes.M15, historyLength),
                 getHistorical(symbol, timeframes.M5, historyLength),
-                // getHistorical(symbol, timeframes.M1, historyLength),
+                getHistorical(symbol, timeframes.M1, historyLength),
             ]);
-            console.log(`Fetched candles: ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}`);
-            return { h4Data, h1Data, m15Data, m5Data };
+            console.log(`Fetched candles: ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`);
+            return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
         } catch (error) {
             logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
             return {};
@@ -216,49 +240,51 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        const { h4Data, h1Data, m15Data, m5Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
-            // D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
+            D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
             H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
             H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
             M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
             M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
-            // M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
+            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
         };
 
-        // const d1Candles = this.candleHistory[symbol].D1;
+        const d1Candles = this.candleHistory[symbol].D1;
         const h4Candles = this.candleHistory[symbol].H4;
         const h1Candles = this.candleHistory[symbol].H1;
         const m15Candles = this.candleHistory[symbol].M15;
         const m5Candles = this.candleHistory[symbol].M5;
-        // const m1Candles = this.candleHistory[symbol].M1;
+        const m1Candles = this.candleHistory[symbol].M1;
 
-        if (!h4Candles || !h1Candles || !m15Candles || !m5Candles) {
+        if (!d1Candles || !h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} (H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles} skipping analysis.`
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( D1: ${!!d1Candles}, H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`
             );
             return;
         }
 
         const indicators = {
-            // d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
+            d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
             h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
-            // m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
+            m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        const candles = { h4Candles, h1Candles, m15Candles, m5Candles };
-
-        const trendAnalysis = await analyzeTrend(symbol, getHistorical);
+        const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
         // --- Fetch real-time bid/ask ---
-        const marketDetails = await getMarketDetails(symbol);
-        const bid = marketDetails?.snapshot?.bid;
-        const ask = marketDetails?.snapshot?.offer;
+        const bid = this.latestPrices[symbol]?.bid;
+        const ask = this.latestPrices[symbol]?.ask;
+
+        // Only log when we have both bid and ask
+        if (this.latestPrices[symbol]?.bid !== null && this.latestPrices[symbol]?.ask !== null) {
+            logger.debug(`[WebSocket] ${symbol} - bid: ${this.latestPrices[symbol].bid}, ask: ${this.latestPrices[symbol].ask}`);
+        }
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
