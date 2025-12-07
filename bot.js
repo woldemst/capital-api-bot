@@ -4,6 +4,7 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, analyzeTrend } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
+import { log } from "console";
 const { TIMEFRAMES } = ANALYSIS;
 
 class TradingBot {
@@ -59,7 +60,7 @@ class TradingBot {
 
     async startLiveTrading(tokens) {
         try {
-            this.setupWebSocket(tokens);
+            // this.setupWebSocket(tokens);
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMaxHoldMonitor();
@@ -71,45 +72,45 @@ class TradingBot {
     }
 
     // WebSocket connection is just for  5, 1 minute candles
-    setupWebSocket(tokens) {
-        try {
-            const activeSymbols = this.getActiveSymbols();
-            // Initialize price tracker for all active symbols
-            this.latestPrices = {};
-            activeSymbols.forEach((symbol) => {
-                this.latestPrices[symbol] = { bid: null, ask: null, ts: null };
-            });
+    // setupWebSocket(tokens) {
+    //     try {
+    //         const activeSymbols = this.getActiveSymbols();
+    //         // Initialize price tracker for all active symbols
+    //         this.latestPrices = {};
+    //         activeSymbols.forEach((symbol) => {
+    //             this.latestPrices[symbol] = { analyzeSymbol: null, ask: null, ts: null };
+    //         });
 
-            webSocketService.connect(tokens, activeSymbols, (data) => {
-                const msg = JSON.parse(data.toString());
-                const { payload } = msg;
-                const epic = payload?.epic;
-                if (!epic) return;
+    //         webSocketService.connect(tokens, activeSymbols, (data) => {
+    //             const msg = JSON.parse(data.toString());
+    //             const { payload } = msg;
+    //             const epic = payload?.epic;
+    //             if (!epic) return;
 
-                this.latestCandles[epic] = { latest: payload };
+    //             this.latestCandles[epic] = { latest: payload };
 
-                // Update bid or ask based on priceType
-                if (!this.latestPrices[epic]) {
-                    this.latestPrices[epic] = { bid: null, ask: null, ts: null };
-                }
+    //             // Update bid or ask based on priceType
+    //             if (!this.latestPrices[epic]) {
+    //                 this.latestPrices[epic] = { bid: null, ask: null, ts: null };
+    //             }
 
-                if (payload.priceType === "bid") {
-                    this.latestPrices[epic].bid = payload.c;
-                } else if (payload.priceType === "ask") {
-                    this.latestPrices[epic].ask = payload.c;
-                }
+    //             if (payload.priceType === "bid") {
+    //                 this.latestPrices[epic].bid = payload.c;
+    //             } else if (payload.priceType === "ask") {
+    //                 this.latestPrices[epic].ask = payload.c;
+    //             }
 
-                this.latestPrices[epic].ts = Date.now();
+    //             this.latestPrices[epic].ts = Date.now();
 
-                // Only log when we have both bid and ask
-                if (this.latestPrices[epic].bid !== null && this.latestPrices[epic].ask !== null) {
-                    logger.debug(`[WebSocket] ${epic} - bid: ${this.latestPrices[epic].bid}, ask: ${this.latestPrices[epic].ask}`);
-                }
-            });
-        } catch (error) {
-            logger.error("[bot.js] WebSocket message processing error:", error.message);
-        }
-    }
+    //             // Only log when we have both bid and ask
+    //             if (this.latestPrices[epic].bid !== null && this.latestPrices[epic].ask !== null) {
+    //                 logger.debug(`[WebSocket] ${epic} - bid: ${this.latestPrices[epic].bid}, ask: ${this.latestPrices[epic].ask}`);
+    //             }
+    //         });
+    //     } catch (error) {
+    //         logger.error("[bot.js] WebSocket message processing error:", error.message);
+    //     }
+    // }
 
     startSessionPing() {
         this.sessionPingInterval = setInterval(async () => {
@@ -278,13 +279,18 @@ class TradingBot {
         const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
         // --- Fetch real-time bid/ask ---
-        const bid = this.latestPrices[symbol]?.bid;
-        const ask = this.latestPrices[symbol]?.ask;
+        const marketDetails = await getMarketDetails(symbol);
+        const bid = marketDetails?.snapshot?.bid;
+        const ask = marketDetails?.snapshot?.offer;
+        
+        // Guard: skip analysis if we don't have valid prices yet
+        if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) {
+            logger.warn(`[bot.js][analyzeSymbol] Skipping ${symbol}: invalid bid/ask (bid=${bid}, ask=${ask})`);
+            return;
+        }
 
         // Only log when we have both bid and ask
-        if (this.latestPrices[symbol]?.bid !== null && this.latestPrices[symbol]?.ask !== null) {
-            logger.debug(`[WebSocket] ${symbol} - bid: ${this.latestPrices[symbol].bid}, ask: ${this.latestPrices[symbol].ask}`);
-        }
+        logger.debug(`${symbol} - bid: ${bid}, ask: ${ask}`);
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
