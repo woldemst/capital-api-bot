@@ -1,10 +1,12 @@
 import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
-import { ANALYSIS } from "./config.js";
+import { ANALYSIS } from "../config.js";
+import { calculateBackQuantSignal } from "./BackQuant.js";
 
 export async function calcIndicators(bars) {
     if (!bars || !Array.isArray(bars) || bars.length === 0) {
         return null;
     }
+
 
     const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
     const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
@@ -79,6 +81,19 @@ export async function calcIndicators(bars) {
     }
     const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
     const lastClose = closes[closes.length - 1];
+
+    // BackQuant Fourier For Loop signal (uses HLC3 internally)
+    const backQuant = calculateBackQuantSignal({
+        highs,
+        lows,
+        closes,
+        // You can tweak these values or later move them into ANALYSIS config
+        N: 50,
+        start: 1,
+        end: 45,
+        upper: 40,
+        lower: -10,
+    });
 
     const price_vs_ema9 = (lastClose - ema9) / ema9;
     const price_vs_ema21 = (lastClose - ema21) / ema21;
@@ -161,6 +176,12 @@ export async function calcIndicators(bars) {
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] > ema21[ema21.length - 1] && ema9[ema9.length - 2] <= ema21[ema21.length - 2],
         isBearishCross:
             ema9.length > 1 && ema21.length > 1 && ema9[ema9.length - 1] < ema21[ema21.length - 1] && ema9[ema9.length - 2] >= ema21[ema21.length - 2],
+
+        // BackQuant Fourier For Loop output
+        backQuantScore: backQuant?.score ?? null,
+        backQuantSignal: backQuant?.out ?? 0,
+        backQuantIsLong: backQuant?.isLong ?? false,
+        backQuantIsShort: backQuant?.isShort ?? false,
     };
 }
 
