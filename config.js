@@ -107,13 +107,6 @@ export const DEV = {
     MODE: false,
 };
 
-// export const PROD = {
-//     INTERVAL: (() => {
-//         const now = new Date();
-//         const msToNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
-//         return msToNextMinute + 5000; // 5 seconds after the next minute
-//     })(),
-// };
 
 // 1 min
 export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };

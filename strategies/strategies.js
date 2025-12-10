@@ -17,8 +17,8 @@ class Strategy {
 
         const context = { prev, last };
 
-        const buyConditions = this.generateBuyConditions(h4, h1, m15, price);
-        const sellConditions = this.generateSellConditions(h4, h1, m15, price);
+        const buyConditions = this.generateBuyConditions(h4, h1, m15, m5, price);
+        const sellConditions = this.generateSellConditions(h4, h1, m15, m5, price);
         const evaluation = this.evaluateSignals(buyConditions, sellConditions, context);
 
         if (!evaluation.signal) return { ...evaluation, signal: null, reason: "score_below_threshold", context };
@@ -64,33 +64,49 @@ class Strategy {
         return { signal, buyScore, sellScore, threshold, context };
     }
 
-    generateBuyConditions(h4, h1, m15, price) {
+    generateBuyConditions(h4, h1, m15, m5, price) {
+        const m5Trend = this.pickTrend(m5);
+
         return [
+            // Higher timeframe bullish bias
             h4?.emaFast > h4?.emaSlow,
             h4?.macd?.histogram > 0,
 
             h1?.ema9 > h1?.ema21,
             h1?.rsi < RSI.EXIT_OVERSOLD,
 
+            // M15 confirmation
             m15?.isBullishCross,
             m15?.rsi < RSI.OVERSOLD,
-
             price <= m15?.bb?.lower,
+
+            // NEW: M5 structure alignment for M5-focused trading
+            m5Trend === "bullish",
+            m5?.ema9 > m5?.ema21,
+            m5?.close > m5?.ema50,
         ];
     }
 
-    generateSellConditions(h4, h1, m15, price) {
+    generateSellConditions(h4, h1, m15, m5, price) {
+        const m5Trend = this.pickTrend(m5);
+
         return [
+            // Higher timeframe bearish bias
             !h4?.isBullishTrend,
             h4?.macd?.histogram < 0,
 
             h1?.ema9 < h1?.ema21,
             h1?.rsi > RSI.OVERBOUGHT,
 
+            // M15 confirmation
             m15?.isBearishCross,
             m15?.rsi > RSI.OVERBOUGHT,
-
             price >= m15?.bb?.upper,
+
+            // NEW: M5 structure alignment for M5-focused trading
+            m5Trend === "bearish",
+            m5?.ema9 < m5?.ema21,
+            m5?.close < m5?.ema50,
         ];
     }
 

@@ -2,9 +2,8 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositi
 import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import { calcIndicators, analyzeTrend } from "./indicators/indicators.js";
+import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
-import { log } from "console";
 const { TIMEFRAMES } = ANALYSIS;
 
 class TradingBot {
@@ -141,7 +140,7 @@ class TradingBot {
             }
         };
 
-        // First run: align to next 5th minute + 5 seconds
+        // First run: align to next 5th minute + 5 seconds  
         const interval = DEV.MODE ? DEV.INTERVAL : getNextDelay();
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
@@ -290,7 +289,7 @@ class TradingBot {
         }
 
         // Only log when we have both bid and ask
-        logger.debug(`${symbol} - bid: ${bid}, ask: ${ask}`);
+        // logger.debug(`${symbol} - bid: ${bid}, ask: ${ask}`);
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
