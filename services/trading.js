@@ -155,7 +155,7 @@ class TradingService {
     // ============================================================
     async calculateATR(symbol) {
         try {
-            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.M15, 30); // Request more bars for robustness
+            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.M5, 200); // Request more bars for robustness
             if (!data?.prices || data.prices.length < 21) {
                 logger.warn(`[ATR] Insufficient data for ATR calculation on ${symbol} (got ${data?.prices?.length || 0} bars). Using fallback value.`);
                 return 0.001; // Fallback ATR value

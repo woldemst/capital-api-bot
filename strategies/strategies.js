@@ -84,6 +84,8 @@ class Strategy {
             m5Trend === "bullish",
             m5?.ema9 > m5?.ema21,
             m5?.close > m5?.ema50,
+
+            m5?.rsi > 50 && m5?.rsi < RSI.OVERBOUGHT,
         ];
     }
 
@@ -107,6 +109,8 @@ class Strategy {
             m5Trend === "bearish",
             m5?.ema9 < m5?.ema21,
             m5?.close < m5?.ema50,
+
+            m5?.rsi < 30 && m5?.rsi < RSI.OVERSOLD,
         ];
     }
 
