@@ -1,10 +1,10 @@
 import { ATR } from "technicalindicators";
-import fs from "fs";
 
-import { placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition, getHistorical } from "../api.js";
+import { placePosition, updateTrailingStop, getDealConfirmation, getAllowedTPRange, closePosition as apiClosePosition, getHistorical, getOpenPositions } from "../api.js";
 import { RISK, ANALYSIS } from "../config.js";
+import { calcIndicators } from "../indicators/indicators.js";
 import logger from "../utils/logger.js";
-import { getCurrentTradesLogPath } from "../utils/tradeLogger.js";
+import { logTradeClose, logTradeOpen } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
@@ -36,6 +36,95 @@ class TradingService {
     roundPrice(price, symbol) {
         const decimals = symbol.includes("JPY") ? 3 : 5;
         return Number(price).toFixed(decimals) * 1;
+    }
+
+    buildIndicatorSnapshot(indicators, price, symbol) {
+        if (!indicators) return null;
+
+        const { h4, h1, m15, m5 } = indicators;
+        const m5Trend = Strategy.pickTrend(m5, { symbol, timeframe: "M5", atr: m5?.atr });
+
+        return {
+            price,
+            h4: {
+                isBullishTrend: h4?.isBullishTrend ?? null,
+                macdHistogram: h4?.macd?.histogram ?? null,
+                emaFast: h4?.emaFast ?? null,
+                emaSlow: h4?.emaSlow ?? null,
+            },
+            h1: {
+                ema9: h1?.ema9 ?? null,
+                ema21: h1?.ema21 ?? null,
+                rsi: h1?.rsi ?? null,
+            },
+            m15: {
+                isBearishCross: m15?.isBearishCross ?? null,
+                isBullishCross: m15?.isBullishCross ?? null,
+                rsi: m15?.rsi ?? null,
+                bbUpper: m15?.bb?.upper ?? null,
+                bbLower: m15?.bb?.lower ?? null,
+            },
+            m5: {
+                trend: m5Trend,
+                ema9: m5?.ema9 ?? null,
+                ema21: m5?.ema21 ?? null,
+                ema50: m5?.ema50 ?? null,
+                close: m5?.close ?? m5?.lastClose ?? null,
+                rsi: m5?.rsi ?? null,
+            },
+        };
+    }
+
+    async captureIndicatorSet(symbol) {
+        if (!symbol) return null;
+
+        try {
+            const [h4Data, h1Data, m15Data, m5Data] = await Promise.all([
+                getHistorical(symbol, ANALYSIS.TIMEFRAMES.H4, 200),
+                getHistorical(symbol, ANALYSIS.TIMEFRAMES.H1, 200),
+                getHistorical(symbol, ANALYSIS.TIMEFRAMES.M15, 200),
+                getHistorical(symbol, ANALYSIS.TIMEFRAMES.M5, 200),
+            ]);
+
+            const [h4, h1, m15, m5] = await Promise.all([
+                calcIndicators(h4Data?.prices),
+                calcIndicators(h1Data?.prices),
+                calcIndicators(m15Data?.prices),
+                calcIndicators(m5Data?.prices),
+            ]);
+
+            return { h4, h1, m15, m5 };
+        } catch (error) {
+            logger.warn(`[Indicators] Unable to capture snapshot for ${symbol}: ${error.message}`);
+            return null;
+        }
+    }
+
+    async getPositionContext(dealId) {
+        try {
+            const positions = await getOpenPositions();
+            const match = positions?.positions?.find((p) => p?.position?.dealId === dealId || p?.dealId === dealId);
+            if (!match) return null;
+
+            const symbol = match?.market?.epic || match?.position?.epic || match?.market?.instrumentName || null;
+            const direction = match?.position?.direction;
+
+            const bid = match?.market?.bid;
+            const ask = match?.market?.offer ?? match?.market?.ask;
+            const price =
+                direction === "BUY" && Number.isFinite(ask)
+                    ? ask
+                    : direction === "SELL" && Number.isFinite(bid)
+                    ? bid
+                    : Number.isFinite(bid) && Number.isFinite(ask)
+                    ? (bid + ask) / 2
+                    : bid ?? ask ?? null;
+
+            return { symbol, direction, price };
+        } catch (error) {
+            logger.warn(`[ClosePos] Could not fetch position context for ${dealId}: ${error.message}`);
+            return null;
+        }
     }
 
     // ============================================================
@@ -155,7 +244,7 @@ class TradingService {
     // ============================================================
     async calculateATR(symbol) {
         try {
-            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.M5, 200); // Request more bars for robustness
+            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.M15, 200); // Request more bars for robustness
             if (!data?.prices || data.prices.length < 21) {
                 logger.warn(`[ATR] Insufficient data for ATR calculation on ${symbol} (got ${data?.prices?.length || 0} bars). Using fallback value.`);
                 return 0.001; // Fallback ATR value
@@ -242,6 +331,27 @@ class TradingService {
             }
 
             logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
+
+            try {
+                if (!confirmation?.dealId) {
+                    logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log.`);
+                } else {
+                    const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
+                    const entryPrice = confirmation?.level ?? price;
+
+                    logTradeOpen({
+                        symbol,
+                        dealId: confirmation.dealId,
+                        side: signal,
+                        entryPrice,
+                        stopLoss: stopLossPrice,
+                        takeProfit: takeProfitPrice,
+                        indicators: indicatorSnapshot,
+                    });
+                }
+            } catch (logError) {
+                logger.error(`[Order] Failed to log open trade for ${symbol}:`, logError);
+            }
 
             this.openTrades.push(symbol);
         } catch (error) {
@@ -348,21 +458,45 @@ class TradingService {
     //                     Close Position
     // ============================================================
     async closePosition(dealId, label) {
+        const closeReason = label || "closed";
+        let symbol;
+        let priceHint;
+        let indicatorSnapshot = null;
+
+        try {
+            const context = await this.getPositionContext(dealId);
+            if (context) {
+                symbol = context.symbol;
+                priceHint = context.price;
+
+                const indicators = await this.captureIndicatorSet(symbol);
+                if (indicators) {
+                    const priceForSnapshot = priceHint ?? indicators?.m5?.close ?? null;
+                    indicatorSnapshot = this.buildIndicatorSnapshot(indicators, priceForSnapshot, symbol);
+                }
+            }
+        } catch (contextError) {
+            logger.warn(`[ClosePos] Could not capture close snapshot for ${dealId}: ${contextError.message}`);
+        }
+
         try {
             await apiClosePosition(dealId);
             logger.info(`[API] Closed ${dealId}`);
-
-            const logPath = getCurrentTradesLogPath();
-            fs.appendFileSync(
-                logPath,
-                JSON.stringify({
-                    time: new Date().toISOString(),
-                    id: dealId,
-                    type: label,
-                }) + "\n"
-            );
         } catch (err) {
             logger.error(`[ClosePos] Error closing deal ${dealId}:`, err);
+            return;
+        }
+
+        try {
+            logTradeClose({
+                symbol,
+                dealId,
+                closeReason,
+                indicators: indicatorSnapshot,
+                closePrice: priceHint ?? indicatorSnapshot?.price,
+            });
+        } catch (logErr) {
+            logger.error(`[ClosePos] Failed to log closure for ${dealId}:`, logErr);
         }
     }
 }
