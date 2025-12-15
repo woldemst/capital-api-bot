@@ -38,6 +38,7 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
+    // Keep the snapshot limited to the indicator fields used inside strategies.js
     buildIndicatorSnapshot(indicators, price, symbol) {
         if (!indicators) return null;
 
@@ -338,6 +339,7 @@ class TradingService {
                 } else {
                     const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
                     const entryPrice = confirmation?.level ?? price;
+                    const logTimestamp = new Date().toISOString();
 
                     logTradeOpen({
                         symbol,
@@ -347,6 +349,7 @@ class TradingService {
                         stopLoss: stopLossPrice,
                         takeProfit: takeProfitPrice,
                         indicators: indicatorSnapshot,
+                        timestamp: logTimestamp,
                     });
                 }
             } catch (logError) {
@@ -494,6 +497,7 @@ class TradingService {
                 closeReason,
                 indicators: indicatorSnapshot,
                 closePrice: priceHint ?? indicatorSnapshot?.price,
+                timestamp: new Date().toISOString(),
             });
         } catch (logErr) {
             logger.error(`[ClosePos] Failed to log closure for ${dealId}:`, logErr);

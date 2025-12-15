@@ -33,6 +33,7 @@ function appendLine(logPath, payload) {
 
 function updateEntry(logPath, dealId, updater) {
     if (!fs.existsSync(logPath)) return false;
+    const targetId = String(dealId);
     const lines = fs.readFileSync(logPath, "utf-8").split("\n");
     let updated = false;
 
@@ -47,7 +48,7 @@ function updateEntry(logPath, dealId, updater) {
             continue;
         }
 
-        if (entry.dealId === dealId) {
+        if (String(entry.dealId) === targetId) {
             const next = updater(entry);
             lines[i] = JSON.stringify(next);
             updated = true;
@@ -62,12 +63,22 @@ function updateEntry(logPath, dealId, updater) {
     return updated;
 }
 
-export function logTradeOpen({ symbol, dealId, side, entryPrice, stopLoss, takeProfit, indicators, timestamp = new Date().toISOString() }) {
+export function logTradeOpen({
+    symbol,
+    dealId,
+    side,
+    entryPrice,
+    stopLoss,
+    takeProfit,
+    indicators,
+    timestamp = new Date().toISOString(),
+}) {
     const logPath = getSymbolLogPath(symbol);
     const payload = {
         dealId,
         symbol,
         side,
+        timestamp,
         openedAt: timestamp,
         entryPrice,
         stopLoss,
@@ -93,14 +104,19 @@ export function logTradeClose({
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
     for (const logPath of candidates) {
-        const updated = updateEntry(logPath, dealId, (entry) => ({
-            ...entry,
-            status: "closed",
-            closeReason: reason,
-            closedAt,
-            closePrice: typeof closePrice !== "undefined" ? closePrice : entry.closePrice,
-            indicatorsClose: indicators ?? entry.indicatorsClose ?? null,
-        }));
+        const updated = updateEntry(logPath, dealId, (entry) => {
+            const openedTimestamp = entry.timestamp ?? entry.openedAt ?? null;
+
+            return {
+                ...entry,
+                timestamp: openedTimestamp || closedAt,
+                status: "closed",
+                closeReason: reason,
+                closedAt,
+                closePrice: typeof closePrice !== "undefined" ? closePrice : entry.closePrice,
+                indicatorsClose: indicators ?? entry.indicatorsClose ?? null,
+            };
+        });
 
         if (updated) return true;
     }
@@ -110,6 +126,7 @@ export function logTradeClose({
     appendLine(fallbackPath, {
         dealId,
         symbol: symbol || "unknown",
+        timestamp: closedAt,
         status: "closed",
         closeReason: reason,
         closedAt,
