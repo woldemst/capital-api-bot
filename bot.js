@@ -2,6 +2,7 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositi
 import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
+import PositionGuard from "./services/positionGuard.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
@@ -19,6 +20,7 @@ class TradingBot {
         this.monitorInterval = null; // Add monitor interval for open trades
         this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
+        this.positionGuard = new PositionGuard({ getActiveSymbols: this.getActiveSymbols.bind(this) });
 
         // Define allowed trading windows (UTC, Berlin time for example)
         this.allowedTradingWindows = [
@@ -63,6 +65,7 @@ class TradingBot {
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMaxHoldMonitor();
+            this.positionGuard.start();
             this.isRunning = true;
         } catch (error) {
             logger.error("[bot.js][Bot] Error starting live trading:", error);
@@ -128,10 +131,10 @@ class TradingBot {
 
         const runAnalysis = async () => {
             try {
-                // if (!this.isTradingAllowed()) {
-                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                //     return;
-                // }
+                if (!this.isTradingAllowed()) {
+                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                    return;
+                }
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
                 await this.startMonitorOpenTrades();
@@ -305,6 +308,7 @@ class TradingBot {
         this.isRunning = false;
         clearInterval(this.analysisInterval);
         clearInterval(this.sessionRefreshInterval);
+        this.positionGuard.stop();
         webSocketService.disconnect();
     }
 
@@ -365,17 +369,9 @@ class TradingBot {
     }
 
     async closeAllPositions() {
-        logger.info("[Bot] Closing all positions before weekend...");
-        try {
-            const positions = await getOpenPositions();
-            for (const pos of positions.positions) {
-                await tradingService.closePosition(pos.dealId);
-                logger.info(`[Bot] Closed position: ${pos.market.epic}`);
-            }
-        } catch (error) {
-            logger.error("[Bot] Error closing all positions:", error);
-        }
+        return this.positionGuard.closeAllPositions();
     }
+
 
     // NEW: make timestamp parsing bulletproof (string/seconds/ms, with/without timezone)
     parseOpenTimeMs(openTime) {
@@ -391,8 +387,8 @@ class TradingBot {
 
             // Capital.com often returns ISO-like strings; ensure ISO form
             // "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DDTHH:MM:SS"
-            if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
-                s = s.replace(" ", "T");
+            if (/^\d{4}[-/]\d{2}[-/]\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+                s = s.replace(" ", "T").replace(/\//g, "-");
             }
 
             // If there’s no explicit timezone, assume UTC to avoid local-time skew
