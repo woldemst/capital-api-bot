@@ -2,8 +2,9 @@ import fs from "fs";
 import path from "path";
 
 // Ensure logs directory exists
-if (!fs.existsSync("./logs")) {
-    fs.mkdirSync("./logs");
+const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
+if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
 const logger = {

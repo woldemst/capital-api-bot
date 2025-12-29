@@ -168,7 +168,7 @@ class TradingBot {
 
                     const positions = await getOpenPositions();
                     if (positions?.positions) {
-                        tradingService.setOpenTrades(positions.positions.map((p) => p.market.epic));
+                        await tradingService.syncOpenPositions(positions.positions);
                         this.openedPositions = positions.positions.length;
                         logger.info(`Current open positions: ${positions.positions.length}`);
                     }
@@ -316,6 +316,12 @@ class TradingBot {
         logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
         try {
             const positions = await getOpenPositions();
+            if (positions?.positions) {
+                await tradingService.syncOpenPositions(positions.positions);
+            } else {
+                await tradingService.syncOpenPositions([]);
+                return;
+            }
             for (const pos of positions.positions) {
                 const symbol = pos.market ? pos.market.epic : pos.position.epic;
 
@@ -440,7 +446,7 @@ class TradingBot {
                             logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
                             continue;
                         }
-                        await tradingService.closePosition(dealId);
+                        await tradingService.closePosition(dealId, "timeout");
                         logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
                     }
                 }

@@ -10,7 +10,7 @@ import {
 import { RISK, ANALYSIS } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "../utils/logger.js";
-import { logTradeClose, logTradeOpen } from "../utils/tradeLogger.js";
+import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
@@ -33,6 +33,17 @@ class TradingService {
     }
     setAvailableMargin(m) {
         this.availableMargin = m;
+    }
+
+    async syncOpenPositions(positions = []) {
+        const epics = Array.isArray(positions)
+            ? positions
+                  .map((p) => p?.market?.epic || p?.position?.epic)
+                  .filter(Boolean)
+            : [];
+
+        this.openTrades = [...new Set(epics)];
+        await tradeTracker.syncOpenPositions(positions);
     }
 
     isSymbolTraded(symbol) {
@@ -333,13 +344,14 @@ class TradingService {
                     logTradeOpen({
                         symbol,
                         dealId: confirmation.dealId,
-                        side: signal,
+                        signal,
                         entryPrice,
                         stopLoss: stopLossPrice,
                         takeProfit: takeProfitPrice,
                         indicators: indicatorSnapshot,
                         timestamp: logTimestamp,
                     });
+                    tradeTracker.registerOpenDeal(confirmation.dealId, symbol);
                 }
             } catch (logError) {
                 logger.error(`[Order] Failed to log open trade for ${symbol}:`, logError);
@@ -480,7 +492,7 @@ class TradingService {
         }
 
         try {
-            logTradeClose({
+            const updated = logTradeClose({
                 symbol,
                 dealId,
                 closeReason,
@@ -488,6 +500,7 @@ class TradingService {
                 closePrice: priceHint ?? indicatorSnapshot?.price,
                 timestamp: new Date().toISOString(),
             });
+            if (updated) tradeTracker.markDealClosed(dealId);
         } catch (logErr) {
             logger.error(`[ClosePos] Failed to log closure for ${dealId}:`, logErr);
         }
