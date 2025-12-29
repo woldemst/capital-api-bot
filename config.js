@@ -50,7 +50,7 @@ export const RISK = {
     MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
-    REQUIRED_SCORE: 3, // Must have total score or more
+    REQUIRED_SCORE: 6, // Must have total score or more
 };
 
 // Technical Analysis Configuration
