@@ -5,3 +5,4 @@ backtest/data/
 backtest/signals/
 backtest/results/
 backtest/analysis/
+logs/
