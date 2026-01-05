@@ -143,7 +143,7 @@ class TradingBot {
             }
         };
 
-        // First run: align to next 5th minute + 5 seconds  
+        // First run: align to next 5th minute + 5 seconds
         const interval = DEV.MODE ? DEV.INTERVAL : getNextDelay();
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
@@ -284,15 +284,14 @@ class TradingBot {
         const marketDetails = await getMarketDetails(symbol);
         const bid = marketDetails?.snapshot?.bid;
         const ask = marketDetails?.snapshot?.offer;
-        
+
+        // console.log(marketDetails);
+
         // Guard: skip analysis if we don't have valid prices yet
         if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) {
             logger.warn(`[bot.js][analyzeSymbol] Skipping ${symbol}: invalid bid/ask (bid=${bid}, ask=${ask})`);
             return;
         }
-
-        // Only log when we have both bid and ask
-        // logger.debug(`${symbol} - bid: ${bid}, ask: ${ask}`);
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
@@ -377,7 +376,6 @@ class TradingBot {
     async closeAllPositions() {
         return this.positionGuard.closeAllPositions();
     }
-
 
     // NEW: make timestamp parsing bulletproof (string/seconds/ms, with/without timezone)
     parseOpenTimeMs(openTime) {

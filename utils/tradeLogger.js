@@ -66,7 +66,7 @@ function updateEntry(logPath, dealId, updater) {
 }
 
 function normalizeCloseReason(reason) {
-    if (!reason) return "closed";
+    if (!reason) return "closed_";
     const r = String(reason).toLowerCase();
     if (r === "tp" || r === "take_profit" || r.includes("take")) return "hit_tp";
     if (r === "sl" || r === "stop_loss" || r.includes("stop")) return "hit_sl";
@@ -122,22 +122,13 @@ export function getOpenTradesFromLogs() {
     return openEntries;
 }
 
-export function logTradeOpen({
-    symbol,
-    dealId,
-    signal,
-    entryPrice,
-    stopLoss,
-    takeProfit,
-    indicators,
-    timestamp = new Date().toISOString(),
-}) {
+export function logTradeOpen({ symbol, dealId, signal, entryPrice, stopLoss, takeProfit, indicators }) {
     const logPath = getSymbolLogPath(symbol);
     const payload = {
         dealId,
         symbol,
         signal,
-        openedAt: timestamp,
+        openedAt: new Date().toISOString(),
         entryPrice,
         stopLoss,
         takeProfit,
@@ -145,19 +136,14 @@ export function logTradeOpen({
         status: "open",
     };
 
+    // console.log("payload",payload);
+
     appendLine(logPath, payload);
 }
 
-export function logTradeClose({
-    symbol,
-    dealId,
-    closeReason,
-    indicators,
-    closePrice,
-    timestamp = new Date().toISOString(),
-}) {
-    const reason = normalizeCloseReason(closeReason || "closed");
-    const closedAt = timestamp;
+export function logTradeClose({ symbol, dealId, closeReason, indicators, closePrice }) {
+    const reason = normalizeCloseReason(closeReason);
+    const closedAt = new Date().toISOString();
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
@@ -167,8 +153,7 @@ export function logTradeClose({
 
             return {
                 ...entry,
-                openedAt: openedTimestamp || closedAt,
-                timestamp: openedTimestamp || closedAt,
+                openedAt: openedTimestamp,
                 status: "closed",
                 closeReason: reason,
                 closedAt,
@@ -258,7 +243,6 @@ class TradeTracker {
                     closeReason: inferredReason,
                     indicators: closePrice ? { price: closePrice } : null,
                     closePrice: closePrice ?? undefined,
-                    timestamp: new Date().toISOString(),
                 });
 
                 if (updated || !entry) {
