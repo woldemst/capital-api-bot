@@ -66,7 +66,7 @@ function updateEntry(logPath, dealId, updater) {
 }
 
 function normalizeCloseReason(reason) {
-    if (!reason) return "closed_";
+    if (!reason) return "closed_manually";
     const r = String(reason).toLowerCase();
     if (r === "tp" || r === "take_profit" || r.includes("take")) return "hit_tp";
     if (r === "sl" || r === "stop_loss" || r.includes("stop")) return "hit_sl";
@@ -122,17 +122,17 @@ export function getOpenTradesFromLogs() {
     return openEntries;
 }
 
-export function logTradeOpen({ symbol, dealId, signal, entryPrice, stopLoss, takeProfit, indicators }) {
+export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
     const payload = {
         dealId,
         symbol,
         signal,
-        openedAt: new Date().toISOString(),
         entryPrice,
         stopLoss,
         takeProfit,
         indicators,
+        openedAt: timestamp,
         status: "open",
     };
 
@@ -141,9 +141,9 @@ export function logTradeOpen({ symbol, dealId, signal, entryPrice, stopLoss, tak
     appendLine(logPath, payload);
 }
 
-export function logTradeClose({ symbol, dealId, closeReason, indicators, closePrice }) {
+export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicators, timestamp }) {
     const reason = normalizeCloseReason(closeReason);
-    const closedAt = new Date().toISOString();
+    const closedAt = timestamp;
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
@@ -194,6 +194,8 @@ class TradeTracker {
     registerOpenDeal(dealId, symbol) {
         if (!dealId) return;
         const id = String(dealId);
+        console.log("registered opened deal id", dealId, "for: ", symbol);
+
         this.openDealIds.add(id);
         if (symbol) this.dealIdToSymbol.set(id, symbol);
     }
@@ -205,23 +207,20 @@ class TradeTracker {
         this.dealIdToSymbol.delete(id);
     }
 
-    async syncOpenPositions(positions = []) {
+    async syncOpenPositions(positionsOrResponse = []) {
+        const positions = Array.isArray(positionsOrResponse) ? positionsOrResponse : positionsOrResponse?.positions ?? [];
         const brokerDealIds = new Set();
 
-        if (Array.isArray(positions)) {
-            positions.forEach((p) => {
-                const epic = p?.market?.epic || p?.position?.epic;
-                const dealId = p?.position?.dealId ?? p?.dealId;
-                if (!dealId) return;
+        positions.forEach((p) => {
+            const dealId = p?.position?.dealId;
+            if (!dealId) return;
 
-                const id = String(dealId);
-                brokerDealIds.add(id);
-                this.openDealIds.add(id);
-                if (epic) this.dealIdToSymbol.set(id, epic);
-            });
-        }
+            const id = String(dealId);
+            brokerDealIds.add(id);
+            this.openDealIds.add(id);
+        });
 
-        await this.reconcileClosedDeals(brokerDealIds);
+        return brokerDealIds;
     }
 
     async reconcileClosedDeals(brokerDealIds = new Set()) {

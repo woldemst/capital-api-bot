@@ -4,6 +4,7 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import PositionGuard from "./services/positionGuard.js";
 import { calcIndicators } from "./indicators/indicators.js";
+import { tradeTracker } from "./utils/tradeLogger.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
 
@@ -13,11 +14,13 @@ class TradingBot {
         this.analysisInterval = null;
         this.sessionRefreshInterval = null;
         this.pingInterval = 9 * 60 * 1000;
+        this.checkInterval = 15 * 1000;
         this.maxRetries = 3;
         this.retryDelay = 30000; // 30 seconds
         this.latestCandles = {}; // Store latest candles for each symbol
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
+        this.dealIdMonitorInterval = null; // Interval handle for dealId monitor
         this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
         this.positionGuard = new PositionGuard({ getActiveSymbols: this.getActiveSymbols.bind(this) });
@@ -65,7 +68,8 @@ class TradingBot {
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMaxHoldMonitor();
-            this.positionGuard.start();
+            await this.startMonitorDealIds();
+            // this.positionGuard.start();
             this.isRunning = true;
         } catch (error) {
             logger.error("[bot.js][Bot] Error starting live trading:", error);
@@ -131,10 +135,10 @@ class TradingBot {
 
         const runAnalysis = async () => {
             try {
-                if (!this.isTradingAllowed()) {
-                    logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                    return;
-                }
+                // if (!this.isTradingAllowed()) {
+                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                //     return;
+                // }
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
                 await this.startMonitorOpenTrades();
@@ -307,6 +311,7 @@ class TradingBot {
         this.isRunning = false;
         clearInterval(this.analysisInterval);
         clearInterval(this.sessionRefreshInterval);
+        clearInterval(this.dealIdMonitorInterval);
         this.positionGuard.stop();
         webSocketService.disconnect();
     }
@@ -315,12 +320,6 @@ class TradingBot {
         logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
         try {
             const positions = await getOpenPositions();
-            if (positions?.positions) {
-                await tradingService.syncOpenPositions(positions.positions);
-            } else {
-                await tradingService.syncOpenPositions([]);
-                return;
-            }
             for (const pos of positions.positions) {
                 const symbol = pos.market ? pos.market.epic : pos.position.epic;
 
@@ -348,6 +347,28 @@ class TradingBot {
         } catch (error) {
             logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
         }
+    }
+
+    async startMonitorDealIds() {
+        logger.info(`[DealID Monitor] Starting deal ID monitor`);
+
+        // Prevent multiple intervals if this is called more than once
+        if (this.dealIdMonitorInterval) clearInterval(this.dealIdMonitorInterval);
+
+        const run = async () => {
+            try {
+                const res = await getOpenPositions();
+                const positions = Array.isArray(res?.positions) ? res.positions : [];
+
+                await tradeTracker.syncOpenPositions(positions);
+            } catch (error) {
+                logger.error("[DealID Monitor] Error in startMonitorDealIds:", error);
+            }
+        };
+
+        // Run immediately, then on interval (setInterval's first tick happens after the delay)
+        await run();
+        this.dealIdMonitorInterval = setInterval(run, this.checkInterval);
     }
 
     scheduleMidnightSessionRefresh() {
@@ -444,7 +465,7 @@ class TradingBot {
                             logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
                             continue;
                         }
-                        await tradingService.closePosition(dealId, "timeout");
+                        // await tradingService.closePosition(dealId, "timeout");
                         logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
                     }
                 }

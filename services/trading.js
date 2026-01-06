@@ -23,6 +23,7 @@ class TradingService {
         this.maxRiskPerTrade = PER_TRADE;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
+        this.dealIds = new Set();
     }
 
     setAccountBalance(balance) {
@@ -35,11 +36,26 @@ class TradingService {
         this.availableMargin = m;
     }
 
-    async syncOpenPositions(positions = []) {
-        const epics = Array.isArray(positions) ? positions.map((p) => p?.market?.epic || p?.position?.epic).filter(Boolean) : [];
+    // Rehydrate open trades from broker positions (important after nodemon restart)
+    syncOpenPositions(positions = []) {
+        const arr = Array.isArray(positions) ? positions : positions?.positions ?? [];
 
-        this.openTrades = [...new Set(epics)];
-        await tradeTracker.syncOpenPositions(positions);
+        const symbols = [];
+        const dealIds = new Set();
+
+        for (const p of arr) {
+            const dealId = p?.position?.dealId ?? p?.dealId;
+            const epic = p?.market?.epic ?? p?.position?.epic;
+
+            if (dealId) dealIds.add(String(dealId));
+            if (epic) symbols.push(String(epic));
+        }
+
+        // Keep symbols unique to avoid duplicates
+        this.openTrades = [...new Set(symbols)];
+        this.dealIds = dealIds;
+
+        return { count: this.dealIds.size, symbols: this.openTrades };
     }
 
     isSymbolTraded(symbol) {
@@ -338,12 +354,12 @@ class TradingService {
                     const logTimestamp = new Date().toISOString();
 
                     logTradeOpen({
-                        symbol,
                         dealId: confirmation.dealId,
+                        symbol,
                         signal,
                         entryPrice,
-                        stopLoss: stopLossPrice,
-                        takeProfit: takeProfitPrice,
+                        stopLoss: stopLossPrice.toFixed(5),
+                        takeProfit: takeProfitPrice.toFixed(5),
                         indicators: indicatorSnapshot,
                         timestamp: logTimestamp,
                     });
@@ -365,7 +381,7 @@ class TradingService {
     // ============================================================
     async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
-            if (this.openTrades.length >= MAX_POSITIONS) {
+            if (this.dealIds.size >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max positions reached.`);
                 return;
             }
@@ -490,11 +506,11 @@ class TradingService {
 
         try {
             const updated = logTradeClose({
-                symbol,
                 dealId,
+                symbol,
+                closePrice: priceHint ?? indicatorSnapshot?.price,
                 closeReason,
                 indicators: indicatorSnapshot,
-                closePrice: priceHint ?? indicatorSnapshot?.price,
                 timestamp: new Date().toISOString(),
             });
             if (updated) tradeTracker.markDealClosed(dealId);
