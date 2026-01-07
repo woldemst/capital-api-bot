@@ -98,8 +98,6 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-
-
 export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
     const payload = {
@@ -150,6 +148,18 @@ class TradeTracker {
     constructor() {
         this.openDealIds = [];
         this.dealIdToSymbol = new Map();
+
+        this.openDealIdsBrocker = [];
+        this.dealIdToSymbolBrocker = new Map();
+    }
+
+    registerOpenBrockerDeal(dealId, symbol) {
+        if (!dealId) return;
+        const id = String(dealId);
+        if (!this.openDealIdsBrocker.includes(id)) {
+            this.openDealIdsBrocker.push(id);
+        }
+        if (symbol) this.dealIdToSymbolBrocker.set(id, symbol);
     }
 
     registerOpenDeal(dealId, symbol) {
@@ -160,6 +170,8 @@ class TradeTracker {
         if (!this.openDealIds.includes(id)) {
             this.openDealIds.push(id);
         }
+        console.log("[tradeLogger] openDealIds", this.openDealIds);
+
         if (symbol) this.dealIdToSymbol.set(id, symbol);
     }
 

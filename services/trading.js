@@ -323,8 +323,12 @@ class TradingService {
 
             logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
 
+            console.log("confirmation", confirmation);
+            const affectedDealId = confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId;
+            // or: const affectedDealId = confirmation?.affectedDeals?.[0]?.dealId;
+
             try {
-                if (!confirmation?.dealId) {
+                if (!affectedDealId) {
                     logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log.`);
                 } else {
                     const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
@@ -332,7 +336,7 @@ class TradingService {
                     const logTimestamp = new Date().toISOString();
 
                     logTradeOpen({
-                        dealId: confirmation.dealId,
+                        dealId: affectedDealId,
                         symbol,
                         signal,
                         entryPrice,
@@ -342,7 +346,8 @@ class TradingService {
                         timestamp: logTimestamp,
                     });
 
-                    tradeTracker.registerOpenDeal(confirmation.dealId, symbol);
+                    tradeTracker.registerOpenDeal(affectedDealId, symbol);
+                    // track open deal in memory
                 }
             } catch (logError) {
                 logger.error(`[Order] Failed to log open trade for ${symbol}:`, logError);

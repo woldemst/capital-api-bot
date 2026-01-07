@@ -353,14 +353,24 @@ class TradingBot {
             try {
                 const res = await getOpenPositions();
                 const positions = Array.isArray(res?.positions) ? res.positions : [];
+                // console.log("open pos, ", positions);
 
                 // 1. DealIds currently open at broker
-                const brokerDealIds = positions.map((p) => p?.position?.dealId ?? p?.dealId).filter(Boolean);
+                const brokerDeals = positions
+                    .map((p) => ({
+                        dealId: p?.position?.dealId ?? p?.dealId,
+                        symbol: p?.market?.epic ?? p?.position?.epic,
+                    }))
+                    .filter(Boolean);
+
+                const brokerDealIds = brokerDeals.map((d) => d.dealId);
 
                 // 2. Add new ones to memory
-                for (const id of brokerDealIds) {
-                    if (!this.openedDealIds.includes(id)) {
-                        this.openedDealIds.push(id);
+                // are open in broker but not in memory
+                for (const { dealId, symbol } of brokerDeals) {
+                    if (!this.openedDealIds.includes(dealId)) {
+                        this.openedDealIds.push(dealId);
+                        tradeTracker.registerOpenBrockerDeal(dealId, symbol);
                     }
                 }
                 console.log("open positions | dealIds", this.openedDealIds);
@@ -370,11 +380,11 @@ class TradingBot {
 
                 // 4. Remove closed from memory
                 this.openedDealIds = this.openedDealIds.filter((id) => brokerDealIds.includes(id));
-                // const missing = await tradeTracker.reconcileClosedDeals(positions);
 
                 // 5. Return / handle closed IDs
                 if (closedDealIds.length) {
                     console.log("closedDealIds", closedDealIds);
+                    await tradeTracker.reconcileClosedDeals(closedDealIds);
                     return closedDealIds; // ← THIS tick only
                 }
                 return [];
@@ -445,7 +455,6 @@ class TradingBot {
         return NaN;
     }
 
-    // REPLACE the old startMaxHoldMonitor with this version
     async startMaxHoldMonitor() {
         // keep only one interval running
         if (this.maxHoldInterval) clearInterval(this.maxHoldInterval);
