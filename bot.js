@@ -24,6 +24,7 @@ class TradingBot {
         this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
         this.positionGuard = new PositionGuard({ getActiveSymbols: this.getActiveSymbols.bind(this) });
+        this.openedDealIds = [];
 
         // Define allowed trading windows (UTC, Berlin time for example)
         this.allowedTradingWindows = [
@@ -68,7 +69,7 @@ class TradingBot {
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMaxHoldMonitor();
-            await this.startMonitorDealIds();
+            this.startMonitorDealIds();
             // this.positionGuard.start();
             this.isRunning = true;
         } catch (error) {
@@ -170,12 +171,6 @@ class TradingBot {
                         tradingService.setAvailableMargin(accountData.accounts[0].balance.available);
                     }
 
-                    const positions = await getOpenPositions();
-                    if (positions?.positions) {
-                        await tradingService.syncOpenPositions(positions.positions);
-                        this.openedPositions = positions.positions.length;
-                        logger.info(`Current open positions: ${positions.positions.length}`);
-                    }
                     return; // Success - exit the method
                 }
             } catch (error) {
@@ -349,25 +344,47 @@ class TradingBot {
         }
     }
 
-    async startMonitorDealIds() {
-        logger.info(`[DealID Monitor] Starting deal ID monitor`);
-
-        // Prevent multiple intervals if this is called more than once
-        if (this.dealIdMonitorInterval) clearInterval(this.dealIdMonitorInterval);
+    startMonitorDealIds() {
+        logger.info(`[DealID Monitor] Starting (every ${this.checkInterval}ms)`);
 
         const run = async () => {
+            logger.info(`[DealID Monitor] tick ${new Date().toISOString()}`);
+
             try {
                 const res = await getOpenPositions();
                 const positions = Array.isArray(res?.positions) ? res.positions : [];
 
-                await tradeTracker.syncOpenPositions(positions);
+                // 1. DealIds currently open at broker
+                const brokerDealIds = positions.map((p) => p?.position?.dealId ?? p?.dealId).filter(Boolean);
+
+                // 2. Add new ones to memory
+                for (const id of brokerDealIds) {
+                    if (!this.openedDealIds.includes(id)) {
+                        this.openedDealIds.push(id);
+                    }
+                }
+                console.log("open positions | dealIds", this.openedDealIds);
+
+                // 3. Detect closed ones
+                const closedDealIds = this.openedDealIds.filter((id) => !brokerDealIds.includes(id));
+
+                // 4. Remove closed from memory
+                this.openedDealIds = this.openedDealIds.filter((id) => brokerDealIds.includes(id));
+                // const missing = await tradeTracker.reconcileClosedDeals(positions);
+
+                // 5. Return / handle closed IDs
+                if (closedDealIds.length) {
+                    console.log("closedDealIds", closedDealIds);
+                    return closedDealIds; // ← THIS tick only
+                }
+                return [];
             } catch (error) {
-                logger.error("[DealID Monitor] Error in startMonitorDealIds:", error);
+                logger.error("[DealID Monitor] Error:", error);
+                return [];
             }
         };
 
-        // Run immediately, then on interval (setInterval's first tick happens after the delay)
-        await run();
+        run(); // run once immediately
         this.dealIdMonitorInterval = setInterval(run, this.checkInterval);
     }
 

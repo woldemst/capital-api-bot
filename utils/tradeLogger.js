@@ -98,29 +98,7 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function getOpenTradesFromLogs() {
-    const openEntries = [];
-    const files = listLogFiles();
 
-    for (const logPath of files) {
-        if (!fs.existsSync(logPath)) continue;
-        const lines = fs.readFileSync(logPath, "utf-8").split("\n");
-        for (const raw of lines) {
-            if (!raw.trim()) continue;
-            let entry;
-            try {
-                entry = JSON.parse(raw.trim());
-            } catch {
-                continue;
-            }
-            if (entry?.status === "open" && entry?.dealId) {
-                openEntries.push(entry);
-            }
-        }
-    }
-
-    return openEntries;
-}
 
 export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
@@ -170,66 +148,32 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
 
 class TradeTracker {
     constructor() {
-        this.openDealIds = new Set();
+        this.openDealIds = [];
         this.dealIdToSymbol = new Map();
-        this.hydrateOpenDealsFromLogs();
-    }
-
-    hydrateOpenDealsFromLogs() {
-        try {
-            const openEntries = getOpenTradesFromLogs();
-            openEntries.forEach((entry) => {
-                const id = String(entry.dealId);
-                this.openDealIds.add(id);
-                if (entry.symbol) this.dealIdToSymbol.set(id, entry.symbol);
-            });
-            if (openEntries.length) {
-                logger.info(`[Reconcile] Hydrated ${openEntries.length} open trades from logs.`);
-            }
-        } catch (err) {
-            logger.warn(`[Reconcile] Failed to hydrate open trades from logs: ${err.message}`);
-        }
     }
 
     registerOpenDeal(dealId, symbol) {
         if (!dealId) return;
         const id = String(dealId);
-        console.log("registered opened deal id", dealId, "for: ", symbol);
+        console.log("registered opened deal id", id, "for: ", symbol);
 
-        this.openDealIds.add(id);
+        if (!this.openDealIds.includes(id)) {
+            this.openDealIds.push(id);
+        }
         if (symbol) this.dealIdToSymbol.set(id, symbol);
     }
 
     markDealClosed(dealId) {
         if (!dealId) return;
         const id = String(dealId);
-        this.openDealIds.delete(id);
+        this.openDealIds = this.openDealIds.filter((dealId) => dealId !== id);
         this.dealIdToSymbol.delete(id);
     }
 
-    async syncOpenPositions(positionsOrResponse = []) {
-        const positions = Array.isArray(positionsOrResponse) ? positionsOrResponse : positionsOrResponse?.positions ?? [];
-        const brokerDealIds = new Set();
+    async reconcileClosedDeals(closedDealsIds = []) {
+        if (!Array.isArray(closedDealsIds) || !closedDealsIds.length) return;
 
-        positions.forEach((p) => {
-            const dealId = p?.position?.dealId;
-            if (!dealId) return;
-
-            const id = String(dealId);
-            brokerDealIds.add(id);
-            this.openDealIds.add(id);
-        });
-
-        return brokerDealIds;
-    }
-
-    async reconcileClosedDeals(brokerDealIds = new Set()) {
-        const missing = [];
-        for (const id of this.openDealIds) {
-            if (!brokerDealIds.has(id)) missing.push(id);
-        }
-
-        for (const id of missing) {
+        for (const id of closedDealsIds) {
             const symbol = this.dealIdToSymbol.get(id);
             try {
                 const { entry } = getTradeEntry(id, symbol);

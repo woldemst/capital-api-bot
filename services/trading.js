@@ -36,28 +36,6 @@ class TradingService {
         this.availableMargin = m;
     }
 
-    // Rehydrate open trades from broker positions (important after nodemon restart)
-    syncOpenPositions(positions = []) {
-        const arr = Array.isArray(positions) ? positions : positions?.positions ?? [];
-
-        const symbols = [];
-        const dealIds = new Set();
-
-        for (const p of arr) {
-            const dealId = p?.position?.dealId ?? p?.dealId;
-            const epic = p?.market?.epic ?? p?.position?.epic;
-
-            if (dealId) dealIds.add(String(dealId));
-            if (epic) symbols.push(String(epic));
-        }
-
-        // Keep symbols unique to avoid duplicates
-        this.openTrades = [...new Set(symbols)];
-        this.dealIds = dealIds;
-
-        return { count: this.dealIds.size, symbols: this.openTrades };
-    }
-
     isSymbolTraded(symbol) {
         return this.openTrades.includes(symbol);
     }
