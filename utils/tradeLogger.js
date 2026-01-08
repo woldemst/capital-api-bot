@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
-import { getMarketDetails } from "../api.js";
+import { getMarketDetails, getHistorical } from "../api.js";
+import { calcIndicators } from "../indicators/indicators.js";
 import logger from "./logger.js";
 
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
@@ -110,9 +111,13 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
         indicators,
         openedAt: timestamp,
         status: "open",
-    };
 
-    // console.log("payload",payload);
+        // keep stable schema for later analysis
+        closeReason: "",
+        indicatorsClose: null,
+        closePrice: null,
+        closedAt: null,
+    };
 
     appendLine(logPath, payload);
 }
@@ -127,14 +132,31 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
         const updated = updateEntry(logPath, dealId, (entry) => {
             const openedTimestamp = entry.openedAt ?? entry.timestamp ?? null;
 
+            // Prefer caller-provided close indicators; otherwise keep existing; otherwise reuse open indicators
+            // Ensure it has the same structure as `entry.indicators` so you can compare easily.
+            const base = entry.indicators ?? null;
+            const incoming = indicators ?? entry.indicatorsClose ?? null;
+
+            let indicatorsClose = incoming;
+            if (base && incoming && typeof incoming === "object") {
+                indicatorsClose = { ...base, ...incoming };
+            } else if (base && !incoming) {
+                indicatorsClose = { ...base };
+            }
+
+            // Always ensure price exists if we know it
+            if (indicatorsClose && typeof indicatorsClose === "object" && typeof closePrice !== "undefined" && closePrice !== null) {
+                indicatorsClose.price = closePrice;
+            }
+
             return {
                 ...entry,
                 openedAt: openedTimestamp,
                 status: "closed",
                 closeReason: reason,
                 closedAt,
-                closePrice: typeof closePrice !== "undefined" ? closePrice : entry.closePrice,
-                indicatorsClose: indicators ?? entry.indicatorsClose ?? null,
+                closePrice: typeof closePrice !== "undefined" ? closePrice : entry.closePrice ?? null,
+                indicatorsClose: indicatorsClose ?? null,
             };
         });
 
@@ -159,7 +181,7 @@ class TradeTracker {
         if (!this.openDealIdsBrocker.includes(id)) {
             this.openDealIdsBrocker.push(id);
         }
-        if (symbol) this.dealIdToSymbolBrocker.set(id, symbol);
+        if (symbol) this.dealIdToSymbolBrocker.set(id, String(symbol));
     }
 
     registerOpenDeal(dealId, symbol) {
@@ -178,26 +200,86 @@ class TradeTracker {
     markDealClosed(dealId) {
         if (!dealId) return;
         const id = String(dealId);
+
+        // local tracker
         this.openDealIds = this.openDealIds.filter((dealId) => dealId !== id);
         this.dealIdToSymbol.delete(id);
+
+        // broker tracker
+        this.openDealIdsBrocker = this.openDealIdsBrocker.filter((dealId) => dealId !== id);
+        this.dealIdToSymbolBrocker.delete(id);
+    }
+
+    async getCloseIndicators(symbol, closePrice) {
+        if (!symbol) return closePrice ? { price: closePrice } : null;
+
+        // Use the same timeframes you log at entry (adjust if your entry log includes more/less)
+        const HISTORY = 200;
+        const TF = {
+            h4: "HOUR_4",
+            h1: "HOUR",
+            m15: "MINUTE_15",
+            m5: "MINUTE_5",
+            // m1: "MINUTE", // enable if you also log m1 on entry
+        };
+
+        try {
+            const [h4Data, h1Data, m15Data, m5Data] = await Promise.all([
+                getHistorical(symbol, TF.h4, HISTORY),
+                getHistorical(symbol, TF.h1, HISTORY),
+                getHistorical(symbol, TF.m15, HISTORY),
+                getHistorical(symbol, TF.m5, HISTORY),
+            ]);
+
+            const h4Candles = Array.isArray(h4Data?.prices) ? h4Data.prices.slice(-HISTORY) : [];
+            const h1Candles = Array.isArray(h1Data?.prices) ? h1Data.prices.slice(-HISTORY) : [];
+            const m15Candles = Array.isArray(m15Data?.prices) ? m15Data.prices.slice(-HISTORY) : [];
+            const m5Candles = Array.isArray(m5Data?.prices) ? m5Data.prices.slice(-HISTORY) : [];
+
+            const indicatorsClose = {
+                price: closePrice ?? null,
+                h4: h4Candles.length ? await calcIndicators(h4Candles, symbol, TF.h4) : null,
+                h1: h1Candles.length ? await calcIndicators(h1Candles, symbol, TF.h1) : null,
+                m15: m15Candles.length ? await calcIndicators(m15Candles, symbol, TF.m15) : null,
+                m5: m5Candles.length ? await calcIndicators(m5Candles, symbol, TF.m5) : null,
+            };
+
+            return indicatorsClose;
+        } catch (err) {
+            logger.warn(`[Reconcile] Close-indicators calc failed for ${symbol}: ${err.message}`);
+            return closePrice ? { price: closePrice } : null;
+        }
     }
 
     async reconcileClosedDeals(closedDealsIds = []) {
         if (!Array.isArray(closedDealsIds) || !closedDealsIds.length) return;
 
         for (const id of closedDealsIds) {
-            const symbol = this.dealIdToSymbol.get(id);
+            // Prefer known symbol mappings; broker mapping is what your DealID monitor populates
+            let symbol = this.dealIdToSymbol.get(id) || this.dealIdToSymbolBrocker.get(id) || null;
             try {
+                console.log('its', id, symbol);
+                
                 const { entry } = getTradeEntry(id, symbol);
+
+                // If symbol wasn't mapped (e.g., after restart), fallback to the symbol stored in the log entry
+                if (!symbol) symbol = entry?.symbol ? String(entry.symbol) : null;
+
                 const closePrice = await this.getClosePrice(symbol, entry);
                 const inferredReason = this.inferCloseReason(entry, closePrice);
 
+                console.log('closed deal id: ', id,'its entry: ', entry, 'closePrice:', closePrice, 'inferredReason:', inferredReason);
+                
+                // Compute REAL close indicators snapshot (current candles at closing time)
+                const indicatorsClose = await this.getCloseIndicators(symbol, closePrice);
+
                 const updated = logTradeClose({
-                    symbol,
+                    symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
                     closeReason: inferredReason,
-                    indicators: closePrice ? { price: closePrice } : null,
-                    closePrice: closePrice ?? undefined,
+                    indicators: indicatorsClose,
+                    closePrice: closePrice ?? null,
+                    timestamp: new Date().toISOString(),
                 });
 
                 if (updated || !entry) {

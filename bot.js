@@ -24,7 +24,7 @@ class TradingBot {
         this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
         this.positionGuard = new PositionGuard({ getActiveSymbols: this.getActiveSymbols.bind(this) });
-        this.openedDealIds = [];
+        this.openedBrockerDealIds = [];
 
         // Define allowed trading windows (UTC, Berlin time for example)
         this.allowedTradingWindows = [
@@ -368,24 +368,24 @@ class TradingBot {
                 // 2. Add new ones to memory
                 // are open in broker but not in memory
                 for (const { dealId, symbol } of brokerDeals) {
-                    if (!this.openedDealIds.includes(dealId)) {
-                        this.openedDealIds.push(dealId);
+                    if (!this.openedBrockerDealIds.includes(dealId)) {
+                        this.openedBrockerDealIds.push(dealId);
                         tradeTracker.registerOpenBrockerDeal(dealId, symbol);
                     }
                 }
-                console.log("open positions | dealIds", this.openedDealIds);
+                console.log("openedBrockerDealIds:", this.openedBrockerDealIds);
 
                 // 3. Detect closed ones
-                const closedDealIds = this.openedDealIds.filter((id) => !brokerDealIds.includes(id));
+                const closedDealIds = this.openedBrockerDealIds.filter((id) => !brokerDealIds.includes(id));
 
                 // 4. Remove closed from memory
-                this.openedDealIds = this.openedDealIds.filter((id) => brokerDealIds.includes(id));
+                this.openedBrockerDealIds = this.openedBrockerDealIds.filter((id) => brokerDealIds.includes(id));
 
                 // 5. Return / handle closed IDs
                 if (closedDealIds.length) {
                     console.log("closedDealIds", closedDealIds);
                     await tradeTracker.reconcileClosedDeals(closedDealIds);
-                    return closedDealIds; // ← THIS tick only
+                    closedDealIds.length = 0;
                 }
                 return [];
             } catch (error) {
