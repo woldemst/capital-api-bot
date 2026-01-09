@@ -4,6 +4,9 @@ import { getMarketDetails, getHistorical } from "../api.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "./logger.js";
 
+import { ANALYSIS } from "../config.js";
+const { TIMEFRAMES } = ANALYSIS;
+
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
 
 function ensureLogDir() {
@@ -173,6 +176,9 @@ class TradeTracker {
 
         this.openDealIdsBrocker = [];
         this.dealIdToSymbolBrocker = new Map();
+
+        this.candleHistoryData = {}; // symbol -> array of candles
+        this.historyLength = 200;
     }
 
     registerOpenBrockerDeal(dealId, symbol) {
@@ -210,44 +216,60 @@ class TradeTracker {
         this.dealIdToSymbolBrocker.delete(id);
     }
 
-    async getCloseIndicators(symbol, closePrice) {
-        if (!symbol) return closePrice ? { price: closePrice } : null;
+    // ------------------------------------------------------------
+    //                 CLOSE INDICATORS CALCULATION
+    // ------------------------------------------------------------
 
-        // Use the same timeframes you log at entry (adjust if your entry log includes more/less)
-        const HISTORY = 200;
-        const TF = {
-            h4: "HOUR_4",
-            h1: "HOUR",
-            m15: "MINUTE_15",
-            m5: "MINUTE_5",
-            // m1: "MINUTE", // enable if you also log m1 on entry
-        };
-
+    async fetchAllCandles(symbol, timeframes, historyLength) {
         try {
-            const [h4Data, h1Data, m15Data, m5Data] = await Promise.all([
-                getHistorical(symbol, TF.h4, HISTORY),
-                getHistorical(symbol, TF.h1, HISTORY),
-                getHistorical(symbol, TF.m15, HISTORY),
-                getHistorical(symbol, TF.m5, HISTORY),
+            const [d1Data, h4Data, h1Data, m15Data, m5Data, m1Data] = await Promise.all([
+                getHistorical(symbol, timeframes.D1, historyLength),
+                getHistorical(symbol, timeframes.H4, historyLength),
+                getHistorical(symbol, timeframes.H1, historyLength),
+                getHistorical(symbol, timeframes.M15, historyLength),
+                getHistorical(symbol, timeframes.M5, historyLength),
+                getHistorical(symbol, timeframes.M1, historyLength),
             ]);
+            console.log(`Fetched candles: ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`);
+            return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
+        } catch (error) {
+            logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
+            return {};
+        }
+    }
+    async getCloseIndicators(symbol) {
+        try {
+            const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.historyLength);
 
-            const h4Candles = Array.isArray(h4Data?.prices) ? h4Data.prices.slice(-HISTORY) : [];
-            const h1Candles = Array.isArray(h1Data?.prices) ? h1Data.prices.slice(-HISTORY) : [];
-            const m15Candles = Array.isArray(m15Data?.prices) ? m15Data.prices.slice(-HISTORY) : [];
-            const m5Candles = Array.isArray(m5Data?.prices) ? m5Data.prices.slice(-HISTORY) : [];
+            this.candleHistoryData[symbol] = {
+                D1: d1Data.prices.slice(-this.historyLength) || [],
+                H4: h4Data.prices.slice(-this.historyLength) || [],
+                H1: h1Data.prices.slice(-this.historyLength) || [],
+                M15: m15Data.prices.slice(-this.historyLength) || [],
+                M5: m5Data.prices.slice(-this.historyLength) || [],
+                M1: m1Data.prices.slice(-this.historyLength) || [],
+            };
+
+            const d1Candles = this.candleHistoryData[symbol].D1;
+            const h4Candles = this.candleHistoryData[symbol].H4;
+            const h1Candles = this.candleHistoryData[symbol].H1;
+            const m15Candles = this.candleHistoryData[symbol].M15;
+            const m5Candles = this.candleHistoryData[symbol].M5;
+            const m1Candles = this.candleHistoryData[symbol].M1;
 
             const indicatorsClose = {
-                price: closePrice ?? null,
-                h4: h4Candles.length ? await calcIndicators(h4Candles, symbol, TF.h4) : null,
-                h1: h1Candles.length ? await calcIndicators(h1Candles, symbol, TF.h1) : null,
-                m15: m15Candles.length ? await calcIndicators(m15Candles, symbol, TF.m15) : null,
-                m5: m5Candles.length ? await calcIndicators(m5Candles, symbol, TF.m5) : null,
+                d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
+                h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
+                h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
+                m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
+                m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
+                m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
             };
 
             return indicatorsClose;
         } catch (err) {
             logger.warn(`[Reconcile] Close-indicators calc failed for ${symbol}: ${err.message}`);
-            return closePrice ? { price: closePrice } : null;
+            return null;
         }
     }
 
@@ -258,8 +280,8 @@ class TradeTracker {
             // Prefer known symbol mappings; broker mapping is what your DealID monitor populates
             let symbol = this.dealIdToSymbol.get(id) || this.dealIdToSymbolBrocker.get(id) || null;
             try {
-                console.log('its', id, symbol);
-                
+                console.log("its", id, symbol);
+
                 const { entry } = getTradeEntry(id, symbol);
 
                 // If symbol wasn't mapped (e.g., after restart), fallback to the symbol stored in the log entry
@@ -268,8 +290,8 @@ class TradeTracker {
                 const closePrice = await this.getClosePrice(symbol, entry);
                 const inferredReason = this.inferCloseReason(entry, closePrice);
 
-                console.log('closed deal id: ', id,'its entry: ', entry, 'closePrice:', closePrice, 'inferredReason:', inferredReason);
-                
+                console.log("closed deal id: ", id, "its entry: ", entry, "closePrice:", closePrice, "inferredReason:", inferredReason);
+
                 // Compute REAL close indicators snapshot (current candles at closing time)
                 const indicatorsClose = await this.getCloseIndicators(symbol, closePrice);
 

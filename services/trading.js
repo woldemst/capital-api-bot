@@ -331,7 +331,7 @@ class TradingService {
                 if (!affectedDealId) {
                     logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log.`);
                 } else {
-                    const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
+                    // const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
                     const entryPrice = confirmation?.level ?? price;
                     const logTimestamp = new Date().toISOString();
 
@@ -342,7 +342,8 @@ class TradingService {
                         entryPrice,
                         stopLoss: stopLossPrice.toFixed(5),
                         takeProfit: takeProfitPrice.toFixed(5),
-                        indicators: indicatorSnapshot,
+                        // indicators: indicatorSnapshot,
+                        indicators: indicators,
                         timestamp: logTimestamp,
                     });
 
