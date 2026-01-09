@@ -45,69 +45,6 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
-    // Keep the snapshot limited to the indicator fields used inside strategies.js
-    buildIndicatorSnapshot(indicators, price, symbol) {
-        if (!indicators) return null;
-
-        const { h4, h1, m15, m5 } = indicators;
-        const m5Trend = Strategy.pickTrend(m5, { symbol, timeframe: "M5", atr: m5?.atr });
-
-        return {
-            price,
-            h4: {
-                isBullishTrend: h4?.isBullishTrend ?? null,
-                macdHistogram: h4?.macd?.histogram ?? null,
-                emaFast: h4?.emaFast ?? null,
-                emaSlow: h4?.emaSlow ?? null,
-            },
-            h1: {
-                ema9: h1?.ema9 ?? null,
-                ema21: h1?.ema21 ?? null,
-                rsi: h1?.rsi ?? null,
-            },
-            m15: {
-                isBearishCross: m15?.isBearishCross ?? null,
-                isBullishCross: m15?.isBullishCross ?? null,
-                rsi: m15?.rsi ?? null,
-                bbUpper: m15?.bb?.upper ?? null,
-                bbLower: m15?.bb?.lower ?? null,
-            },
-            m5: {
-                trend: m5Trend,
-                ema9: m5?.ema9 ?? null,
-                ema21: m5?.ema21 ?? null,
-                ema50: m5?.ema50 ?? null,
-                close: m5?.close ?? m5?.lastClose ?? null,
-                rsi: m5?.rsi ?? null,
-            },
-        };
-    }
-
-    async captureIndicatorSet(symbol) {
-        if (!symbol) return null;
-
-        try {
-            const [h4Data, h1Data, m15Data, m5Data] = await Promise.all([
-                getHistorical(symbol, ANALYSIS.TIMEFRAMES.H4, 200),
-                getHistorical(symbol, ANALYSIS.TIMEFRAMES.H1, 200),
-                getHistorical(symbol, ANALYSIS.TIMEFRAMES.M15, 200),
-                getHistorical(symbol, ANALYSIS.TIMEFRAMES.M5, 200),
-            ]);
-
-            const [h4, h1, m15, m5] = await Promise.all([
-                calcIndicators(h4Data?.prices),
-                calcIndicators(h1Data?.prices),
-                calcIndicators(m15Data?.prices),
-                calcIndicators(m5Data?.prices),
-            ]);
-
-            return { h4, h1, m15, m5 };
-        } catch (error) {
-            logger.warn(`[Indicators] Unable to capture snapshot for ${symbol}: ${error.message}`);
-            return null;
-        }
-    }
-
     async getPositionContext(dealId) {
         try {
             const positions = await getOpenPositions();
@@ -469,12 +406,6 @@ class TradingService {
             if (context) {
                 symbol = context.symbol;
                 priceHint = context.price;
-
-                const indicators = await this.captureIndicatorSet(symbol);
-                if (indicators) {
-                    const priceForSnapshot = priceHint ?? indicators?.m5?.close ?? null;
-                    indicatorSnapshot = this.buildIndicatorSnapshot(indicators, priceForSnapshot, symbol);
-                }
             }
         } catch (contextError) {
             logger.warn(`[ClosePos] Could not capture close snapshot for ${dealId}: ${contextError.message}`);
