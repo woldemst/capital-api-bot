@@ -7,7 +7,7 @@ class Strategy {
     //                      MAIN SIGNAL LOGIC
     // ------------------------------------------------------------
     getSignal = ({ symbol, indicators = {}, candles = {}, bid, ask }) => {
-        const { m5, m15, h1, h4 } = indicators;
+        const { m5, m15, h1, h4, d1, m1 } = indicators;
 
         const price = (bid + ask) / 2;
 
@@ -22,6 +22,9 @@ class Strategy {
         const evaluation = this.evaluateSignals(buyConditions, sellConditions, context);
 
         if (!evaluation.signal) return { ...evaluation, signal: null, reason: "score_below_threshold", context };
+
+        const filter = this.passesDirectionalFilters(evaluation.signal, { d1, m1, m5 });
+        if (!filter.pass) return { ...evaluation, signal: null, reason: filter.reason, context };
 
         return { ...evaluation, reason: "score_above_threshold", context };
     };
@@ -64,6 +67,47 @@ class Strategy {
         return { signal, buyScore, sellScore, threshold, context };
     }
 
+    passesDirectionalFilters(direction, { d1, m1, m5 }) {
+        const toNumber = (value) => {
+            if (value === undefined || value === null || value === "") return NaN;
+            const num = typeof value === "number" ? value : Number(value);
+            return Number.isFinite(num) ? num : NaN;
+        };
+
+        const m5Adx = toNumber(m5?.adx?.adx ?? m5?.adx);
+        if (Number.isFinite(m5Adx) && m5Adx > 23) {
+            return { pass: false, reason: "filter_m5_adx" };
+        }
+
+        if (direction === "BUY") {
+            if (d1?.trend && d1.trend !== "bullish") return { pass: false, reason: "filter_d1_trend" };
+
+            const d1Rsi = toNumber(d1?.rsi);
+            if (Number.isFinite(d1Rsi) && d1Rsi < 55) return { pass: false, reason: "filter_d1_rsi" };
+
+            const d1PriceVsEma9 = toNumber(d1?.price_vs_ema9);
+            if (Number.isFinite(d1PriceVsEma9) && d1PriceVsEma9 < 0.0017) return { pass: false, reason: "filter_d1_price_vs_ema9" };
+
+            const m1Rsi = toNumber(m1?.rsi);
+            if (Number.isFinite(m1Rsi) && m1Rsi < 52) return { pass: false, reason: "filter_m1_rsi" };
+        }
+
+        if (direction === "SELL") {
+            if (d1?.trend && d1.trend !== "bearish") return { pass: false, reason: "filter_d1_trend" };
+
+            const d1Rsi = toNumber(d1?.rsi);
+            if (Number.isFinite(d1Rsi) && d1Rsi > 45) return { pass: false, reason: "filter_d1_rsi" };
+
+            const d1PriceVsEma9 = toNumber(d1?.price_vs_ema9);
+            if (Number.isFinite(d1PriceVsEma9) && d1PriceVsEma9 > -0.0017) return { pass: false, reason: "filter_d1_price_vs_ema9" };
+
+            const m1Rsi = toNumber(m1?.rsi);
+            if (Number.isFinite(m1Rsi) && m1Rsi > 48) return { pass: false, reason: "filter_m1_rsi" };
+        }
+
+        return { pass: true, reason: "" };
+    }
+
     generateBuyConditions(h4, h1, m15, m5, price) {
         const m5Trend = this.pickTrend(m5);
 
@@ -77,8 +121,8 @@ class Strategy {
 
             // M15 confirmation
             m15?.isBullishCross,
-            m15?.rsi < RSI.OVERSOLD,
-            price <= m15?.bb?.lower,
+            m15?.rsi > 50,
+            price >= m15?.bb?.middle,
 
             // NEW: M5 structure alignment for M5-focused trading
             m5Trend === "bullish",
@@ -94,7 +138,7 @@ class Strategy {
 
         return [
             // Higher timeframe bearish bias
-            !h4?.isBullishTrend,
+            h4?.emaFast < h4?.emaSlow,
             h4?.macd?.histogram < 0,
 
             h1?.ema9 < h1?.ema21,
@@ -102,15 +146,15 @@ class Strategy {
 
             // M15 confirmation
             m15?.isBearishCross,
-            m15?.rsi > RSI.OVERBOUGHT,
-            price >= m15?.bb?.upper,
+            m15?.rsi < 50,
+            price <= m15?.bb?.middle,
 
             // NEW: M5 structure alignment for M5-focused trading
             m5Trend === "bearish",
             m5?.ema9 < m5?.ema21,
             m5?.close < m5?.ema50,
 
-            m5?.rsi < 30 && m5?.rsi < RSI.OVERSOLD,
+            m5?.rsi < 50 && m5?.rsi > RSI.OVERSOLD,
         ];
     }
 

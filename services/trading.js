@@ -396,10 +396,12 @@ class TradingService {
     //                     Close Position
     // ============================================================
     async closePosition(dealId, label) {
-        const closeReason = label || "manual_close";
+        const requestedReason = label || "manual_close";
         let symbol;
         let priceHint;
         let indicatorSnapshot = null;
+        let closePayload;
+        let confirmation;
 
         try {
             const context = await this.getPositionContext(dealId);
@@ -412,19 +414,81 @@ class TradingService {
         }
 
         try {
-            await apiClosePosition(dealId);
-            logger.info(`[API] Closed ${dealId}`);
+            if (symbol) {
+                indicatorSnapshot = await tradeTracker.getCloseIndicators(symbol);
+            }
+        } catch (snapshotError) {
+            logger.warn(`[ClosePos] Could not capture close indicators for ${dealId}: ${snapshotError.message}`);
+        }
+
+        try {
+            closePayload = await apiClosePosition(dealId);
+            logger.info(`[ClosePos] Raw close payload for ${dealId}:`, closePayload);
         } catch (err) {
             logger.error(`[ClosePos] Error closing deal ${dealId}:`, err);
             return;
         }
 
         try {
+            if (closePayload?.dealReference) {
+                try {
+                    confirmation = await getDealConfirmation(closePayload.dealReference);
+                    logger.info(`[ClosePos] Close confirmation for ${dealId}:`, confirmation);
+                } catch (confirmError) {
+                    logger.warn(`[ClosePos] Close confirmation failed for ${dealId}: ${confirmError.message}`);
+                }
+            }
+
+            const toNumber = (value) => {
+                if (value === undefined || value === null || value === "") return null;
+                const num = typeof value === "number" ? value : Number(value);
+                return Number.isFinite(num) ? num : null;
+            };
+
+            const firstNumber = (...values) => {
+                for (const value of values) {
+                    const num = toNumber(value);
+                    if (num !== null) return num;
+                }
+                return null;
+            };
+
+            const brokerPrice = firstNumber(
+                confirmation?.closeLevel,
+                confirmation?.level,
+                confirmation?.dealLevel,
+                confirmation?.price,
+                closePayload?.closeLevel,
+                closePayload?.level,
+                closePayload?.price,
+                priceHint
+            );
+
+            const brokerReason =
+                confirmation?.reason ??
+                confirmation?.status ??
+                confirmation?.dealStatus ??
+                closePayload?.reason ??
+                closePayload?.status ??
+                null;
+
+            const finalReason = brokerReason || requestedReason || "unknown";
+
+            logger.info("[ClosePos] Derived closeReason", {
+                dealId,
+                requestedReason,
+                brokerReason,
+                finalReason,
+                closePrice: brokerPrice,
+                priceHint,
+                hasConfirmation: Boolean(confirmation),
+            });
+
             const updated = logTradeClose({
                 dealId,
                 symbol,
-                closePrice: priceHint ?? indicatorSnapshot?.price,
-                closeReason,
+                closePrice: brokerPrice ?? priceHint ?? null,
+                closeReason: finalReason,
                 indicators: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });
