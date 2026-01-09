@@ -70,12 +70,66 @@ function updateEntry(logPath, dealId, updater) {
 }
 
 function normalizeCloseReason(reason) {
-    if (!reason) return "closed_manually";
+    if (!reason) return "unknown";
     const r = String(reason).toLowerCase();
-    if (r === "tp" || r === "take_profit" || r.includes("take")) return "hit_tp";
+    if (r === "tp" || r === "take_profit" || r.includes("take") || r.includes("limit")) return "hit_tp";
+    if (r.includes("trailing")) return "trailing_stop";
     if (r === "sl" || r === "stop_loss" || r.includes("stop")) return "hit_sl";
+    if (r.includes("manual") || r.includes("user")) return "manual_close";
     if (r.includes("timeout") || r.includes("time")) return "timeout";
+    if (r.includes("expire")) return "expired";
+    if (r.includes("partial")) return "partial_close";
     return reason;
+}
+
+function inferCloseReasonFromPrice(entry, closePrice) {
+    if (!entry) return "unknown";
+    const signal = String(entry?.signal || entry?.side || "").toUpperCase();
+    const stopLoss = Number(entry?.stopLoss);
+    const takeProfit = Number(entry?.takeProfit);
+
+    if (!signal || !Number.isFinite(stopLoss) || !Number.isFinite(takeProfit) || !Number.isFinite(closePrice)) {
+        return "unknown";
+    }
+
+    const slHit = signal === "BUY" ? closePrice <= stopLoss : closePrice >= stopLoss;
+    const tpHit = signal === "BUY" ? closePrice >= takeProfit : closePrice <= takeProfit;
+
+    if (tpHit && !slHit) return "hit_tp";
+    if (slHit && !tpHit) return "hit_sl";
+    if (!tpHit && !slHit) return "unknown";
+
+    const distToSL = Math.abs(closePrice - stopLoss);
+    const distToTP = Math.abs(closePrice - takeProfit);
+    return distToTP < distToSL ? "hit_tp" : "hit_sl";
+}
+
+export function deriveCloseReason({ brokerPayload, closeReasonHint, entry, closePrice }) {
+    const hint = normalizeCloseReason(closeReasonHint);
+    const affectedStatuses = Array.isArray(brokerPayload?.affectedDeals)
+        ? brokerPayload.affectedDeals.map((d) => d?.status).filter(Boolean).join(" ")
+        : "";
+    const text = [brokerPayload?.dealStatus, brokerPayload?.status, brokerPayload?.reason, brokerPayload?.closeReason, brokerPayload?.result, affectedStatuses]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase())
+        .join(" ");
+
+    // TODO: Confirm broker close payload fields and tighten mappings to broker enums.
+    if (text) {
+        if (text.includes("trailing")) return { reason: "trailing_stop", source: "broker" };
+        if (text.includes("stop") || text.includes("sl")) return { reason: "hit_sl", source: "broker" };
+        if (text.includes("limit") || text.includes("take") || text.includes("tp")) return { reason: "hit_tp", source: "broker" };
+        if (text.includes("partial")) return { reason: "partial_close", source: "broker" };
+        if (text.includes("expire")) return { reason: "expired", source: "broker" };
+        if (text.includes("manual") || text.includes("user") || text.includes("client")) return { reason: "manual_close", source: "broker" };
+    }
+
+    if (hint && hint !== "unknown") return { reason: hint, source: "hint" };
+
+    const inferred = inferCloseReasonFromPrice(entry, closePrice);
+    if (inferred !== "unknown") return { reason: inferred, source: "inferred" };
+
+    return { reason: "unknown", source: "unknown" };
 }
 
 export function getTradeEntry(dealId, symbol) {
@@ -102,10 +156,18 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp }) {
+export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp, dealReference }) {
+    if (!dealId) return false;
+    const { entry } = getTradeEntry(dealId, symbol);
+    if (entry) {
+        logger.warn(`[tradeLogger] Duplicate open log for ${dealId} (${symbol}), skipping.`);
+        return false;
+    }
+
     const logPath = getSymbolLogPath(symbol);
     const payload = {
         dealId,
+        dealReference,
         symbol,
         signal,
         entryPrice,
@@ -123,33 +185,28 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
     };
 
     appendLine(logPath, payload);
+    return true;
 }
 
 export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicators, timestamp }) {
     const reason = normalizeCloseReason(closeReason);
     const closedAt = timestamp;
-    const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
+    const { entry: existing, logPath: preferredPath } = getTradeEntry(dealId, symbol);
+    if (existing?.status === "closed" && existing.closedAt) return true;
+
+    const primaryPath = preferredPath ?? (symbol ? getSymbolLogPath(symbol) : null);
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
     for (const logPath of candidates) {
         const updated = updateEntry(logPath, dealId, (entry) => {
             const openedTimestamp = entry.openedAt ?? entry.timestamp ?? null;
 
-            // Prefer caller-provided close indicators; otherwise keep existing; otherwise reuse open indicators
-            // Ensure it has the same structure as `entry.indicators` so you can compare easily.
-            const base = entry.indicators ?? null;
             const incoming = indicators ?? entry.indicatorsClose ?? null;
+            const indicatorsClose = incoming && typeof incoming === "object" ? { ...incoming } : incoming ?? null;
+            const resolvedClosePrice = typeof closePrice !== "undefined" ? closePrice : indicatorsClose?.price ?? entry.closePrice ?? null;
 
-            let indicatorsClose = incoming;
-            if (base && incoming && typeof incoming === "object") {
-                indicatorsClose = { ...base, ...incoming };
-            } else if (base && !incoming) {
-                indicatorsClose = { ...base };
-            }
-
-            // Always ensure price exists if we know it
-            if (indicatorsClose && typeof indicatorsClose === "object" && typeof closePrice !== "undefined" && closePrice !== null) {
-                indicatorsClose.price = closePrice;
+            if (indicatorsClose && typeof indicatorsClose === "object" && resolvedClosePrice !== null) {
+                indicatorsClose.price = resolvedClosePrice;
             }
 
             return {
@@ -157,9 +214,37 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
                 openedAt: openedTimestamp,
                 status: "closed",
                 closeReason: reason,
-                closedAt,
-                closePrice: typeof closePrice !== "undefined" ? closePrice : entry.closePrice ?? null,
+                closedAt: closedAt ?? entry.closedAt ?? null,
+                closePrice: resolvedClosePrice,
                 indicatorsClose: indicatorsClose ?? null,
+            };
+        });
+
+        if (updated) return true;
+    }
+
+    return false;
+}
+
+export function logTradeUpdate({ dealId, symbol, stopLoss, takeProfit, timestamp, reason }) {
+    if (!dealId) return false;
+    if (typeof stopLoss === "undefined" && typeof takeProfit === "undefined") return false;
+
+    const { entry, logPath: preferredPath } = getTradeEntry(dealId, symbol);
+    if (!entry) return false;
+
+    const primaryPath = preferredPath ?? (symbol ? getSymbolLogPath(symbol) : null);
+    const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
+    const updatedAt = timestamp ?? new Date().toISOString();
+
+    for (const logPath of candidates) {
+        const updated = updateEntry(logPath, dealId, (existing) => {
+            return {
+                ...existing,
+                stopLoss: typeof stopLoss !== "undefined" ? stopLoss : existing.stopLoss,
+                takeProfit: typeof takeProfit !== "undefined" ? takeProfit : existing.takeProfit,
+                lastUpdateAt: updatedAt,
+                lastUpdateReason: reason ?? existing.lastUpdateReason ?? "",
             };
         });
 
@@ -288,17 +373,18 @@ class TradeTracker {
                 if (!symbol) symbol = entry?.symbol ? String(entry.symbol) : null;
 
                 const closePrice = await this.getClosePrice(symbol, entry);
-                const inferredReason = this.inferCloseReason(entry, closePrice);
+                const { reason: derivedReason, source: reasonSource } = deriveCloseReason({ entry, closePrice });
 
-                console.log("closed deal id: ", id, "its entry: ", entry, "closePrice:", closePrice, "inferredReason:", inferredReason);
+                logger.info(`[Reconcile] Derived close reason for ${id}: ${derivedReason} (source: ${reasonSource})`);
+                console.log("closed deal id: ", id, "its entry: ", entry, "closePrice:", closePrice, "inferredReason:", derivedReason);
 
                 // Compute REAL close indicators snapshot (current candles at closing time)
-                const indicatorsClose = await this.getCloseIndicators(symbol, closePrice);
+                const indicatorsClose = await this.getCloseIndicators(symbol);
 
                 const updated = logTradeClose({
                     symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
-                    closeReason: inferredReason,
+                    closeReason: derivedReason,
                     indicators: indicatorsClose,
                     closePrice: closePrice ?? null,
                     timestamp: new Date().toISOString(),
@@ -335,24 +421,7 @@ class TradeTracker {
     }
 
     inferCloseReason(entry, closePrice) {
-        if (!entry) return "unknown";
-        const signal = String(entry?.signal || entry?.side || "").toUpperCase();
-        const stopLoss = Number(entry?.stopLoss);
-        const takeProfit = Number(entry?.takeProfit);
-
-        if (!signal || !Number.isFinite(stopLoss) || !Number.isFinite(takeProfit) || !Number.isFinite(closePrice)) {
-            return "unknown";
-        }
-
-        const slHit = signal === "BUY" ? closePrice <= stopLoss : closePrice >= stopLoss;
-        const tpHit = signal === "BUY" ? closePrice >= takeProfit : closePrice <= takeProfit;
-
-        if (tpHit && !slHit) return "hit_tp";
-        if (slHit && !tpHit) return "hit_sl";
-
-        const distToSL = Math.abs(closePrice - stopLoss);
-        const distToTP = Math.abs(closePrice - takeProfit);
-        return distToTP < distToSL ? "hit_tp" : "hit_sl";
+        return inferCloseReasonFromPrice(entry, closePrice);
     }
 }
 

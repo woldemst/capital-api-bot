@@ -10,7 +10,7 @@ import {
 import { RISK, ANALYSIS } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "../utils/logger.js";
-import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.js";
+import { deriveCloseReason, getTradeEntry, logTradeClose, logTradeOpen, logTradeUpdate, tradeTracker } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
@@ -261,12 +261,15 @@ class TradingService {
             logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
 
             console.log("confirmation", confirmation);
-            const affectedDealId = confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId;
+            const affectedDealId =
+                confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId ??
+                confirmation?.dealId ??
+                confirmation?.affectedDeals?.[0]?.dealId;
             // or: const affectedDealId = confirmation?.affectedDeals?.[0]?.dealId;
 
             try {
                 if (!affectedDealId) {
-                    logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log.`);
+                    logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log. confirmation=${JSON.stringify(confirmation)}`);
                 } else {
                     // const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
                     const entryPrice = confirmation?.level ?? price;
@@ -274,6 +277,7 @@ class TradingService {
 
                     logTradeOpen({
                         dealId: affectedDealId,
+                        dealReference: pos.dealReference,
                         symbol,
                         signal,
                         entryPrice,
@@ -370,6 +374,13 @@ class TradingService {
 
         try {
             await updateTrailingStop(dealId, currentPrice, newSL, null, direction.toUpperCase(), symbol, true);
+            logTradeUpdate({
+                dealId,
+                symbol,
+                stopLoss: newSL,
+                reason: "trailing_stop",
+                timestamp: new Date().toISOString(),
+            });
             logger.info(`[Trail] Updated SL → ${newSL} for ${dealId}`);
         } catch (error) {
             logger.error(`[Trail] Error updating trailing stop:`, error);
@@ -385,6 +396,13 @@ class TradingService {
         const newSL = entryPrice;
         try {
             await updateTrailingStop(dealId, entryPrice, newSL, null, direction, symbol, true);
+            logTradeUpdate({
+                dealId,
+                symbol,
+                stopLoss: newSL,
+                reason: "breakeven_exit",
+                timestamp: new Date().toISOString(),
+            });
 
             logger.info(`[SoftExit] ${symbol}: misalignment → moved SL to breakeven for ${dealId}`);
         } catch (e) {
@@ -396,35 +414,74 @@ class TradingService {
     //                     Close Position
     // ============================================================
     async closePosition(dealId, label) {
-        const closeReason = label || "manual_close";
+        const closeReasonHint = label || "manual_close";
         let symbol;
         let priceHint;
-        let indicatorSnapshot = null;
+        let indicatorPromise = Promise.resolve(null);
 
         try {
             const context = await this.getPositionContext(dealId);
             if (context) {
                 symbol = context.symbol;
                 priceHint = context.price;
+                if (symbol) {
+                    indicatorPromise = tradeTracker.getCloseIndicators(symbol);
+                }
             }
         } catch (contextError) {
             logger.warn(`[ClosePos] Could not capture close snapshot for ${dealId}: ${contextError.message}`);
         }
 
+        const { entry } = getTradeEntry(dealId, symbol);
+        if (!symbol && entry?.symbol) {
+            symbol = entry.symbol;
+            indicatorPromise = tradeTracker.getCloseIndicators(symbol);
+        }
+        if (!priceHint && entry?.entryPrice) {
+            priceHint = entry.entryPrice;
+        }
+
+        let closePayload;
         try {
-            await apiClosePosition(dealId);
+            closePayload = await apiClosePosition(dealId);
             logger.info(`[API] Closed ${dealId}`);
+            logger.info(`[ClosePos] Raw close payload for ${dealId}: ${JSON.stringify(closePayload ?? null)}`);
         } catch (err) {
             logger.error(`[ClosePos] Error closing deal ${dealId}:`, err);
             return;
         }
 
+        let indicatorSnapshot = null;
+        try {
+            indicatorSnapshot = await indicatorPromise;
+        } catch (indicatorError) {
+            logger.warn(`[ClosePos] Close indicators fetch failed for ${dealId}: ${indicatorError.message}`);
+        }
+
+        // TODO: Prefer broker-provided close price/time when available.
+        const closePrice =
+            Number.isFinite(closePayload?.level)
+                ? closePayload.level
+                : Number.isFinite(closePayload?.closeLevel)
+                ? closePayload.closeLevel
+                : Number.isFinite(closePayload?.price)
+                ? closePayload.price
+                : priceHint ?? indicatorSnapshot?.price;
+
+        const { reason: derivedReason, source: reasonSource } = deriveCloseReason({
+            brokerPayload: closePayload,
+            closeReasonHint,
+            entry,
+            closePrice,
+        });
+        logger.info(`[ClosePos] Derived close reason for ${dealId}: ${derivedReason} (source: ${reasonSource})`);
+
         try {
             const updated = logTradeClose({
                 dealId,
                 symbol,
-                closePrice: priceHint ?? indicatorSnapshot?.price,
-                closeReason,
+                closePrice,
+                closeReason: derivedReason,
                 indicators: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });
