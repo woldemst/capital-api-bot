@@ -7,7 +7,7 @@ import {
     getHistorical,
     getOpenPositions,
 } from "../api.js";
-import { RISK, ANALYSIS } from "../config.js";
+import { RISK, ANALYSIS, STRATEGY } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "../utils/logger.js";
 import { deriveCloseReason, getTradeEntry, logTradeClose, logTradeOpen, logTradeUpdate, tradeTracker } from "../utils/tradeLogger.js";
@@ -76,6 +76,10 @@ class TradingService {
     //               ATR-Based Trade Parameters
     // ============================================================
     async calculateTradeParameters(signal, symbol, bid, ask, context, indicators) {
+        if (context?.strategy === "bollinger_scalp") {
+            return this.calculateBollingerScalpParams(signal, symbol, bid, ask, context);
+        }
+
         const price = signal === "BUY" ? ask : bid;
         const { last } = context;
 
@@ -163,6 +167,75 @@ class TradingService {
             Spread: ${spread}
             SL_pips: ${slPips.toFixed(1)}
             RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
+            Size: ${size}`
+        );
+
+        return { size, price, stopLossPrice, takeProfitPrice };
+    }
+
+    async calculateBollingerScalpParams(signal, symbol, bid, ask, context) {
+        const price = signal === "BUY" ? ask : bid;
+        const signalCandle = context?.signalCandle ?? context?.last;
+        const low =
+            signalCandle?.low ??
+            signalCandle?.Low ??
+            signalCandle?.lowPrice?.bid ??
+            signalCandle?.lowPrice?.ask;
+        const high =
+            signalCandle?.high ??
+            signalCandle?.High ??
+            signalCandle?.highPrice?.bid ??
+            signalCandle?.highPrice?.ask;
+
+        if (!Number.isFinite(low) || !Number.isFinite(high)) {
+            throw new Error(`[Trade Params] Missing signal candle for ${symbol}`);
+        }
+
+        const pip = this.getPipValue(symbol);
+        const slPips = 10;
+        const tpPips = 20;
+
+        let stopLossPrice;
+        let takeProfitPrice;
+
+        if (signal === "BUY") {
+            stopLossPrice = low - slPips * pip;
+            takeProfitPrice = price + tpPips * pip;
+        } else {
+            stopLossPrice = high + slPips * pip;
+            takeProfitPrice = price - tpPips * pip;
+        }
+
+        let size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+        size = Math.floor(size / 100) * 100;
+        if (size < 100) size = 100;
+
+        // --- Respect broker TP constraints if available ---
+        try {
+            const tpRange = await getAllowedTPRange(symbol, signal, price);
+            if (tpRange) {
+                const { minDistance, maxDistance } = tpRange; // in price units
+                const tpDistance = Math.abs(takeProfitPrice - price);
+
+                if (tpDistance < minDistance || (maxDistance && tpDistance > maxDistance)) {
+                    const directionFactor = signal === "BUY" ? 1 : -1;
+                    const clampedDistance = Math.min(Math.max(tpDistance, minDistance), maxDistance || tpDistance);
+                    takeProfitPrice = price + directionFactor * clampedDistance;
+                }
+            }
+        } catch (e) {
+            logger.warn(`[Trade Params] Could not adjust TP to broker range for ${symbol}: ${e.message}`);
+        }
+
+        const slDistance = Math.abs(price - stopLossPrice);
+        const slPipsActual = slDistance / pip;
+
+        logger.info(
+            `[Trade Params] ${symbol} ${signal}:
+            Entry: ${price}
+            SL: ${stopLossPrice}
+            TP: ${takeProfitPrice}
+            SL_pips: ${slPipsActual.toFixed(1)}
             Size: ${size}`
         );
 
@@ -346,6 +419,19 @@ class TradingService {
         // --- Trend misalignment → Breakeven exit ---
         const m5 = indicators.m5;
         const m15 = indicators.m15;
+
+        if (STRATEGY.MODE === "bollinger_scalp" && m5?.bb?.middle && Number.isFinite(m5?.close)) {
+            const dir = direction?.toUpperCase();
+            const mid = m5.bb.middle;
+            const close = m5.close;
+            const shouldExit = (dir === "BUY" && close >= mid) || (dir === "SELL" && close <= mid);
+
+            if (shouldExit) {
+                await this.closePosition(dealId, "mid_band_exit");
+                return;
+            }
+        }
+
         if (m5 && m15) {
             const m5Trend = Strategy.pickTrend(m5, { symbol, timeframe: "M5", atr: m5.atr });
             const m15Trend = Strategy.pickTrend(m15, { symbol, timeframe: "M15", atr: m15.atr });

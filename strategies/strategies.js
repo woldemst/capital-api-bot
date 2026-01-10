@@ -1,5 +1,6 @@
-import { RISK, ANALYSIS } from "../config.js";
+import { RISK, ANALYSIS, STRATEGY } from "../config.js";
 const { RSI } = ANALYSIS;
+const STOCH = { OVERBOUGHT: 80, OVERSOLD: 20 };
 
 class Strategy {
     constructor() {}
@@ -12,19 +13,62 @@ class Strategy {
         const price = (bid + ask) / 2;
 
         // --- Candle data ---
-        const prev = candles.m5Candles[candles.m5Candles.length - 3];
-        const last = candles.m5Candles[candles.m5Candles.length - 2];
+        const m5Candles = candles.m5Candles || [];
+        const prev = m5Candles[m5Candles.length - 3];
+        const last = m5Candles[m5Candles.length - 2];
 
         const context = { prev, last };
+
+        if (STRATEGY.MODE === "bollinger_scalp") {
+            return this.getBollingerScalpSignal(m5, price, context);
+        }
 
         const buyConditions = this.generateBuyConditions(h4, h1, m15, m5, price);
         const sellConditions = this.generateSellConditions(h4, h1, m15, m5, price);
         const evaluation = this.evaluateSignals(buyConditions, sellConditions, context);
 
-        if (!evaluation.signal) return { ...evaluation, signal: null, reason: "score_below_threshold", context };
+        if (!evaluation.signal) return { ...evaluation, signal: null, reason: "score_below_threshold", context: { ...context, strategy: "multi_timeframe" } };
 
-        return { ...evaluation, reason: "score_above_threshold", context };
+        return { ...evaluation, reason: "score_above_threshold", context: { ...context, strategy: "multi_timeframe" } };
     };
+
+    getBollingerScalpSignal(m5, price, context) {
+        const signalCandle = context?.last;
+        const contextWithStrategy = { ...context, strategy: "bollinger_scalp", signalCandle };
+
+        if (!m5 || !signalCandle) {
+            return { signal: null, reason: "missing_m5_data", context: contextWithStrategy };
+        }
+
+        const bb = m5.bbSeries?.[m5.bbSeries.length - 2] ?? m5.bb;
+        const rsi = m5.rsiSeries?.[m5.rsiSeries.length - 2] ?? m5.rsi;
+        const stoch = m5.stochSeries?.[m5.stochSeries.length - 2] ?? m5.stoch;
+
+        const candleClose =
+            signalCandle?.close ??
+            signalCandle?.Close ??
+            signalCandle?.closePrice?.bid ??
+            signalCandle?.closePrice?.ask ??
+            m5?.close ??
+            price;
+
+        if (!Number.isFinite(candleClose) || !Number.isFinite(bb?.lower) || !Number.isFinite(bb?.upper) || !Number.isFinite(rsi) || !Number.isFinite(stoch?.k)) {
+            return { signal: null, reason: "missing_m5_signal_data", context: contextWithStrategy };
+        }
+
+        const buy = candleClose < bb.lower && rsi < RSI.OVERSOLD && stoch.k < STOCH.OVERSOLD;
+        const sell = candleClose > bb.upper && rsi > RSI.OVERBOUGHT && stoch.k > STOCH.OVERBOUGHT;
+
+        let signal = null;
+        if (buy) signal = "BUY";
+        if (sell) signal = "SELL";
+
+        return {
+            signal,
+            reason: signal ? "bollinger_scalp_signal" : "bollinger_scalp_no_signal",
+            context: contextWithStrategy,
+        };
+    }
 
     pickTrend(indicator, _meta = {}) {
         if (!indicator) return "neutral";

@@ -1,4 +1,4 @@
-import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
+import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR, Stochastic } from "technicalindicators";
 import { ANALYSIS } from "../config.js";
 import { calculateBackQuantSignal } from "./BackQuant.js";
 
@@ -40,6 +40,7 @@ export async function calcIndicators(bars) {
     const bbSeries = BollingerBands.calculate({ period: 20, stdDev: 2, values: closes });
     const bbUpperSeries = bbSeries.map((b) => b.upper);
     const bbLowerSeries = bbSeries.map((b) => b.lower);
+    const stochSeries = Stochastic.calculate({ period: 5, signalPeriod: 3, high: highs, low: lows, close: closes });
 
     const bb = bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined;
     // Calculate EMAs for trend
@@ -130,6 +131,7 @@ export async function calcIndicators(bars) {
         lastClose,
         close: lastClose,
         rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
+        stoch: stochSeries.length > 0 ? stochSeries[stochSeries.length - 1] : undefined,
         adx: ADX.calculate({ period: 14, close: closes, high: highs, low: lows }).pop(),
         atr: atr,
         adaptiveRSI: (() => {
@@ -155,6 +157,7 @@ export async function calcIndicators(bars) {
         bbSeries,
         bbUpperSeries,
         bbLowerSeries,
+        stochSeries,
         trend: maFast > maSlow ? "bullish" : maFast < maSlow ? "bearish" : "neutral",
         trendStrength: currentADX,
         trendDetails: {

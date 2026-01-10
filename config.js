@@ -53,6 +53,10 @@ export const RISK = {
     REQUIRED_SCORE: 6, // Must have total score or more
 };
 
+export const STRATEGY = {
+    MODE: process.env.STRATEGY_MODE || "bollinger_scalp",
+};
+
 // Technical Analysis Configuration
 export const ANALYSIS = {
     // Multi-Timeframe Strategy
