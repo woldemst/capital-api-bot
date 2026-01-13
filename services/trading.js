@@ -95,7 +95,7 @@ class TradingService {
 
         // You can tweak these:
         const candleBufferFactor = 0.25; // 25% of candle size
-        const extraBufferPips = 2; // fixed pip buffer
+        const extraBufferPips = 2; // fixed pip buffeer
         const rr = 1.5; // risk:reward
 
         const candleBuffer = candleSize * candleBufferFactor;
@@ -238,6 +238,26 @@ class TradingService {
         let size = riskAmount / lossPerUnitAtSL;
         if (size < 100) size = 100;
 
+        // --- Margin check for 5 simultaneous trades ---
+        // Assume leverage is 30:1 for forex (can be adjusted)
+        const leverage = 30;
+        // Margin required = (size * entryPrice) / leverage
+        const marginRequired = (size * entryPrice) / leverage;
+        // Use available margin from account (set by updateAccountInfo)
+        const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
+        // Ensure margin for one trade is no more than 1/5 of available
+        const maxMarginPerTrade = availableMargin / 5;
+        if (marginRequired > maxMarginPerTrade) {
+            // Reduce size so marginRequired == maxMarginPerTrade
+            size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+            if (size < 100) size = 100;
+            console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
+        }
+        console.log(
+            `[PositionSize] Raw size: ${
+                riskAmount / (stopLossPips * pipValue)
+            }, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`
+        );
         return size;
     }
     // Add pip value determination
@@ -309,7 +329,7 @@ class TradingService {
     // ============================================================
     async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
-            await this.syncOpenTradesFromBroker(); 
+            await this.syncOpenTradesFromBroker();
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
