@@ -44,6 +44,14 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
+    async syncOpenTradesFromBroker() {
+        const res = await getOpenPositions();
+        const positions = Array.isArray(res?.positions) ? res.positions : [];
+        const symbols = positions.map((p) => p?.market?.epic ?? p?.position?.epic).filter(Boolean);
+
+        this.openTrades = [...new Set(symbols)];
+    }
+
     async getPositionContext(dealId) {
         try {
             const positions = await getOpenPositions();
@@ -301,6 +309,7 @@ class TradingService {
     // ============================================================
     async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
+            await this.syncOpenTradesFromBroker(); 
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
