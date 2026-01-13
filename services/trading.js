@@ -23,7 +23,6 @@ class TradingService {
         this.maxRiskPerTrade = PER_TRADE;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
-        this.dealIds = new Set();
     }
 
     setAccountBalance(balance) {
@@ -302,8 +301,9 @@ class TradingService {
     // ============================================================
     async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
-            if (this.dealIds.size >= MAX_POSITIONS) {
-                logger.info(`[ProcessPrice] Max positions reached.`);
+            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+            if (this.openTrades.length >= MAX_POSITIONS) {
+                logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
                 return;
             }
             if (this.isSymbolTraded(symbol)) {
@@ -465,12 +465,7 @@ class TradingService {
             );
 
             const brokerReason =
-                confirmation?.reason ??
-                confirmation?.status ??
-                confirmation?.dealStatus ??
-                closePayload?.reason ??
-                closePayload?.status ??
-                null;
+                confirmation?.reason ?? confirmation?.status ?? confirmation?.dealStatus ?? closePayload?.reason ?? closePayload?.status ?? null;
 
             const finalReason = brokerReason || requestedReason || "unknown";
 
