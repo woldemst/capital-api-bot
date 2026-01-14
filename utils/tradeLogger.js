@@ -80,6 +80,16 @@ function normalizeCloseReason(reason) {
     return reason;
 }
 
+function toNumber(value) {
+    if (value === undefined || value === null || value === "") return null;
+    const num = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function getPipSize(symbol) {
+    return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
+}
+
 export function getTradeEntry(dealId, symbol) {
     const targetId = String(dealId);
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
@@ -289,7 +299,7 @@ class TradeTracker {
 
                 const closePrice = await this.getClosePrice(symbol, entry);
                 const existingReason = entry?.closeReason && String(entry.closeReason).trim() ? String(entry.closeReason) : "";
-                const inferredReason = existingReason || this.inferCloseReason(entry, null);
+                const inferredReason = existingReason || this.inferCloseReason(entry, { closePrice, symbol });
 
                 logger.info("[Reconcile] Close snapshot", { dealId: id, symbol, closePrice, source: "market_snapshot" });
                 logger.info("[Reconcile] Close reason", {
@@ -350,6 +360,53 @@ class TradeTracker {
             closeInfo?.message ??
             "";
         const normalized = normalizeCloseReason(raw);
+        if (normalized && normalized !== "unknown") return normalized;
+
+        const closePrice = toNumber(
+            closeInfo?.closePrice ??
+                closeInfo?.closeLevel ??
+                closeInfo?.level ??
+                closeInfo?.price ??
+                entry?.closePrice ??
+                entry?.closeLevel ??
+                entry?.level
+        );
+        const stopLoss = toNumber(entry?.stopLoss ?? entry?.stopLevel ?? closeInfo?.stopLoss ?? closeInfo?.stopLevel);
+        const takeProfit = toNumber(entry?.takeProfit ?? entry?.limitLevel ?? entry?.profitLevel ?? closeInfo?.takeProfit ?? closeInfo?.limitLevel ?? closeInfo?.profitLevel);
+
+        if (closePrice === null || (stopLoss === null && takeProfit === null)) return normalized || "unknown";
+
+        const side = String(entry?.signal ?? entry?.side ?? entry?.direction ?? closeInfo?.direction ?? "").toUpperCase();
+        const pip = getPipSize(entry?.symbol ?? closeInfo?.symbol);
+        const tolerance = pip * 2;
+        const hasSide = side === "BUY" || side === "SELL";
+
+        let hitTp = false;
+        let hitSl = false;
+
+        if (takeProfit !== null) {
+            if (hasSide) {
+                hitTp = side === "BUY" ? closePrice >= takeProfit - tolerance : closePrice <= takeProfit + tolerance;
+            } else {
+                hitTp = Math.abs(closePrice - takeProfit) <= tolerance;
+            }
+        }
+
+        if (stopLoss !== null) {
+            if (hasSide) {
+                hitSl = side === "BUY" ? closePrice <= stopLoss + tolerance : closePrice >= stopLoss - tolerance;
+            } else {
+                hitSl = Math.abs(closePrice - stopLoss) <= tolerance;
+            }
+        }
+
+        if (hitTp && hitSl) {
+            const tpDist = takeProfit === null ? Number.POSITIVE_INFINITY : Math.abs(closePrice - takeProfit);
+            const slDist = stopLoss === null ? Number.POSITIVE_INFINITY : Math.abs(closePrice - stopLoss);
+            return tpDist <= slDist ? "hit_tp" : "hit_sl";
+        }
+        if (hitTp) return "hit_tp";
+        if (hitSl) return "hit_sl";
         return normalized || "unknown";
     }
 }

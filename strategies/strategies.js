@@ -9,58 +9,62 @@ class Strategy {
     // ------------------------------------------------------------
 
     getSignal({ indicators, candles, bid, ask }) {
-        const { m5 } = indicators;
+        const { m5, h1 } = indicators;
 
-        const prev = candles.m5Candles[candles.m5Candles.length - 2];
-        const last = candles.m5Candles[candles.m5Candles.length - 1];
+        const m5Prev = candles.m5Candles[candles.m5Candles.length - 2];
+        const m5Last = candles.m5Candles[candles.m5Candles.length - 1];
 
-        // Check price-action + Bollinger setup
-        const signal = this.greenRedCandlePattern(m5, prev, last);
+        const h1Prev = candles.h1Candles[candles.h1Candles.length - 2];
+        const h1Last = candles.h1Candles[candles.h1Candles.length - 1];
 
-        console.log("signal:", signal, "prev", prev, "last", last);
+        // Check price-action
+        const m5Signal = this.greenRedCandlePattern(m5, m5Prev, m5Last);
 
-        if (signal === "bullish") {
+        const h1Signal = this.greenRedCandlePattern(h1, h1Prev, h1Last);
+
+        if (m5Signal === "bullish" && h1Signal === "bullish") {
             return {
                 signal: "BUY",
-                reason: "price_action_bollinger",
-                context: { prev, last },
+                reason: "grreen_red_pattern",
+
+                context: { last: m5Last, prev: m5Prev },
             };
-        } else if (signal === "bearish") {
+        } else if (m5Signal === "bearish" && h1Signal === "bearish") {
             return {
                 signal: "SELL",
-                reason: "price_action_bollinger",
-                context: { prev, last },
+                reason: "grreen_red_pattern",
+                context: { last: m5Last, prev: m5Prev },
             };
         } else {
             return {
                 signal: null,
                 reason: "no_signal",
-                context: { prev, last },
+                context: { last: m5Last, prev: m5Prev },
             };
         }
     }
 
-    getPriceActionSignal(indicator, prev, last) {
-        // 1) Identify price‑action pattern
-        const paDirection = this.greenRedCandlePattern(indicator, prev, last);
+    // getPriceActionSignal(indicator, prev, last) {
+    //     // 1) Identify price‑action pattern
+    //     const paDirection = this.greenRedCandlePattern(indicator, prev, last);
 
-        // 2) Require the last candle’s close to be near Bollinger band extremes
-        const bb = indicator?.bb;
-        console.log("bb", bb.lower, bb.upper, last.close);
+    //     // 2) Require the last candle’s close to be near Bollinger band extremes
+    //     const bb = indicator?.bb;
+    //     console.log("bb", bb.lower, bb.upper, last.close);
 
-        if (!bb) return null;
-        const close = last.close;
+    //     if (!bb) return null;
+    //     const close = last.close;
 
-        // For a BUY, price should be under or at the lower band
-        if (paDirection === "bullish" && close <= bb.lower) {
-            return "BUY";
-        }
-        // For a SELL, price should be above or at the upper band
-        if (paDirection === "bearish" && close >= bb.upper) {
-            return "SELL";
-        }
-        return null;
-    }
+    //     // For a BUY, price should be under or at the lower band
+    //     if (paDirection === "bullish" && close <= bb.lower) {
+    //         return "BUY";
+    //     }
+    //     // For a SELL, price should be above or at the upper band
+    //     if (paDirection === "bearish" && close >= bb.upper) {
+    //         return "SELL";
+    //     }
+    //     return null;
+    // }
 
     // ------------------------------------------------------------
     //                       PRICE ACTION PATTERN
@@ -78,14 +82,13 @@ class Strategy {
         // const range = last.high - last.low;
         // const strong = range > 0 && body / range >= 0.3;
 
-        if (isBear(prev) && isBull(last) && trend === "bullish") return "bullish";
-        if (isBull(prev) && isBear(last) && trend === "bearish") return "bearish";
+        if (trend === "bullish" && isBear(prev) && isBull(last)) return "bullish";
+        if (trend === "bearish" && isBull(prev) && isBear(last)) return "bearish";
 
         return false;
     }
 
-    pickTrend(indicator, _meta = {}) {
-        if (!indicator) return "neutral";
+    pickTrend(indicator) {
         const { ema20, ema50, emaFast, emaSlow, ema9, ema21, trend } = indicator;
 
         if (Number.isFinite(ema20) && Number.isFinite(ema50)) {
