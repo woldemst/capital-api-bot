@@ -11,25 +11,43 @@ class Strategy {
     getSignal({ indicators, candles, bid, ask }) {
         const { m5, h1 } = indicators;
 
-        const m5Prev = candles.m5Candles[candles.m5Candles.length - 2];
-        const m5Last = candles.m5Candles[candles.m5Candles.length - 1];
+        if (!candles?.m5Candles?.length || candles.m5Candles.length < 3) {
+            return { signal: null, reason: "insufficient_m5_candles", context: {} };
+        }
+        if (!candles?.m15Candles?.length || candles.m15Candles.length < 3) {
+            return { signal: null, reason: "insufficient_m15_candles", context: {} };
+        }
 
-        const h1Prev = candles.h1Candles[candles.h1Candles.length - 2];
-        const h1Last = candles.h1Candles[candles.h1Candles.length - 1];
+        // Use the last CLOSED candles (avoid the still-forming candle at the end)
+        const m5Prev = candles.m5Candles[candles.m5Candles.length - 3];
+        const m5Last = candles.m5Candles[candles.m5Candles.length - 2];
+
+        const m15Prev = candles.m15Candles[candles.m15Candles.length - 3];
+        const m15Last = candles.m15Candles[candles.m15Candles.length - 2];
 
         // Check price-action
-        const m5Signal = this.greenRedCandlePattern(m5, m5Prev, m5Last);
+        const m5Signal = this.greenRedCandlePattern(m5Prev, m5Last);
 
-        const h1Signal = this.greenRedCandlePattern(h1, h1Prev, h1Last);
+        const m15Signal = this.greenRedCandlePattern(m15Prev, m15Last);
 
-        if (m5Signal === "bullish" && h1Signal === "bullish") {
+        const m5Trend = this.pickTrend(m5);
+        // const h1Trend = this.pickTrend(h1);
+
+        console.log("m5Trend: ", m5Trend,"m5Prev: ", m5Prev, "m5Last: ", m5Last, "m5Signal: ", m5Signal);
+        console.log("======");
+        
+        const m15Trend = this.pickTrend(indicators?.m15);
+        console.log("m15Trend: ", m15Trend, "m15Prev: ", m15Prev, "m15Last: ", m15Last, "m15Signal: ", m15Signal);
+        
+
+        if (m5Trend === "bullish" && m15Trend === "bullish" && m5Signal === "bullish" && m15Signal === "bullish") {
             return {
                 signal: "BUY",
                 reason: "grreen_red_pattern",
 
                 context: { last: m5Last, prev: m5Prev },
             };
-        } else if (m5Signal === "bearish" && h1Signal === "bearish") {
+        } else if (m5Trend === "bearish" && m15Trend === "bearish" && m5Signal === "bearish" && m15Signal === "bearish") {
             return {
                 signal: "SELL",
                 reason: "grreen_red_pattern",
@@ -69,10 +87,8 @@ class Strategy {
     // ------------------------------------------------------------
     //                       PRICE ACTION PATTERN
     // ------------------------------------------------------------
-    greenRedCandlePattern(indicator, prev, last) {
-        if (!prev || !last || !indicator) return false;
-
-        const trend = this.pickTrend(indicator);
+    greenRedCandlePattern(prev, last) {
+        if (!prev || !last) return false;
 
         const isBull = (c) => c.close > c.open;
         const isBear = (c) => c.close < c.open;
@@ -82,8 +98,8 @@ class Strategy {
         // const range = last.high - last.low;
         // const strong = range > 0 && body / range >= 0.3;
 
-        if (trend === "bullish" && isBear(prev) && isBull(last)) return "bullish";
-        if (trend === "bearish" && isBull(prev) && isBear(last)) return "bearish";
+        if (isBear(prev) && isBull(last)) return "bullish";
+        if (isBull(prev) && isBear(last)) return "bearish";
 
         return false;
     }

@@ -32,8 +32,6 @@ export const SESSIONS = {
         SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
     },
     CRYPTO: ["BTC/USD", "ETH/USD"],
-    STOCKS: ["AAPL", "TSLA"],
-    ETFS: ["SPY", "QQQ"],
 };
 
 export const RISK = {
@@ -55,7 +53,6 @@ export const RISK = {
 
 // Technical Analysis Configuration
 export const ANALYSIS = {
-    // Multi-Timeframe Strategy
     TIMEFRAMES: {
         D1: "DAY", // Daily trend direction
         H4: "HOUR_4", // 4-hour trend direction
@@ -83,22 +80,6 @@ export const ANALYSIS = {
         EXIT_OVERBOUGHT: 65, // Earlier exit
         EXIT_OVERSOLD: 35,
     },
-
-    BACKTESTING: {
-        ENABLED: false,
-        START_DATE: "2024-01-01",
-        END_DATE: "2025-12-31",
-    },
-
-    RANGE_FILTER: {
-        ENABLED: true,
-        // Minimum ATR as a percentage of price (e.g. 0.0005 ≈ 0.05%)
-        MIN_ATR_PCT: 0.0005,
-        // Minimum Bollinger Band width as a percentage of price
-        MIN_BB_WIDTH_PCT: 0.0007,
-        // Minimum EMA distance (fast vs slow) as a percentage of price
-        MIN_EMA_DIST_PCT: 0.0003,
-    },
 };
 
 // Development overrides for faster testing
@@ -108,9 +89,9 @@ export const DEV = {
 };
 
 // 1 min
-export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
+// export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
 
 // 5 min
-// export const PROD = {
-//     INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
-// };
+export const PROD = {
+    INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
+};

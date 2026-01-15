@@ -132,8 +132,6 @@ class TradingBot {
 
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
-        const getNextDelay = () => ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
-
         const runAnalysis = async () => {
             try {
                 // if (!this.isTradingAllowed()) {
@@ -149,7 +147,7 @@ class TradingBot {
         };
 
         // First run: align to next 5th minute + 5 seconds
-        const interval = DEV.MODE ? DEV.INTERVAL : getNextDelay();
+        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
         setTimeout(() => {

@@ -239,17 +239,15 @@ class TradingService {
         if (size < 100) size = 100;
 
         // --- Margin check for 5 simultaneous trades ---
-        // Assume leverage is 30:1 for forex (can be adjusted)
-        const leverage = 30;
         // Margin required = (size * entryPrice) / leverage
-        const marginRequired = (size * entryPrice) / leverage;
+        const marginRequired = (size * entryPrice) / RISK.LEVERAGE;
         // Use available margin from account (set by updateAccountInfo)
         const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
         // Ensure margin for one trade is no more than 1/5 of available
-        const maxMarginPerTrade = availableMargin / 5;
+        const maxMarginPerTrade = availableMargin / RISK.MAX_POSITIONS;
         if (marginRequired > maxMarginPerTrade) {
             // Reduce size so marginRequired == maxMarginPerTrade
-            size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+            size = Math.floor((maxMarginPerTrade * RISK.LEVERAGE) / entryPrice / 100) * 100;
             if (size < 100) size = 100;
             console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
         }
