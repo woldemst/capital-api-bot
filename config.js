@@ -38,9 +38,9 @@ export const RISK = {
     LEVERAGE: 30,
     PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
-    BUFFER_PIPS: 1, // Buffer for SL calculation
-    REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 60, // Maximum hold time in minutes
+    BUFFER_PIPS: 2, // Buffer for SL calculation
+    RR: 2, // 2:1 reward-to-risk ratio
+    MAX_HOLD_TIME: 30, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
@@ -49,6 +49,21 @@ export const RISK = {
     ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
     RISK_REWARD: 2, // Reward-to-risk ratio
     REQUIRED_SCORE: 6, // Must have total score or more
+};
+
+export const STRATEGY = {
+    // Which strategy to run in live trading. Options supported by services/trading.js:
+    // "green_red" | "bollinger_mean_reversion" 
+    MODE: "bollinger_mean_reversion",
+
+    // Settings for Bollinger Mean Reversion strategy (M5 entry, optional M15 filter)
+    BOLLINGER_MR: {
+        RSI_BUY_MAX: 30,
+        RSI_SELL_MIN: 70,
+        ADX_MAX: 20,
+        USE_EMA200_FILTER: true,
+        USE_M15_TREND_FILTER: false,
+    },
 };
 
 // Technical Analysis Configuration
@@ -85,7 +100,7 @@ export const ANALYSIS = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 15 seconds between analyses
-    MODE: false,
+    MODE: true,
 };
 
 // 1 min
