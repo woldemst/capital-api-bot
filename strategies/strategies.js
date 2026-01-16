@@ -1,33 +1,149 @@
-import { RISK, ANALYSIS } from "../config.js";
-const { RSI } = ANALYSIS;
-
+import { STRATEGY } from "../config.js";
 class Strategy {
     constructor() {}
+
     // ------------------------------------------------------------
-    //                      MAIN SIGNAL LOGIC
+    //     Strategy A: Bollinger Mean-Reversion (M5) + Filters
     // ------------------------------------------------------------
-    getSignal = ({ symbol, indicators = {}, candles = {}, bid, ask }) => {
-        const { m5, m15, h1, h4 } = indicators;
+    getSignalBollingerMeanReversion({ symbol, indicators, candles, bid, ask }) {
+        const { m5, m15 } = indicators;
 
-        const price = (bid + ask) / 2;
+        const m5Candles = candles?.m5Candles;
+        if (m5Candles.length < 3) {
+            return { signal: null, reason: "insufficient_m5_candles", context: {} };
+        }
 
-        // --- Candle data ---
-        const prev = candles.m5Candles[candles.m5Candles.length - 3];
-        const last = candles.m5Candles[candles.m5Candles.length - 2];
+        // last CLOSED candles
+        const prev = m5Candles[m5Candles.length - 3];
+        const last = m5Candles[m5Candles.length - 2];
+        if (!prev || !last) return { signal: null, reason: "missing_prev_last", context: {} };
 
-        const context = { prev, last };
+        // Align indicators with the last closed candle (not the still-forming candle).
+        const bb = m5.bbSeries[m5.bbSeries.length - 2];
+        const rsi = m5.rsiSeries[m5.rsiSeries.length - 2];
 
-        const buyConditions = this.generateBuyConditions(h4, h1, m15, m5, price);
-        const sellConditions = this.generateSellConditions(h4, h1, m15, m5, price);
-        const evaluation = this.evaluateSignals(buyConditions, sellConditions, context);
+        const adx = m5?.adx.adx;
+        const ema200 = m5?.ema200;
 
-        if (!evaluation.signal) return { ...evaluation, signal: null, reason: "score_below_threshold", context };
+        if (!bb || !Number.isFinite(bb.lower) || !Number.isFinite(bb.upper) || !Number.isFinite(bb.middle)) {
+            return { signal: null, reason: "missing_bb", context: { last, prev } };
+        }
+        if (!Number.isFinite(rsi) || !Number.isFinite(adx)) {
+            return { signal: null, reason: "missing_rsi_adx", context: { last, prev, bb } };
+        }
 
-        return { ...evaluation, reason: "score_above_threshold", context };
-    };
+        // Tunables (env overrides)
+        const mrConfig = STRATEGY?.BOLLINGER_MR;
+        const rsiBuyMax = mrConfig.RSI_BUY_MAX;
+        const rsiSellMin = mrConfig?.RSI_SELL_MIN;
+        const adxMax = mrConfig?.ADX_MAX;
+        const useEma200Filter = mrConfig?.USE_EMA200_FILTER;
+        const useM15TrendFilter = mrConfig?.USE_M15_TREND_FILTER;
 
-    pickTrend(indicator, _meta = {}) {
-        if (!indicator) return "neutral";
+        // Avoid strong trends
+        console.log(`ADX: ${adx}, ADX Max: ${adxMax}`);
+
+        if (adx >= adxMax) {
+            return { signal: null, reason: "adx_too_high", context: { last, prev, adx, adxMax } };
+        }
+
+        // Optional M15 trend filter (avoid fading strong HTF trend)
+        if (useM15TrendFilter && m15) {
+            const m15Trend = this.pickTrend(m15);
+            if (m15Trend === "bullish" && last.close >= bb.upper) {
+                return { signal: null, reason: "m15_bull_avoid_top_fade", context: { last, prev, m15Trend } };
+            }
+            if (m15Trend === "bearish" && last.close <= bb.lower) {
+                return { signal: null, reason: "m15_bear_avoid_bottom_fade", context: { last, prev, m15Trend } };
+            }
+        }
+
+        // BUY conditions
+        if (last.low <= bb.lower && rsi <= rsiBuyMax) {
+            if (useEma200Filter && last.close <= ema200) {
+                return { signal: null, reason: "ema200_filter_block_buy", context: { last, prev, ema200 } };
+            }
+
+            return {
+                signal: "BUY",
+                reason: "bb_mean_reversion_buy",
+                // TP target: mean (middle band)
+                context: { last, prev, tpTarget: bb.middle, bb, rsi, adx },
+            };
+        }
+
+        // SELL conditions
+        if (last.high >= bb.upper && rsi >= rsiSellMin) {
+            if (useEma200Filter && last.close >= ema200) {
+                return { signal: null, reason: "ema200_filter_block_sell", context: { last, prev, ema200 } };
+            }
+
+            return {
+                signal: "SELL",
+                reason: "bb_mean_reversion_sell",
+                context: { last, prev, tpTarget: bb.middle, bb, rsi, adx },
+            };
+        }
+
+        return { signal: null, reason: "no_signal", context: { last, prev, bb, rsi, adx } };
+    }
+
+    // ------------------------------------------------------------
+    //                       PRICE ACTION PATTERN | "GREEN RED"
+    // ------------------------------------------------------------
+    getSignalGreenRed({ indicators, candles }) {
+        const { m5, m15 } = indicators;
+        const m5Candles = candles?.m5Candles ?? [];
+        const m15Candles = candles?.m15Candles ?? [];
+
+        if (m5Candles.length < 3) {
+            return { signal: null, reason: "insufficient_m5_candles", context: {} };
+        }
+        if (m15Candles.length < 3) {
+            return { signal: null, reason: "insufficient_m15_candles", context: {} };
+        }
+
+        // Use the last CLOSED candles (avoid the still-forming candle at the end)
+        const m5Prev = m5Candles[m5Candles.length - 3];
+        const m5Last = m5Candles[m5Candles.length - 2];
+        if (!m5Prev || !m5Last) return { signal: null, reason: "missing_m5_closed", context: {} };
+
+        const adx = m5?.adx?.adx;
+        const m5Signal = this.greenRedCandlePattern(m5Prev, m5Last);
+        const m5Trend = this.pickTrend(m5);
+        const m15Trend = this.pickTrend(m15);
+        const trendsAligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
+
+        if (Number.isFinite(adx) && adx >= 28) {
+            return { signal: null, reason: "adx_too_high", context: { last: m5Last, prev: m5Prev, adx } };
+        }
+
+        if (trendsAligned && m5Signal === m5Trend) {
+            const signal = m5Trend === "bullish" ? "BUY" : "SELL";
+            return { signal, reason: "green_red_pattern", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, adx } };
+        }
+
+        return { signal: null, reason: "no_signal", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, m5Signal, adx } };
+    }
+
+    greenRedCandlePattern(prev, last) {
+        if (!prev || !last) return false;
+
+        const isBull = (c) => c.close > c.open;
+        const isBear = (c) => c.close < c.open;
+
+        // --- Candle body strength check ---
+        const body = Math.abs(last.close - last.open);
+        const range = last.high - last.low;
+        const strong = range > 0 && body / range >= 0.3;
+
+        if (isBear(prev) && isBull(last) && strong) return "bullish";
+        if (isBull(prev) && isBear(last) && strong) return "bearish";
+
+        return false;
+    }
+
+    pickTrend(indicator) {
         const { ema20, ema50, emaFast, emaSlow, ema9, ema21, trend } = indicator;
 
         if (Number.isFinite(ema20) && Number.isFinite(ema50)) {
@@ -50,90 +166,6 @@ class Strategy {
         }
 
         return "neutral";
-    }
-
-    evaluateSignals(buyConditions, sellConditions, context) {
-        const threshold = RISK.REQUIRED_SCORE; // 3
-        const buyScore = buyConditions.filter(Boolean).length;
-        const sellScore = sellConditions.filter(Boolean).length;
-
-        let signal = null;
-        if (buyScore >= threshold) signal = "BUY";
-        if (sellScore >= threshold) signal = "SELL";
-
-        return { signal, buyScore, sellScore, threshold, context };
-    }
-
-    generateBuyConditions(h4, h1, m15, m5, price) {
-        const m5Trend = this.pickTrend(m5);
-
-        return [
-            // Higher timeframe bullish bias
-            h4?.emaFast > h4?.emaSlow,
-            h4?.macd?.histogram > 0,
-
-            h1?.ema9 > h1?.ema21,
-            h1?.rsi < RSI.EXIT_OVERSOLD,
-
-            // M15 confirmation
-            m15?.isBullishCross,
-            m15?.rsi < RSI.OVERSOLD,
-            price <= m15?.bb?.lower,
-
-            // NEW: M5 structure alignment for M5-focused trading
-            m5Trend === "bullish",
-            m5?.ema9 > m5?.ema21,
-            m5?.close > m5?.ema50,
-
-            m5?.rsi > 50 && m5?.rsi < RSI.OVERBOUGHT,
-        ];
-    }
-
-    generateSellConditions(h4, h1, m15, m5, price) {
-        const m5Trend = this.pickTrend(m5);
-
-        return [
-            // Higher timeframe bearish bias
-            !h4?.isBullishTrend,
-            h4?.macd?.histogram < 0,
-
-            h1?.ema9 < h1?.ema21,
-            h1?.rsi > RSI.OVERBOUGHT,
-
-            // M15 confirmation
-            m15?.isBearishCross,
-            m15?.rsi > RSI.OVERBOUGHT,
-            price >= m15?.bb?.upper,
-
-            // NEW: M5 structure alignment for M5-focused trading
-            m5Trend === "bearish",
-            m5?.ema9 < m5?.ema21,
-            m5?.close < m5?.ema50,
-
-            m5?.rsi < 30 && m5?.rsi < RSI.OVERSOLD,
-        ];
-    }
-
-    // ------------------------------------------------------------
-    //                       PATTERN LOGIC
-    // ------------------------------------------------------------
-    greenRedCandlePattern(trend, prev, last) {
-        if (!prev || !last) return false;
-
-        const isBull = (c) => c.close > c.open;
-        const isBear = (c) => c.close < c.open;
-
-        // --- Candle body strength check ---
-        const body = Math.abs(last.close - last.open);
-        const range = last.high - last.low;
-        const strong = range > 0 && body / range >= 0.3;
-
-        const dir = trend.toLowerCase();
-
-        if (isBear(prev) && isBull(last) && dir === "bullish" && strong) return "bullish";
-        if (isBull(prev) && isBear(last) && dir === "bearish" && strong) return "bearish";
-
-        return false;
     }
 }
 

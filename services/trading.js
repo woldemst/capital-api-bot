@@ -7,7 +7,7 @@ import {
     getHistorical,
     getOpenPositions,
 } from "../api.js";
-import { RISK, ANALYSIS } from "../config.js";
+import { RISK, ANALYSIS, STRATEGY } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "../utils/logger.js";
 import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.js";
@@ -23,7 +23,6 @@ class TradingService {
         this.maxRiskPerTrade = PER_TRADE;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
-        this.dealIds = new Set();
     }
 
     setAccountBalance(balance) {
@@ -43,6 +42,14 @@ class TradingService {
     roundPrice(price, symbol) {
         const decimals = symbol.includes("JPY") ? 3 : 5;
         return Number(price).toFixed(decimals) * 1;
+    }
+
+    async syncOpenTradesFromBroker() {
+        const res = await getOpenPositions();
+        const positions = Array.isArray(res?.positions) ? res.positions : [];
+        const symbols = positions.map((p) => p?.market?.epic ?? p?.position?.epic).filter(Boolean);
+
+        this.openTrades = [...new Set(symbols)];
     }
 
     async getPositionContext(dealId) {
@@ -75,49 +82,32 @@ class TradingService {
     // ============================================================
     //               ATR-Based Trade Parameters
     // ============================================================
-    async calculateTradeParameters(signal, symbol, bid, ask, context, indicators) {
-        const price = signal === "BUY" ? ask : bid;
-        const { last } = context;
+    async calculateTradeParameters(signal, symbol, bid, ask, context) {
+        const isBuy = signal === "BUY";
+        const price = isBuy ? ask : bid;
+        const last = context.last;
 
-        const isJPY = symbol.includes("JPY");
-        const pip = isJPY ? 0.01 : 0.0001;
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const direction = isBuy ? 1 : -1;
 
-        // --- Candle characteristics ---
-        const candleSize = last.high - last.low;
-        const spread = Math.abs(ask - bid);
-
-        // You can tweak these:
-        const candleBufferFactor = 0.25; // 25% of candle size
-        const extraBufferPips = 2; // fixed pip buffer
-        const rr = 1.5; // risk:reward
-
-        const candleBuffer = candleSize * candleBufferFactor;
-        const extraBuffer = extraBufferPips * pip;
+        // Buffer expressed in PRICE units (pips -> price)
+        const buffer = RISK.BUFFER_PIPS * pip;
 
         let stopLossPrice;
         let takeProfitPrice;
 
-        if (signal === "BUY") {
-            // SL below the low of the signal candle
-            stopLossPrice = last.low - candleBuffer - spread - extraBuffer;
+        const stopReference = isBuy ? last.low : last.high;
+        stopLossPrice = stopReference - direction * buffer;
 
-            const slDistance = price - stopLossPrice;
-            if (slDistance <= 0) {
-                throw new Error(`[Trade Params] Invalid BUY SL distance for ${symbol}`);
-            }
+        const slDistanceFromEntry = direction * (price - stopLossPrice);
+        if (!(slDistanceFromEntry > 0)) logger.error(`[Trade Params] Invalid ${signal} SL distance for ${symbol}`);
 
-            takeProfitPrice = price + slDistance * rr;
-        } else {
-            // SELL: SL above the high of the signal candle
-            stopLossPrice = last.high + candleBuffer + spread + extraBuffer;
+        // Default TP based on RR (strategy-specific overrides can adjust later)
+        takeProfitPrice = price + direction * slDistanceFromEntry * RISK.RR;
 
-            const slDistance = stopLossPrice - price;
-            if (slDistance <= 0) {
-                throw new Error(`[Trade Params] Invalid SELL SL distance for ${symbol}`);
-            }
-
-            takeProfitPrice = price - slDistance * rr;
-        }
+        // Round prices to symbol precision
+        stopLossPrice = this.roundPrice(stopLossPrice, symbol);
+        takeProfitPrice = this.roundPrice(takeProfitPrice, symbol);
 
         // --- Risk management & position size ---
         const slDistance = Math.abs(price - stopLossPrice);
@@ -125,16 +115,15 @@ class TradingService {
 
         const riskAmount = (this.accountBalance * this.maxRiskPerTrade) / MAX_POSITIONS;
 
-        // Simple pip-based model (approx): 1 pip move ≈ pip fraction of price
-        // This is not exact CFD contract math, but good enough for backtesting & scaling.
+        // Approx pip value model (kept as-is)
         const pipValuePerUnit = pip / price;
         const lossPerUnitAtSL = slPips * pipValuePerUnit;
 
-        let size = riskAmount / lossPerUnitAtSL;
+        let size = lossPerUnitAtSL > 0 ? riskAmount / lossPerUnitAtSL : 0;
 
         // Normalize size: 100-unit step, minimum 100
         size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
+        if (size < 100) logger.error(`[Trade Params] Computed size below minimum for ${symbol}`);
 
         // --- Respect broker TP constraints if available ---
         try {
@@ -143,107 +132,30 @@ class TradingService {
                 const { minDistance, maxDistance } = tpRange; // in price units
                 const tpDistance = Math.abs(takeProfitPrice - price);
 
-                // If TP too close or too far, clamp it to allowed range but keep the direction.
                 if (tpDistance < minDistance || (maxDistance && tpDistance > maxDistance)) {
-                    const directionFactor = signal === "BUY" ? 1 : -1;
                     const clampedDistance = Math.min(Math.max(tpDistance, minDistance), maxDistance || tpDistance);
-                    takeProfitPrice = price + directionFactor * clampedDistance;
+                    takeProfitPrice = this.roundPrice(price + direction * clampedDistance, symbol);
                 }
             }
         } catch (e) {
             logger.warn(`[Trade Params] Could not adjust TP to broker range for ${symbol}: ${e.message}`);
         }
 
+        const riskReward = slDistance > 0 ? Math.abs(takeProfitPrice - price) / slDistance : 0;
+
         logger.info(
-            `[Trade Params] ${symbol} ${signal}:
-            Entry: ${price}
-            SL: ${stopLossPrice}
-            TP: ${takeProfitPrice}
-            CandleSize: ${candleSize}
-            Spread: ${spread}
-            SL_pips: ${slPips.toFixed(1)}
-            RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
-            Size: ${size}`
+            `[Trade Params] ${symbol} ${signal}: Entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} SL_pips=${slPips.toFixed(1)} RR=${riskReward.toFixed(2)}:1 Size=${size}`
         );
 
         return { size, price, stopLossPrice, takeProfitPrice };
     }
 
-    // async calculateTradeParameters(signal, symbol, bid, ask, indicators) {
-    //     // Use ATR from the entry timeframe (M15)
-    //     const price = signal === "BUY" ? ask : bid;
-    //     // const atr = await this.calculateATR(symbol); // Already uses M15 timeframe
-    //     const atr = indicators?.m15?.atr;
-
-    //     // ATR-based dynamic stops/TPs
-    //     const stopLossDistance = 1.5 * atr;
-    //     const takeProfitDistance = 3 * atr;
-    //     const stopLossPrice = signal === "BUY" ? price - stopLossDistance : price + stopLossDistance;
-    //     const takeProfitPrice = signal === "BUY" ? price + takeProfitDistance : price - takeProfitDistance;
-    //     const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
-    //     logger.info(`[calculateTradeParameters] ATR: ${atr}, Size: ${size}`);
-
-    //     //     // --- Respect broker TP constraints if available ---
-    //     try {
-    //         const tpRange = await getAllowedTPRange(symbol, signal, price);
-    //         if (tpRange) {
-    //             const { minDistance, maxDistance } = tpRange; // in price units
-    //             const tpDistance = Math.abs(takeProfitPrice - price);
-
-    //             // If TP too close or too far, clamp it to allowed range but keep the direction.
-    //             if (tpDistance < minDistance || (maxDistance && tpDistance > maxDistance)) {
-    //                 const directionFactor = signal === "BUY" ? 1 : -1;
-    //                 const clampedDistance = Math.min(Math.max(tpDistance, minDistance), maxDistance || tpDistance);
-    //                 takeProfitPrice = price + directionFactor * clampedDistance;
-    //             }
-    //         }
-    //     } catch (e) {
-    //         logger.warn(`[Trade Params] Could not adjust TP to broker range for ${symbol}: ${e.message}`);
-    //     }
-    //     const slDistance = Math.abs(price - stopLossPrice);
-
-    //     logger.info(
-    //         `[Trade Params] ${symbol} ${signal}:
-    //             Entry: ${price}
-    //             SL: ${stopLossPrice}
-    //             TP: ${takeProfitPrice}
-    //             RR: ${(Math.abs(takeProfitPrice - price) / slDistance).toFixed(2)}:1
-    //             Size : ${size}`
-    //     );
-    //     return { size, price, stopLossPrice, takeProfitPrice };
-    // }
-
-    positionSize(balance, price, stopLossPrice, symbol) {
-        const isJPY = symbol.includes("JPY");
-        const pip = isJPY ? 0.01 : 0.0001;
-
-        // --- Risk management & position size ---
-        const slDistance = Math.abs(price - stopLossPrice);
-        const slPips = slDistance / pip;
-
-        const riskAmount = (balance * this.maxRiskPerTrade) / MAX_POSITIONS;
-
-        // Simple pip-based model (approx): 1 pip move ≈ pip fraction of price
-        // This is not exact CFD contract math, but good enough for backtesting & scaling.
-        const pipValuePerUnit = pip / price;
-        const lossPerUnitAtSL = slPips * pipValuePerUnit;
-
-        let size = riskAmount / lossPerUnitAtSL;
-        if (size < 100) size = 100;
-
-        return size;
-    }
-    // Add pip value determination
-    getPipValue(symbol) {
-        return symbol.includes("JPY") ? 0.01 : 0.0001;
-    }
-
     // ============================================================
     //                    Place the Trade
     // ============================================================
-    async executeTrade(symbol, signal, bid, ask, indicators, candles, context) {
+    async executeTrade(symbol, signal, bid, ask, indicators, context) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context, indicators);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context);
 
             const pos = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
@@ -302,8 +214,10 @@ class TradingService {
     // ============================================================
     async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
-            if (this.dealIds.size >= MAX_POSITIONS) {
-                logger.info(`[ProcessPrice] Max positions reached.`);
+            await this.syncOpenTradesFromBroker();
+            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+            if (this.openTrades.length >= MAX_POSITIONS) {
+                logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
                 return;
             }
             if (this.isSymbolTraded(symbol)) {
@@ -311,13 +225,16 @@ class TradingService {
                 return;
             }
 
-            const { signal, reason, context } = Strategy.getSignal({
-                symbol,
-                indicators,
-                candles,
-                bid,
-                ask,
-            });
+            const mode = STRATEGY.MODE.toLowerCase();
+            let result;
+            switch (mode) {
+                case "green_red":
+                    result = Strategy.getSignalGreenRed({ symbol, indicators, candles, bid, ask });
+                default:
+                    break;
+            }
+
+            const { signal, reason, context } = result;
 
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
@@ -325,7 +242,7 @@ class TradingService {
             }
 
             logger.info(`[Signal] ${symbol}: ${signal}`);
-            await this.executeTrade(symbol, signal, bid, ask, indicators, candles, context);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, context);
         } catch (err) {
             logger.error(`[ProcessPrice] Error:`, err);
         }
@@ -396,10 +313,12 @@ class TradingService {
     //                     Close Position
     // ============================================================
     async closePosition(dealId, label) {
-        const closeReason = label || "manual_close";
+        const requestedReason = label || "manual_close";
         let symbol;
         let priceHint;
         let indicatorSnapshot = null;
+        let closePayload;
+        let confirmation;
 
         try {
             const context = await this.getPositionContext(dealId);
@@ -412,19 +331,76 @@ class TradingService {
         }
 
         try {
-            await apiClosePosition(dealId);
-            logger.info(`[API] Closed ${dealId}`);
+            if (symbol) {
+                indicatorSnapshot = await tradeTracker.getCloseIndicators(symbol);
+            }
+        } catch (snapshotError) {
+            logger.warn(`[ClosePos] Could not capture close indicators for ${dealId}: ${snapshotError.message}`);
+        }
+
+        try {
+            closePayload = await apiClosePosition(dealId);
+            logger.info(`[ClosePos] Raw close payload for ${dealId}:`, closePayload);
         } catch (err) {
             logger.error(`[ClosePos] Error closing deal ${dealId}:`, err);
             return;
         }
 
         try {
+            if (closePayload?.dealReference) {
+                try {
+                    confirmation = await getDealConfirmation(closePayload.dealReference);
+                    logger.info(`[ClosePos] Close confirmation for ${dealId}:`, confirmation);
+                } catch (confirmError) {
+                    logger.warn(`[ClosePos] Close confirmation failed for ${dealId}: ${confirmError.message}`);
+                }
+            }
+
+            const toNumber = (value) => {
+                if (value === undefined || value === null || value === "") return null;
+                const num = typeof value === "number" ? value : Number(value);
+                return Number.isFinite(num) ? num : null;
+            };
+
+            const firstNumber = (...values) => {
+                for (const value of values) {
+                    const num = toNumber(value);
+                    if (num !== null) return num;
+                }
+                return null;
+            };
+
+            const brokerPrice = firstNumber(
+                confirmation?.closeLevel,
+                confirmation?.level,
+                confirmation?.dealLevel,
+                confirmation?.price,
+                closePayload?.closeLevel,
+                closePayload?.level,
+                closePayload?.price,
+                priceHint
+            );
+
+            const brokerReason =
+                confirmation?.reason ?? confirmation?.status ?? confirmation?.dealStatus ?? closePayload?.reason ?? closePayload?.status ?? null;
+
+            const finalReason = brokerReason || requestedReason || "unknown";
+
+            logger.info("[ClosePos] Derived closeReason", {
+                dealId,
+                requestedReason,
+                brokerReason,
+                finalReason,
+                closePrice: brokerPrice,
+                priceHint,
+                hasConfirmation: Boolean(confirmation),
+            });
+
             const updated = logTradeClose({
                 dealId,
                 symbol,
-                closePrice: priceHint ?? indicatorSnapshot?.price,
-                closeReason,
+                closePrice: brokerPrice ?? priceHint ?? null,
+                closeReason: finalReason,
                 indicators: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });

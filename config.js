@@ -32,17 +32,15 @@ export const SESSIONS = {
         SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
     },
     CRYPTO: ["BTC/USD", "ETH/USD"],
-    STOCKS: ["AAPL", "TSLA"],
-    ETFS: ["SPY", "QQQ"],
 };
 
 export const RISK = {
     LEVERAGE: 30,
     PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
-    BUFFER_PIPS: 1, // Buffer for SL calculation
-    REWARD_RATIO: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 60, // Maximum hold time in minutes
+    BUFFER_PIPS: 2, // Buffer for SL calculation
+    RR: 2, // 2:1 reward-to-risk ratio
+    MAX_HOLD_TIME: 30, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
@@ -53,9 +51,24 @@ export const RISK = {
     REQUIRED_SCORE: 6, // Must have total score or more
 };
 
+export const STRATEGY = {
+    // Which strategy to run in live trading. Options supported by services/trading.js:
+    // "green_red" | "bollinger_mean_reversion"
+    // MODE: "bollinger_mean_reversion",
+    MODE: "green_red",
+
+    // Settings for Bollinger Mean Reversion strategy (M5 entry, optional M15 filter)
+    BOLLINGER_MR: {
+        RSI_BUY_MAX: 30,
+        RSI_SELL_MIN: 70,
+        ADX_MAX: 28.0,
+        USE_EMA200_FILTER: false,
+        USE_M15_TREND_FILTER: false,
+    },
+};
+
 // Technical Analysis Configuration
 export const ANALYSIS = {
-    // Multi-Timeframe Strategy
     TIMEFRAMES: {
         D1: "DAY", // Daily trend direction
         H4: "HOUR_4", // 4-hour trend direction
@@ -83,22 +96,6 @@ export const ANALYSIS = {
         EXIT_OVERBOUGHT: 65, // Earlier exit
         EXIT_OVERSOLD: 35,
     },
-
-    BACKTESTING: {
-        ENABLED: false,
-        START_DATE: "2024-01-01",
-        END_DATE: "2025-12-31",
-    },
-
-    RANGE_FILTER: {
-        ENABLED: true,
-        // Minimum ATR as a percentage of price (e.g. 0.0005 ≈ 0.05%)
-        MIN_ATR_PCT: 0.0005,
-        // Minimum Bollinger Band width as a percentage of price
-        MIN_BB_WIDTH_PCT: 0.0007,
-        // Minimum EMA distance (fast vs slow) as a percentage of price
-        MIN_EMA_DIST_PCT: 0.0003,
-    },
 };
 
 // Development overrides for faster testing
@@ -107,11 +104,10 @@ export const DEV = {
     MODE: false,
 };
 
-
 // 1 min
-export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
+// export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
 
 // 5 min
-// export const PROD = {
-//     INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
-// };
+export const PROD = {
+    INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
+};
