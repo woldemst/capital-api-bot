@@ -15,12 +15,11 @@ export async function calcIndicators(bars) {
     const emaFastTrendSeries = EMA.calculate({ period: ANALYSIS.EMA.TREND.FAST, values: closes });
     const emaSlowTrendSeries = EMA.calculate({ period: ANALYSIS.EMA.TREND.SLOW, values: closes });
 
+    // EMA series and helpers (needed for Calm River)
     const ema5Series = EMA.calculate({ period: 5, values: closes });
     const ema9Series = EMA.calculate({ period: 9, values: closes });
     const ema10Series = EMA.calculate({ period: 10, values: closes });
     const ema12Series = EMA.calculate({ period: 12, values: closes });
-
-    // EMA series and helpers (needed for Calm River)
     const ema20Series = EMA.calculate({ period: 20, values: closes });
     const ema21Series = EMA.calculate({ period: 21, values: closes });
     const ema26Series = EMA.calculate({ period: 26, values: closes });
@@ -29,6 +28,7 @@ export async function calcIndicators(bars) {
     const ema100Series = EMA.calculate({ period: 100, values: closes });
     const ema200Series = EMA.calculate({ period: 200, values: closes });
 
+    // Latest EMA values
     const ema5 = ema5Series[ema5Series.length - 1];
     const ema9 = ema9Series[ema9Series.length - 1];
     const ema10 = ema10Series[ema10Series.length - 1];
@@ -44,6 +44,7 @@ export async function calcIndicators(bars) {
     const ema100 = ema100Series[ema100Series.length - 1];
     const ema200 = ema200Series[ema200Series.length - 1];
 
+    // EMA prevs 
     const ema20Prev = ema20Series[ema20Series.length - 2] ?? ema20Val;
     const ema30Prev = ema30Series[ema30Series.length - 2] ?? ema30Val;
     const ema50Prev = ema50Series[ema50Series.length - 2] ?? ema50Val;
@@ -211,40 +212,4 @@ export async function calcIndicators(bars) {
         backQuantIsLong: backQuant?.isLong ?? false,
         backQuantIsShort: backQuant?.isShort ?? false,
     };
-}
-
-// Analyze trend on higher timeframes
-export async function analyzeTrend(symbol, getHistorical) {
-    if (!symbol || typeof getHistorical !== "function") {
-        console.error("Invalid parameters for analyzeTrend");
-        return { overallTrend: "unknown" };
-    }
-
-    try {
-        // Add back D1 timeframe analysis
-        const [h4Data, d1Data] = await Promise.all([getHistorical(symbol, ANALYSIS.TIMEFRAMES.H4, 50), getHistorical(symbol, ANALYSIS.TIMEFRAMES.D1, 30)]);
-
-        if (!h4Data?.prices || !d1Data?.prices) {
-            console.error("Missing prices in historical data");
-            return { overallTrend: "unknown" };
-        }
-
-        const h4Indicators = await calcIndicators(h4Data.prices);
-        const d1Indicators = await calcIndicators(d1Data.prices);
-
-        // Use EMA crossover for trend determination
-        const h4Trend = h4Indicators.emaFastTrend > h4Indicators.emaSlowTrend ? "bullish" : "bearish";
-        const d1Trend = d1Indicators.emaFastTrend > d1Indicators.emaSlowTrend ? "bullish" : "bearish";
-
-        return {
-            h4Trend,
-            d1Trend,
-            h4Indicators,
-            d1Indicators,
-            overallTrend: h4Trend === "bullish" && d1Trend === "bullish" ? "bullish" : h4Trend === "bearish" && d1Trend === "bearish" ? "bearish" : "mixed",
-        };
-    } catch (error) {
-        console.error(`Error analyzing trend for ${symbol}:`, error);
-        return { overallTrend: "unknown" };
-    }
 }

@@ -83,55 +83,27 @@ class TradingService {
     //               ATR-Based Trade Parameters
     // ============================================================
     async calculateTradeParameters(signal, symbol, bid, ask, context) {
-        if (!context?.last || !Number.isFinite(context.last.high) || !Number.isFinite(context.last.low)) {
-            throw new Error(`[Trade Params] Missing/invalid context.last candle for ${symbol}`);
-        }
-
-        const price = signal === "BUY" ? ask : bid;
+        const isBuy = signal === "BUY";
+        const price = isBuy ? ask : bid;
         const last = context.last;
 
-        const isJPY = symbol.includes("JPY");
-        const pip = isJPY ? 0.01 : 0.0001;
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const direction = isBuy ? 1 : -1;
 
         // Buffer expressed in PRICE units (pips -> price)
-        const buffer = (RISK.BUFFER_PIPS ?? 2) * pip;
-
-        // Spread in PRICE units
-        const spread = Math.abs((ask ?? price) - (bid ?? price));
-
-        // Use RR from config (fallback 1.5)
-        const rr = Number.isFinite(RISK.RR) ? RISK.RR : 1.5;
+        const buffer = RISK.BUFFER_PIPS * pip;
 
         let stopLossPrice;
         let takeProfitPrice;
 
-        if (signal === "BUY") {
-            // SL below the low of the signal candle
-            stopLossPrice = last.low - buffer - spread;
+        const stopReference = isBuy ? last.low : last.high;
+        stopLossPrice = stopReference - direction * buffer;
 
-            const slDistance = price - stopLossPrice;
-            if (!(slDistance > 0)) {
-                throw new Error(`[Trade Params] Invalid BUY SL distance for ${symbol}`);
-            }
+        const slDistanceFromEntry = direction * (price - stopLossPrice);
+        if (!(slDistanceFromEntry > 0)) logger.error(`[Trade Params] Invalid ${signal} SL distance for ${symbol}`);
 
-            // Default TP based on RR, but allow strategy override (e.g. BB middle)
-            const tpTarget = context?.tpTarget;
-            const rrTp = price + slDistance * rr;
-            takeProfitPrice = Number.isFinite(tpTarget) && tpTarget > price ? tpTarget : rrTp;
-        } else {
-            // SELL: SL above the high of the signal candle
-            stopLossPrice = last.high + buffer + spread;
-
-            const slDistance = stopLossPrice - price;
-            if (!(slDistance > 0)) {
-                throw new Error(`[Trade Params] Invalid SELL SL distance for ${symbol}`);
-            }
-
-            // Default TP based on RR, but allow strategy override (e.g. BB middle)
-            const tpTarget = context?.tpTarget;
-            const rrTp = price - slDistance * rr;
-            takeProfitPrice = Number.isFinite(tpTarget) && tpTarget < price ? tpTarget : rrTp;
-        }
+        // Default TP based on RR (strategy-specific overrides can adjust later)
+        takeProfitPrice = price + direction * slDistanceFromEntry * RISK.RR;
 
         // Round prices to symbol precision
         stopLossPrice = this.roundPrice(stopLossPrice, symbol);
@@ -147,11 +119,11 @@ class TradingService {
         const pipValuePerUnit = pip / price;
         const lossPerUnitAtSL = slPips * pipValuePerUnit;
 
-        let size = riskAmount / lossPerUnitAtSL;
+        let size = lossPerUnitAtSL > 0 ? riskAmount / lossPerUnitAtSL : 0;
 
         // Normalize size: 100-unit step, minimum 100
         size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
+        if (size < 100) logger.error(`[Trade Params] Computed size below minimum for ${symbol}`);
 
         // --- Respect broker TP constraints if available ---
         try {
@@ -161,47 +133,21 @@ class TradingService {
                 const tpDistance = Math.abs(takeProfitPrice - price);
 
                 if (tpDistance < minDistance || (maxDistance && tpDistance > maxDistance)) {
-                    const directionFactor = signal === "BUY" ? 1 : -1;
                     const clampedDistance = Math.min(Math.max(tpDistance, minDistance), maxDistance || tpDistance);
-                    takeProfitPrice = this.roundPrice(price + directionFactor * clampedDistance, symbol);
+                    takeProfitPrice = this.roundPrice(price + direction * clampedDistance, symbol);
                 }
             }
         } catch (e) {
             logger.warn(`[Trade Params] Could not adjust TP to broker range for ${symbol}: ${e.message}`);
         }
 
+        const riskReward = slDistance > 0 ? Math.abs(takeProfitPrice - price) / slDistance : 0;
+
         logger.info(
-            `[Trade Params] ${symbol} ${signal}: Entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} SL_pips=${slPips.toFixed(1)} RR=${(
-                Math.abs(takeProfitPrice - price) / slDistance
-            ).toFixed(2)}:1 Size=${size}`
+            `[Trade Params] ${symbol} ${signal}: Entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} SL_pips=${slPips.toFixed(1)} RR=${riskReward.toFixed(2)}:1 Size=${size}`
         );
 
         return { size, price, stopLossPrice, takeProfitPrice };
-    }
-
-    positionSize(balance, entryPrice, stopLossPrice, symbol) {
-        const isJPY = symbol.includes("JPY");
-        const pip = isJPY ? 0.01 : 0.0001;
-
-        const slDistance = Math.abs(entryPrice - stopLossPrice);
-        const slPips = slDistance / pip;
-
-        const riskAmount = (balance * this.maxRiskPerTrade) / MAX_POSITIONS;
-
-        const pipValuePerUnit = pip / entryPrice;
-        const lossPerUnitAtSL = slPips * pipValuePerUnit;
-
-        let size = riskAmount / lossPerUnitAtSL;
-
-        // Normalize size: 100-unit step, minimum 100
-        size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
-
-        return size;
-    }
-    // Add pip value determination
-    getPipValue(symbol) {
-        return symbol.includes("JPY") ? 0.01 : 0.0001;
     }
 
     // ============================================================
@@ -282,23 +228,13 @@ class TradingService {
             const mode = STRATEGY.MODE.toLowerCase();
             let result;
             switch (mode) {
-                case "bb_mr":
-                    case "bollinger_mean_reversion":
-                    result = Strategy.getSignalBollingerMeanReversion({
-                        symbol,
-                        indicators,
-                        candles,
-                        bid,
-                        ask,
-                    });
-                    break;
                 case "green_red":
-                default:
                     result = Strategy.getSignalGreenRed({ symbol, indicators, candles, bid, ask });
+                default:
                     break;
             }
 
-            const { signal, reason, context } = result || { signal: null, reason: "no_result", context: {} };
+            const { signal, reason, context } = result;
 
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);

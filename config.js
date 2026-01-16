@@ -53,15 +53,16 @@ export const RISK = {
 
 export const STRATEGY = {
     // Which strategy to run in live trading. Options supported by services/trading.js:
-    // "green_red" | "bollinger_mean_reversion" 
-    MODE: "bollinger_mean_reversion",
+    // "green_red" | "bollinger_mean_reversion"
+    // MODE: "bollinger_mean_reversion",
+    MODE: "green_red",
 
     // Settings for Bollinger Mean Reversion strategy (M5 entry, optional M15 filter)
     BOLLINGER_MR: {
         RSI_BUY_MAX: 30,
         RSI_SELL_MIN: 70,
-        ADX_MAX: 20,
-        USE_EMA200_FILTER: true,
+        ADX_MAX: 28.0,
+        USE_EMA200_FILTER: false,
         USE_M15_TREND_FILTER: false,
     },
 };
@@ -100,7 +101,7 @@ export const ANALYSIS = {
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 15 seconds between analyses
-    MODE: true,
+    MODE: false,
 };
 
 // 1 min
