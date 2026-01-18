@@ -93,37 +93,46 @@ class Strategy {
     // ------------------------------------------------------------
     getSignalGreenRed({ indicators, candles }) {
         const { m5, m15 } = indicators;
-        const m5Candles = candles?.m5Candles ?? [];
-        const m15Candles = candles?.m15Candles ?? [];
 
-        if (m5Candles.length < 3) {
-            return { signal: null, reason: "insufficient_m5_candles", context: {} };
-        }
-        if (m15Candles.length < 3) {
-            return { signal: null, reason: "insufficient_m15_candles", context: {} };
-        }
+        if (candles?.m5Candles.length < 3) return { signal: null, reason: "insufficient_m5_candles", context: {} };
+        if (candles?.m15Candles.length < 3) return { signal: null, reason: "insufficient_m15_candles", context: {} };
 
-        // Use the last CLOSED candles (avoid the still-forming candle at the end)
-        const m5Prev = m5Candles[m5Candles.length - 3];
-        const m5Last = m5Candles[m5Candles.length - 2];
-        if (!m5Prev || !m5Last) return { signal: null, reason: "missing_m5_closed", context: {} };
+        const m5Prev = candles.m5Candles[candles.m5Candles.length - 3];
+        const m5Last = candles.m5Candles[candles.m5Candles.length - 2];
 
-        const adx = m5?.adx?.adx;
         const m5Signal = this.greenRedCandlePattern(m5Prev, m5Last);
+        if (!m5Signal) {
+            return { signal: null, reason: "no_pattern", context: { last: m5Last, prev: m5Prev } };
+        }
+
         const m5Trend = this.pickTrend(m5);
         const m15Trend = this.pickTrend(m15);
         const trendsAligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
 
-        if (Number.isFinite(adx) && adx >= 28) {
+        if (!trendsAligned) {
+            return { signal: null, reason: "trend_not_aligned", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend } };
+        }
+
+        if (m5Signal !== m5Trend) {
+            return { signal: null, reason: "pattern_vs_trend_mismatch", context: { last: m5Last, prev: m5Prev, m5Signal, m5Trend, m15Trend } };
+        }
+
+        const adx = m5.adx.adx;
+        if (adx >= 28) {
             return { signal: null, reason: "adx_too_high", context: { last: m5Last, prev: m5Prev, adx } };
         }
 
-        if (trendsAligned && m5Signal === m5Trend) {
-            const signal = m5Trend === "bullish" ? "BUY" : "SELL";
-            return { signal, reason: "green_red_pattern", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, adx } };
+        // Option A: M15 quality filter (entry must not be "expensive/extended")
+        const m15Rsi = m15.rsi.rsi;
+        const m15Pb = m15.bb.pb;
+
+        const m15QualityOk = m15Rsi <= 45 && m15Pb <= 0.3;
+        if (!m15QualityOk) {
+            return { signal: null, reason: "blocked_m15_quality", context: { last: m5Last, prev: m5Prev, adx, m15Rsi, m15Pb, m5Trend, m15Trend } };
         }
 
-        return { signal: null, reason: "no_signal", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, m5Signal, adx } };
+        const signal = m5Trend === "bullish" ? "BUY" : "SELL";
+        return { signal, reason: "green_red_pattern", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, adx, m15Rsi, m15Pb } };
     }
 
     greenRedCandlePattern(prev, last) {
@@ -144,26 +153,11 @@ class Strategy {
     }
 
     pickTrend(indicator) {
-        const { ema20, ema50, emaFast, emaSlow, ema9, ema21, trend } = indicator;
+        const { ema20, ema50, trend } = indicator;
 
-        if (Number.isFinite(ema20) && Number.isFinite(ema50)) {
-            if (ema20 > ema50) return "bullish";
-            if (ema20 < ema50) return "bearish";
-        }
-
-        if (Number.isFinite(emaFast) && Number.isFinite(emaSlow)) {
-            if (emaFast > emaSlow) return "bullish";
-            if (emaFast < emaSlow) return "bearish";
-        }
-
-        if (Number.isFinite(ema9) && Number.isFinite(ema21)) {
-            if (ema9 > ema21) return "bullish";
-            if (ema9 < ema21) return "bearish";
-        }
-
-        if (trend === "bullish" || trend === "bearish") {
-            return trend;
-        }
+        if (ema20 > ema50) return "bullish";
+        if (ema20 < ema50) return "bearish";
+        if (trend === "bullish" || trend === "bearish") return trend;
 
         return "neutral";
     }

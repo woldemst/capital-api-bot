@@ -315,7 +315,7 @@ class TradeTracker {
                     symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
                     closeReason: inferredReason,
-                    indicators: indicatorsClose,
+                    indicatorsOnClosing: indicatorsClose,
                     closePrice: closePrice ?? null,
                     timestamp: new Date().toISOString(),
                 });

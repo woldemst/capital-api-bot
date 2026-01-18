@@ -192,7 +192,7 @@ class TradingService {
                         stopLoss: stopLossPrice.toFixed(5),
                         takeProfit: takeProfitPrice.toFixed(5),
                         // indicators: indicatorSnapshot,
-                        indicators: indicators,
+                        indicatorsOnOpening: indicators,
                         timestamp: logTimestamp,
                     });
 
@@ -401,7 +401,7 @@ class TradingService {
                 symbol,
                 closePrice: brokerPrice ?? priceHint ?? null,
                 closeReason: finalReason,
-                indicators: indicatorSnapshot,
+                indicatorsOnClosing: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });
             if (updated) tradeTracker.markDealClosed(dealId);
