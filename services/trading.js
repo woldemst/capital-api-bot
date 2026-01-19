@@ -67,10 +67,10 @@ class TradingService {
                 direction === "BUY" && Number.isFinite(ask)
                     ? ask
                     : direction === "SELL" && Number.isFinite(bid)
-                    ? bid
-                    : Number.isFinite(bid) && Number.isFinite(ask)
-                    ? (bid + ask) / 2
-                    : bid ?? ask ?? null;
+                      ? bid
+                      : Number.isFinite(bid) && Number.isFinite(ask)
+                        ? (bid + ask) / 2
+                        : (bid ?? ask ?? null);
 
             return { symbol, direction, price };
         } catch (error) {
@@ -144,7 +144,7 @@ class TradingService {
         const riskReward = slDistance > 0 ? Math.abs(takeProfitPrice - price) / slDistance : 0;
 
         logger.info(
-            `[Trade Params] ${symbol} ${signal}: Entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} SL_pips=${slPips.toFixed(1)} RR=${riskReward.toFixed(2)}:1 Size=${size}`
+            `[Trade Params] ${symbol} ${signal}: Entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice} SL_pips=${slPips.toFixed(1)} RR=${riskReward.toFixed(2)}:1 Size=${size}`,
         );
 
         return { size, price, stopLossPrice, takeProfitPrice };
@@ -378,7 +378,7 @@ class TradingService {
                 closePayload?.closeLevel,
                 closePayload?.level,
                 closePayload?.price,
-                priceHint
+                priceHint,
             );
 
             const brokerReason =

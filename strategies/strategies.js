@@ -109,45 +109,51 @@ class Strategy {
         const m15Trend = this.pickTrend(m15);
         const trendsAligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
 
-        if (!trendsAligned) {
-            return { signal: null, reason: "trend_not_aligned", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend } };
-        }
+        // if (!trendsAligned) {
+        //     return { signal: null, reason: "trend_not_aligned", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend } };
+        // }
 
-        if (m5Signal !== m5Trend) {
-            return { signal: null, reason: "pattern_vs_trend_mismatch", context: { last: m5Last, prev: m5Prev, m5Signal, m5Trend, m15Trend } };
-        }
-
-        const adx = m5.adx.adx;
-        if (adx >= 28) {
-            return { signal: null, reason: "adx_too_high", context: { last: m5Last, prev: m5Prev, adx } };
-        }
-
-        // Option A: M15 quality filter (entry must not be "expensive/extended")
-        const m15Rsi = m15.rsi.rsi;
-        const m15Pb = m15.bb.pb;
-
-        const m15QualityOk = m15Rsi <= 45 && m15Pb <= 0.3;
-        if (!m15QualityOk) {
-            return { signal: null, reason: "blocked_m15_quality", context: { last: m5Last, prev: m5Prev, adx, m15Rsi, m15Pb, m5Trend, m15Trend } };
-        }
+        // if (m5Signal !== m5Trend) {
+        //     return { signal: null, reason: "pattern_vs_trend_mismatch", context: { last: m5Last, prev: m5Prev, m5Signal, m5Trend, m15Trend } };
+        // }
 
         const signal = m5Trend === "bullish" ? "BUY" : "SELL";
-        return { signal, reason: "green_red_pattern", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, adx, m15Rsi, m15Pb } };
+
+        const m15Rsi = m15.rsi;
+        const m15Pb = m15.bb.pb;
+        console.log(m15Rsi, m15Pb);
+        
+        const buyQualityOk = m15Rsi <= 55 && m15Pb <= 0.7;
+        const sellQualityOk = m15Rsi >= 45 && m15Pb >= 0.3;
+
+        if (signal === "BUY" && !buyQualityOk) {
+            return { signal: null, reason: "blocked_m15_quality_buy", context: { m15Rsi, m15Pb } };
+        }
+        if (signal === "SELL" && !sellQualityOk) {
+            return { signal: null, reason: "blocked_m15_quality_sell", context: { m15Rsi, m15Pb } };
+        }
+
+        return { signal, reason: "green_red_pattern", context: { last: m5Last, prev: m5Prev, m15Rsi, m15Pb } };
     }
 
     greenRedCandlePattern(prev, last) {
+        console.log(`Prev: ${prev.close}, Last: ${prev.close}`);
+        
         if (!prev || !last) return false;
 
         const isBull = (c) => c.close > c.open;
         const isBear = (c) => c.close < c.open;
 
         // --- Candle body strength check ---
-        const body = Math.abs(last.close - last.open);
-        const range = last.high - last.low;
-        const strong = range > 0 && body / range >= 0.3;
+        // const body = Math.abs(last.close - last.open);
+        // const range = last.high - last.low;
+        // const strong = range > 0 && body / range >= 0.3;
 
-        if (isBear(prev) && isBull(last) && strong) return "bullish";
-        if (isBull(prev) && isBear(last) && strong) return "bearish";
+        // if (isBear(prev) && isBull(last) && strong) return "bullish";
+        // if (isBull(prev) && isBear(last) && strong) return "bearish";
+
+        if (isBear(prev) && isBull(last)) return "bullish";
+        if (isBull(prev) && isBear(last)) return "bearish";
 
         return false;
     }
