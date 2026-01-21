@@ -7,6 +7,7 @@ import { calcIndicators } from "./indicators/indicators.js";
 import { tradeTracker } from "./utils/tradeLogger.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES } = ANALYSIS;
+import { isNewsTime } from "./utils/newsChecker.js";
 
 class TradingBot {
     constructor() {
@@ -134,10 +135,6 @@ class TradingBot {
     async startAnalysisInterval() {
         const runAnalysis = async () => {
             try {
-                // if (!this.isTradingAllowed()) {
-                //     logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                //     return;
-                // }
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
                 await this.startMonitorOpenTrades();
@@ -213,6 +210,10 @@ class TradingBot {
     async analyzeAllSymbols() {
         const activeSymbols = this.getActiveSymbols();
         for (const symbol of activeSymbols) {
+            if (!(await this.isTradingAllowed(symbol))) {
+                logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                return;
+            }
             await this.analyzeSymbol(symbol);
             await this.delay(2000);
         }
@@ -261,7 +262,7 @@ class TradingBot {
 
         if (!d1Candles || !h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( D1: ${!!d1Candles}, H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( D1: ${!!d1Candles}, H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`,
             );
             return;
         }
@@ -457,49 +458,52 @@ class TradingBot {
         // keep only one interval running
         if (this.maxHoldInterval) clearInterval(this.maxHoldInterval);
 
-        this.maxHoldInterval = setInterval(async () => {
-            try {
-                const positions = await getOpenPositions();
-                if (!positions?.positions?.length) return;
+        this.maxHoldInterval = setInterval(
+            async () => {
+                try {
+                    const positions = await getOpenPositions();
+                    if (!positions?.positions?.length) return;
 
-                const nowMs = Date.now();
+                    const nowMs = Date.now();
 
-                for (const pos of positions.positions) {
-                    const openRaw = pos?.position?.openTime ?? pos?.position?.createdDateUTC ?? pos?.position?.createdDate ?? pos?.openTime; // fallbacks, just in case
+                    for (const pos of positions.positions) {
+                        const openRaw = pos?.position?.openTime ?? pos?.position?.createdDateUTC ?? pos?.position?.createdDate ?? pos?.openTime; // fallbacks, just in case
 
-                    logger.debug(`[Bot] Position ${pos?.market?.epic} - Open Time raw: ${openRaw}`);
+                        logger.debug(`[Bot] Position ${pos?.market?.epic} - Open Time raw: ${openRaw}`);
 
-                    const openMs = this.parseOpenTimeMs(openRaw);
+                        const openMs = this.parseOpenTimeMs(openRaw);
 
-                    if (Number.isNaN(openMs)) {
-                        logger.error(`[Bot] Could not parse open time for ${pos?.market?.epic}: ${openRaw}`);
-                        continue;
-                    }
-
-                    // clamp in case of clock skew
-                    const heldMs = Math.max(0, nowMs - openMs);
-                    const minutesHeld = heldMs / 60000; // exact minutes
-
-                    logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
-
-                    // RISK.MAX_HOLD_TIME is in minutes (15)
-                    if (minutesHeld >= RISK.MAX_HOLD_TIME) {
-                        const dealId = pos?.position?.dealId ?? pos?.dealId;
-                        if (!dealId) {
-                            logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
+                        if (Number.isNaN(openMs)) {
+                            logger.error(`[Bot] Could not parse open time for ${pos?.market?.epic}: ${openRaw}`);
                             continue;
                         }
-                        // await tradingService.closePosition(dealId, "timeout");
-                        logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
+
+                        // clamp in case of clock skew
+                        const heldMs = Math.max(0, nowMs - openMs);
+                        const minutesHeld = heldMs / 60000; // exact minutes
+
+                        logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
+
+                        // RISK.MAX_HOLD_TIME is in minutes (15)
+                        if (minutesHeld >= RISK.MAX_HOLD_TIME) {
+                            const dealId = pos?.position?.dealId ?? pos?.dealId;
+                            if (!dealId) {
+                                logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
+                                continue;
+                            }
+                            // await tradingService.closePosition(dealId, "timeout");
+                            logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
+                        }
                     }
+                } catch (error) {
+                    logger.error("[Bot] Error in max hold monitor:", error);
                 }
-            } catch (error) {
-                logger.error("[Bot] Error in max hold monitor:", error);
-            }
-        }, 5 * 60 * 1000); // Check every 5 minutes
+            },
+            5 * 60 * 1000,
+        ); // Check every 5 minutes
     }
 
-    isTradingAllowed() {
+    async isTradingAllowed(symbol) {
         const now = new Date();
 
         const day = now.getDay(); // 0 = Sunday, 6 = Saturday
@@ -525,6 +529,12 @@ class TradingBot {
 
         if (!allowed) {
             logger.info("[Bot] Trading blocked: Not in allowed session window (first/last 15 min excluded).");
+            return false;
+        }
+
+        const newsBlocked = await isNewsTime(symbol);
+        if (newsBlocked) {
+            logger.info("[Bot] Trading blocked: High-impact news event detected.");
             return false;
         }
         return true;
