@@ -21,7 +21,9 @@ class TradingBot {
         this.latestCandles = {}; // Store latest candles for each symbol
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
+        this.monitorInProgress = false; // Prevent overlapping monitor runs
         this.dealIdMonitorInterval = null; // Interval handle for dealId monitor
+        this.dealIdMonitorInProgress = false; // Prevent overlapping dealId checks
         this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
 
@@ -69,8 +71,7 @@ class TradingBot {
             // this.setupWebSocket(tokens);
             this.startSessionPing();
             this.startAnalysisInterval();
-            this.startMaxHoldMonitor();
-            this.startMonitorDealIds();
+            this.startMonitorOpenTrades();
             // this.positionGuard.start();
             this.isRunning = true;
         } catch (error) {
@@ -215,7 +216,7 @@ class TradingBot {
                 return;
             }
             await this.analyzeSymbol(symbol);
-            await this.delay(2000);       
+            await this.delay(2000);
         }
     }
 
@@ -312,8 +313,32 @@ class TradingBot {
 
     async startMonitorOpenTrades() {
         logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
+        if (this.monitorInterval) clearInterval(this.monitorInterval);
+        if (!this.dealIdMonitorInterval) this.logDeals();
+
+        this.monitorInterval = setInterval(async () => {
+            if (this.monitorInProgress) {
+                logger.warn("[Monitoring] Previous monitor tick still running; skipping.");
+                return;
+            }
+
+            this.monitorInProgress = true;
+            try {
+                await this.trailingStopCheck();
+                await this.delay(3000);
+                await this.maxHoldCheck();
+                await this.delay(3000);
+            } finally {
+                this.monitorInProgress = false;
+            }
+        }, 60 * 1000);
+    }
+
+    async trailingStopCheck() {
         try {
+            logger.info(`[Monitoring] Trailing stop check at ${new Date().toISOString()}`);
             const positions = await getOpenPositions();
+            if (!positions?.positions?.length) return;
             for (const pos of positions.positions) {
                 const symbol = pos.market ? pos.market.epic : pos.position.epic;
 
@@ -343,10 +368,60 @@ class TradingBot {
         }
     }
 
-    startMonitorDealIds() {
+    async maxHoldCheck() {
+        try {
+            const positions = await getOpenPositions();
+            if (!positions?.positions?.length) return;
+
+            const nowMs = Date.now();
+
+            for (const pos of positions.positions) {
+                const openRaw = pos?.position?.openTime ?? pos?.position?.createdDateUTC ?? pos?.position?.createdDate ?? pos?.openTime; // fallbacks, just in case
+
+                logger.debug(`[Bot] Position ${pos?.market?.epic} - Open Time raw: ${openRaw}`);
+
+                const openMs = this.parseOpenTimeMs(openRaw);
+
+                if (Number.isNaN(openMs)) {
+                    logger.error(`[Bot] Could not parse open time for ${pos?.market?.epic}: ${openRaw}`);
+                    continue;
+                }
+
+                // clamp in case of clock skew
+                const heldMs = Math.max(0, nowMs - openMs);
+                const minutesHeld = heldMs / 60000; // exact minutes
+
+                logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
+
+                // RISK.MAX_HOLD_TIME is in minutes (15)
+                if (minutesHeld >= RISK.MAX_HOLD_TIME) {
+                    const dealId = pos?.position?.dealId ?? pos?.dealId;
+                    if (!dealId) {
+                        logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
+                        continue;
+                    }
+                    await tradingService.closePosition(dealId, "timeout");
+                    logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
+                }
+            }
+        } catch (error) {
+            logger.error("[Bot] Error in max hold monitor:", error);
+        }
+    }
+
+    logDeals() {
+        if (this.dealIdMonitorInterval) {
+            logger.warn("[DealID Monitor] Already running; skipping start.");
+            return;
+        }
         logger.info(`[DealID Monitor] Starting (every ${this.checkInterval}ms)`);
 
         const run = async () => {
+            if (this.dealIdMonitorInProgress) {
+                logger.warn("[DealID Monitor] Previous tick still running; skipping.");
+                return;
+            }
+            this.dealIdMonitorInProgress = true;
             logger.info(`[DealID Monitor] tick ${new Date().toISOString()}`);
 
             try {
@@ -390,6 +465,8 @@ class TradingBot {
             } catch (error) {
                 logger.error("[DealID Monitor] Error:", error);
                 return [];
+            } finally {
+                this.dealIdMonitorInProgress = false;
             }
         };
 
@@ -452,55 +529,6 @@ class TradingBot {
         }
 
         return NaN;
-    }
-
-    async startMaxHoldMonitor() {
-        // keep only one interval running
-        if (this.maxHoldInterval) clearInterval(this.maxHoldInterval);
-
-        this.maxHoldInterval = setInterval(
-            async () => {
-                try {
-                    const positions = await getOpenPositions();
-                    if (!positions?.positions?.length) return;
-
-                    const nowMs = Date.now();
-
-                    for (const pos of positions.positions) {
-                        const openRaw = pos?.position?.openTime ?? pos?.position?.createdDateUTC ?? pos?.position?.createdDate ?? pos?.openTime; // fallbacks, just in case
-
-                        logger.debug(`[Bot] Position ${pos?.market?.epic} - Open Time raw: ${openRaw}`);
-
-                        const openMs = this.parseOpenTimeMs(openRaw);
-
-                        if (Number.isNaN(openMs)) {
-                            logger.error(`[Bot] Could not parse open time for ${pos?.market?.epic}: ${openRaw}`);
-                            continue;
-                        }
-
-                        // clamp in case of clock skew
-                        const heldMs = Math.max(0, nowMs - openMs);
-                        const minutesHeld = heldMs / 60000; // exact minutes
-
-                        logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
-
-                        // RISK.MAX_HOLD_TIME is in minutes (15)
-                        if (minutesHeld >= RISK.MAX_HOLD_TIME) {
-                            const dealId = pos?.position?.dealId ?? pos?.dealId;
-                            if (!dealId) {
-                                logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
-                                continue;
-                            }
-                            // await tradingService.closePosition(dealId, "timeout");
-                            logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
-                        }
-                    }
-                } catch (error) {
-                    logger.error("[Bot] Error in max hold monitor:", error);
-                }
-            },
-            5 * 60 * 1000,
-        ); // Check every 5 minutes
     }
 
     async isTradingAllowed(symbol) {
