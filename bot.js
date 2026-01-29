@@ -6,7 +6,7 @@ import PositionGuard from "./services/positionGuard.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import { tradeTracker } from "./utils/tradeLogger.js";
 import logger from "./utils/logger.js";
-const { TIMEFRAMES } = ANALYSIS;
+const { TIMEFRAMES, SYMBOLS } = ANALYSIS;
 import { isNewsTime } from "./utils/newsChecker.js";
 
 class TradingBot {
@@ -24,7 +24,7 @@ class TradingBot {
         this.dealIdMonitorInterval = null; // Interval handle for dealId monitor
         this.maxCandleHistory = 200; // Rolling window size for indicators
         this.openedPositions = {}; // Track opened positions
-        this.positionGuard = new PositionGuard({ getActiveSymbols: this.getActiveSymbols.bind(this) });
+
         this.openedBrockerDealIds = [];
 
         // Define allowed trading windows (UTC, Berlin time for example)
@@ -150,7 +150,7 @@ class TradingBot {
         setTimeout(() => {
             runAnalysis();
             // After first run, repeat every 5 minutes
-            this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
+            this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 15 * 60 * 1000);
         }, interval);
     }
 
@@ -181,41 +181,41 @@ class TradingBot {
         }
     }
 
-    getActiveSymbols() {
-        const now = new Date();
-        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+    // getActiveSymbols() {
+    //     const now = new Date();
+    //     const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
 
-        // Helper to check if hour is in session
-        const inSession = (start, end) => {
-            if (start < end) return hour >= start && hour < end;
-            return hour >= start || hour < end; // Overnight session
-        };
+    //     // Helper to check if hour is in session
+    //     const inSession = (start, end) => {
+    //         if (start < end) return hour >= start && hour < end;
+    //         return hour >= start || hour < end; // Overnight session
+    //     };
 
-        const activeSessions = [];
-        if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
-        if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
-        if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
-        if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
+    //     const activeSessions = [];
+    //     if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
+    //     if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
+    //     if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
+    //     if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
 
-        // Combine symbols from all active sessions, remove duplicates
-        let combined = [];
-        activeSessions.forEach((arr) => combined.push(...arr));
-        combined = [...new Set(combined)];
+    //     // Combine symbols from all active sessions, remove duplicates
+    //     let combined = [];
+    //     activeSessions.forEach((arr) => combined.push(...arr));
+    //     combined = [...new Set(combined)];
 
-        logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
-        return combined;
-    }
+    //     logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
+    //     return combined;
+    // }
 
     // Analyzes all symbols in the trading universe.
+
     async analyzeAllSymbols() {
-        const activeSymbols = this.getActiveSymbols();
-        for (const symbol of activeSymbols) {
+        for (const symbol of SYMBOLS) {
             if (!(await this.isTradingAllowed(symbol))) {
                 logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
                 return;
             }
             await this.analyzeSymbol(symbol);
-            await this.delay(2000);
+            await this.delay(2000);       
         }
     }
 

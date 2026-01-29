@@ -76,8 +76,12 @@ export const ANALYSIS = {
         M15: "MINUTE_15", // 15-minute entry timeframe
         M5: "MINUTE_5", // 5-minute entry timeframe
         M1: "MINUTE", // 1-minute entry timeframe
-    },
 
+        TREND: "HOUR_4", // Trend direction
+        SETUP: "HOUR", // Trade setup
+        ENTRY: "MINUTE_15", // Entry/Exit timing
+    },
+    SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
     EMA: {
         TREND: {
             FAST: 50,
@@ -100,8 +104,8 @@ export const ANALYSIS = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 15 seconds between analyses
-    MODE: false,
+    INTERVAL: 60 * 1000, // 15 seconds between analyses
+    MODE: true,
 };
 
 // 1 min
@@ -109,5 +113,5 @@ export const DEV = {
 
 // 5 min
 export const PROD = {
-    INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
+    INTERVAL: ((15 - (new Date().getMinutes() % 15)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
 };

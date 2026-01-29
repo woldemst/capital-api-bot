@@ -2,90 +2,66 @@ import { STRATEGY } from "../config.js";
 class Strategy {
     constructor() {}
 
-    // ------------------------------------------------------------
-    //     Strategy A: Bollinger Mean-Reversion (M5) + Filters
-    // ------------------------------------------------------------
-    getSignalBollingerMeanReversion({ symbol, indicators, candles, bid, ask }) {
-        const { m5, m15 } = indicators;
+    generateSignal({ symbol, indicators, bid, ask, candles }) {
+        const { h4, h1, m15 } = indicators;
+        const buyConditions = this.generateBuyConditions(h4, h1, m15, bid);
+        const sellConditions = this.generateSellConditions(h4, h1, m15, ask);
+        const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
+        return {
+            signal,
+            buyScore,
+            sellScore,
+            reason: "condition_evaluation",
+            context: {},
+        };
+    }
 
-        const m5Candles = candles?.m5Candles;
-        if (m5Candles.length < 3) {
-            return { signal: null, reason: "insufficient_m5_candles", context: {} };
+    generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, bid) {
+        return [
+            // H4 Trend conditions
+            h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
+            h4Indicators.macd?.histogram > 0, // Trend confirmation
+
+            // H1 Setup confirmation
+            h1Indicators.ema9 > h1Indicators.ema21,
+            h1Indicators.rsi < 35, // Slightly relaxed RSI
+
+            // M15 Entry conditions
+            m15Indicators.isBullishCross,
+            m15Indicators.rsi < 30,
+            bid <= m15Indicators.bb?.lower,
+        ];
+    }
+
+    generateSellConditions(h4Indicators, h1Indicators, m15Indicators, ask) {
+        return [
+            // H4 Trend conditions
+            !h4Indicators.isBullishTrend,
+            h4Indicators.macd?.histogram < 0,
+
+            // H1 Setup confirmation
+            h1Indicators.ema9 < h1Indicators.ema21,
+            h1Indicators.rsi > 65,
+
+            // M15 Entry conditions
+            m15Indicators.isBearishCross,
+            m15Indicators.rsi > 70,
+            ask >= m15Indicators.bb?.upper,
+        ];
+    }
+
+    evaluateSignals(buyConditions, sellConditions) {
+        const buyScore = buyConditions.filter(Boolean).length;
+        const sellScore = sellConditions.filter(Boolean).length;
+        console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
+        let signal = null;
+        // Relaxed: only 3/6 conditions needed for a signal
+        if (buyScore >= 3) {
+            signal = "buy";
+        } else if (sellScore >= 3) {
+            signal = "sell";
         }
-
-        // last CLOSED candles
-        const prev = m5Candles[m5Candles.length - 3];
-        const last = m5Candles[m5Candles.length - 2];
-        if (!prev || !last) return { signal: null, reason: "missing_prev_last", context: {} };
-
-        // Align indicators with the last closed candle (not the still-forming candle).
-        const bb = m5.bbSeries[m5.bbSeries.length - 2];
-        const rsi = m5.rsiSeries[m5.rsiSeries.length - 2];
-
-        const adx = m5?.adx.adx;
-        const ema200 = m5?.ema200;
-
-        if (!bb || !Number.isFinite(bb.lower) || !Number.isFinite(bb.upper) || !Number.isFinite(bb.middle)) {
-            return { signal: null, reason: "missing_bb", context: { last, prev } };
-        }
-        if (!Number.isFinite(rsi) || !Number.isFinite(adx)) {
-            return { signal: null, reason: "missing_rsi_adx", context: { last, prev, bb } };
-        }
-
-        // Tunables (env overrides)
-        const mrConfig = STRATEGY?.BOLLINGER_MR;
-        const rsiBuyMax = mrConfig.RSI_BUY_MAX;
-        const rsiSellMin = mrConfig?.RSI_SELL_MIN;
-        const adxMax = mrConfig?.ADX_MAX;
-        const useEma200Filter = mrConfig?.USE_EMA200_FILTER;
-        const useM15TrendFilter = mrConfig?.USE_M15_TREND_FILTER;
-
-        // Avoid strong trends
-        console.log(`ADX: ${adx}, ADX Max: ${adxMax}`);
-
-        if (adx >= adxMax) {
-            return { signal: null, reason: "adx_too_high", context: { last, prev, adx, adxMax } };
-        }
-
-        // Optional M15 trend filter (avoid fading strong HTF trend)
-        if (useM15TrendFilter && m15) {
-            const m15Trend = this.pickTrend(m15);
-            if (m15Trend === "bullish" && last.close >= bb.upper) {
-                return { signal: null, reason: "m15_bull_avoid_top_fade", context: { last, prev, m15Trend } };
-            }
-            if (m15Trend === "bearish" && last.close <= bb.lower) {
-                return { signal: null, reason: "m15_bear_avoid_bottom_fade", context: { last, prev, m15Trend } };
-            }
-        }
-
-        // BUY conditions
-        if (last.low <= bb.lower && rsi <= rsiBuyMax) {
-            if (useEma200Filter && last.close <= ema200) {
-                return { signal: null, reason: "ema200_filter_block_buy", context: { last, prev, ema200 } };
-            }
-
-            return {
-                signal: "BUY",
-                reason: "bb_mean_reversion_buy",
-                // TP target: mean (middle band)
-                context: { last, prev, tpTarget: bb.middle, bb, rsi, adx },
-            };
-        }
-
-        // SELL conditions
-        if (last.high >= bb.upper && rsi >= rsiSellMin) {
-            if (useEma200Filter && last.close >= ema200) {
-                return { signal: null, reason: "ema200_filter_block_sell", context: { last, prev, ema200 } };
-            }
-
-            return {
-                signal: "SELL",
-                reason: "bb_mean_reversion_sell",
-                context: { last, prev, tpTarget: bb.middle, bb, rsi, adx },
-            };
-        }
-
-        return { signal: null, reason: "no_signal", context: { last, prev, bb, rsi, adx } };
+        return { signal, buyScore, sellScore };
     }
 
     // ------------------------------------------------------------
@@ -122,7 +98,7 @@ class Strategy {
         const m15Rsi = m15.rsi;
         const m15Pb = m15.bb.pb;
         console.log(m15Rsi, m15Pb);
-        
+
         const buyQualityOk = m15Rsi <= 55 && m15Pb <= 0.7;
         const sellQualityOk = m15Rsi >= 45 && m15Pb >= 0.3;
 
@@ -138,7 +114,7 @@ class Strategy {
 
     greenRedCandlePattern(prev, last) {
         console.log(`Prev: ${prev.close}, Last: ${prev.close}`);
-        
+
         if (!prev || !last) return false;
 
         const isBull = (c) => c.close > c.open;
