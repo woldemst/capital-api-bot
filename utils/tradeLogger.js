@@ -87,7 +87,11 @@ function toNumber(value) {
 }
 
 function getPipSize(symbol) {
-    return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
+    return String(symbol || "")
+        .toUpperCase()
+        .includes("JPY")
+        ? 0.01
+        : 0.0001;
 }
 
 export function getTradeEntry(dealId, symbol) {
@@ -114,7 +118,7 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp }) {
+export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicatorsOnOpening, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
     const payload = {
         dealId,
@@ -123,13 +127,13 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
         entryPrice,
         stopLoss,
         takeProfit,
-        indicators,
+        indicatorsOnOpening,
         openedAt: timestamp,
         status: "open",
 
         // keep stable schema for later analysis
         closeReason: "",
-        indicatorsClose: null,
+        indicatorsOnClosing: [],
         closePrice: null,
         closedAt: null,
     };
@@ -137,7 +141,7 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
     appendLine(logPath, payload);
 }
 
-export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicators, timestamp }) {
+export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicatorsOnClosing, timestamp }) {
     const normalizedReason = normalizeCloseReason(closeReason);
     const closedAt = timestamp;
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
@@ -152,24 +156,16 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
             const finalReason = shouldUseNormalized ? normalizedReason : existingReason || normalizedReason || "unknown";
 
             const hasClosePrice = closePrice !== undefined && closePrice !== null && closePrice !== "";
-            const nextClosePrice = hasClosePrice ? closePrice : entry.closePrice ?? null;
-
-            const incoming = indicators ?? entry.indicatorsClose ?? null;
-            const indicatorsClose = incoming && typeof incoming === "object" ? { ...incoming } : incoming;
-
-            // Always ensure price exists if we know it
-            if (indicatorsClose && typeof indicatorsClose === "object" && hasClosePrice) {
-                indicatorsClose.price = nextClosePrice;
-            }
+            const nextClosePrice = hasClosePrice ? closePrice : (entry.closePrice ?? null);
 
             return {
                 ...entry,
                 openedAt: openedTimestamp,
                 status: "closed",
                 closeReason: finalReason,
-                closedAt: closedAt ?? entry.closedAt ?? null,
+                closedAt: closedAt ?? entry.closedAt,
                 closePrice: nextClosePrice,
-                indicatorsClose: indicatorsClose ?? null,
+                indicatorsOnClosing: indicatorsOnClosing,
             };
         });
 
@@ -309,13 +305,13 @@ class TradeTracker {
                 });
 
                 // Compute REAL close indicators snapshot (current candles at closing time)
-                const indicatorsClose = await this.getCloseIndicators(symbol);
+                const indicatorsOnClosing = await this.getCloseIndicators(symbol);
 
                 const updated = logTradeClose({
                     symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
                     closeReason: inferredReason,
-                    indicatorsOnClosing: indicatorsClose,
+                    indicatorsOnClosing,
                     closePrice: closePrice ?? null,
                     timestamp: new Date().toISOString(),
                 });
@@ -352,27 +348,17 @@ class TradeTracker {
 
     inferCloseReason(entry, closeInfo = null) {
         if (!entry) return "unknown";
-        const raw =
-            closeInfo?.reason ??
-            closeInfo?.status ??
-            closeInfo?.dealStatus ??
-            closeInfo?.result ??
-            closeInfo?.message ??
-            "";
+        const raw = closeInfo?.reason ?? closeInfo?.status ?? closeInfo?.dealStatus ?? closeInfo?.result ?? closeInfo?.message ?? "";
         const normalized = normalizeCloseReason(raw);
         if (normalized && normalized !== "unknown") return normalized;
 
         const closePrice = toNumber(
-            closeInfo?.closePrice ??
-                closeInfo?.closeLevel ??
-                closeInfo?.level ??
-                closeInfo?.price ??
-                entry?.closePrice ??
-                entry?.closeLevel ??
-                entry?.level
+            closeInfo?.closePrice ?? closeInfo?.closeLevel ?? closeInfo?.level ?? closeInfo?.price ?? entry?.closePrice ?? entry?.closeLevel ?? entry?.level,
         );
         const stopLoss = toNumber(entry?.stopLoss ?? entry?.stopLevel ?? closeInfo?.stopLoss ?? closeInfo?.stopLevel);
-        const takeProfit = toNumber(entry?.takeProfit ?? entry?.limitLevel ?? entry?.profitLevel ?? closeInfo?.takeProfit ?? closeInfo?.limitLevel ?? closeInfo?.profitLevel);
+        const takeProfit = toNumber(
+            entry?.takeProfit ?? entry?.limitLevel ?? entry?.profitLevel ?? closeInfo?.takeProfit ?? closeInfo?.limitLevel ?? closeInfo?.profitLevel,
+        );
 
         if (closePrice === null || (stopLoss === null && takeProfit === null)) return normalized || "unknown";
 

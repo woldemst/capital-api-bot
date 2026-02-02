@@ -52,11 +52,6 @@ export const RISK = {
 };
 
 export const STRATEGY = {
-    // Which strategy to run in live trading. Options supported by services/trading.js:
-    // "green_red" | "bollinger_mean_reversion"
-    // MODE: "bollinger_mean_reversion",
-    MODE: "green_red",
-
     // Settings for Bollinger Mean Reversion strategy (M5 entry, optional M15 filter)
     BOLLINGER_MR: {
         RSI_BUY_MAX: 30,

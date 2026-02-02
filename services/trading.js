@@ -20,7 +20,7 @@ class TradingService {
         this.accountBalance = 0;
         this.availableMargin = 0;
         this.dailyLoss = 0;
-        this.dailyLossLimitPct = 0.05;  
+        this.dailyLossLimitPct = 0.05;
     }
 
     setAccountBalance(balance) {
@@ -223,7 +223,6 @@ class TradingService {
                         entryPrice,
                         stopLoss: stopLossPrice.toFixed(5),
                         takeProfit: takeProfitPrice.toFixed(5),
-                        // indicators: indicatorSnapshot,
                         indicatorsOnOpening: indicators,
                         timestamp: logTimestamp,
                     });
@@ -426,7 +425,7 @@ class TradingService {
                 symbol,
                 closePrice: brokerPrice ?? priceHint ?? null,
                 closeReason: finalReason,
-                indicatorsOnClosing: indicatorSnapshot,
+                indicators: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });
             if (updated) tradeTracker.markDealClosed(dealId);
