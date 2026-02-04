@@ -165,18 +165,26 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
     });
 }
 
-export async function updateTrailingStop(positionId, currentPrice, entryPrice, takeProfit, direction, symbol, isTrailingEnabled) {
-    const tpDistance = Math.abs(takeProfit - entryPrice);
-    const thresholdPrice = direction.toUpperCase() === "BUY" ? entryPrice + 0.7 * tpDistance : entryPrice - 0.7 * tpDistance;
+export async function updateTrailingStop(positionId, currentPrice, entryPrice, takeProfit, direction, symbol) {
+    const entry = Number(entryPrice);
+    const tp = Number(takeProfit);
+    const price = Number(currentPrice);
+    if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(price)) return;
 
-    const thresholdMet = direction.toUpperCase() === "BUY" ? currentPrice >= thresholdPrice : currentPrice <= thresholdPrice;
+    const tpDistance = Math.abs(tp - entry);
+    if (tpDistance <= 0) return;
 
-    if (!thresholdMet && !isTrailingEnabled) {
+    const dir = String(direction || "").toUpperCase();
+    const thresholdPrice = dir === "BUY" ? entry + 0.7 * tpDistance : entry - 0.7 * tpDistance;
+
+    const thresholdMet = dir === "BUY" ? price >= thresholdPrice : price <= thresholdPrice;
+
+    if (!thresholdMet) {
         return; // keep the original SL until the threshold is hit
     }
 
     // --- Calculate trailing distance ---
-    let trailingDistance = Math.abs(currentPrice - entryPrice) * 0.1 || 0.001; // fallback if calculation fails
+    let trailingDistance = Math.abs(price - entry) * 0.1 || 0.001; // fallback if calculation fails
 
     // --- Get symbol-specific minimum stop distance ---
     let minStopDistance = 0.0003; // default fallback

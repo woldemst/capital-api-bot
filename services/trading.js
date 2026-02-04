@@ -45,6 +45,19 @@ class TradingService {
         return Number(price).toFixed(decimals) * 1;
     }
 
+    getTpProgress(direction, entryPrice, takeProfit, currentPrice) {
+        const entry = Number(entryPrice);
+        const tp = Number(takeProfit);
+        const price = Number(currentPrice);
+        if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(price)) return null;
+        const tpDist = Math.abs(tp - entry);
+        if (tpDist <= 0) return null;
+        const dir = String(direction || "").toUpperCase();
+        if (dir === "BUY") return (price - entry) / tpDist;
+        if (dir === "SELL") return (entry - price) / tpDist;
+        return null;
+    }
+
     async syncOpenTradesFromBroker() {
         const res = await getOpenPositions();
         const positions = Array.isArray(res?.positions) ? res.positions : [];
@@ -283,6 +296,11 @@ class TradingService {
 
         if (!dealId) return;
 
+        const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
+        if (tpProgress === null || tpProgress < 0.7) {
+            return; // activate trailing stop only after 70% TP progress
+        }
+
         // --- Trend misalignment → Breakeven exit ---
         const m5 = indicators.m5;
         const m15 = indicators.m15;
@@ -300,20 +318,30 @@ class TradingService {
             }
         }
 
-        const tpDist = Math.abs(takeProfit - entryPrice);
-        const activation = direction === "BUY" ? entryPrice + tpDist * 0.7 : entryPrice - tpDist * 0.7;
+        const entry = Number(entryPrice);
+        const tp = Number(takeProfit);
+        const price = Number(currentPrice);
+        if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(price)) return;
+        const tpDist = Math.abs(tp - entry);
+        if (tpDist <= 0) return;
 
-        const activated = (direction === "BUY" && currentPrice >= activation) || (direction === "SELL" && currentPrice <= activation);
+        const dir = String(direction || "").toUpperCase();
+        const activation = dir === "BUY" ? entry + tpDist * 0.7 : entry - tpDist * 0.7;
+
+        const activated = (dir === "BUY" && price >= activation) || (dir === "SELL" && price <= activation);
 
         if (!activated) return;
 
         const trailDist = tpDist * 0.2;
-        let newSL = direction === "BUY" ? currentPrice - trailDist : currentPrice + trailDist;
+        let newSL = dir === "BUY" ? price - trailDist : price + trailDist;
 
-        if ((direction === "BUY" && newSL <= stopLoss) || (direction === "SELL" && newSL >= stopLoss)) return;
+        const stop = Number(stopLoss);
+        if (Number.isFinite(stop)) {
+            if ((dir === "BUY" && newSL <= stop) || (dir === "SELL" && newSL >= stop)) return;
+        }
 
         try {
-            await updateTrailingStop(dealId, currentPrice, newSL, null, direction.toUpperCase(), symbol, true);
+            await updateTrailingStop(dealId, price, entry, tp, dir, symbol);
             logger.info(`[Trail] Updated SL → ${newSL} for ${dealId}`);
         } catch (error) {
             logger.error(`[Trail] Error updating trailing stop:`, error);
@@ -324,11 +352,17 @@ class TradingService {
     //               Breakeven Soft Exit
     // ============================================================
     async softExitToBreakeven(position) {
-        const { dealId, entryPrice, direction, symbol } = position;
+        const { dealId, entryPrice, takeProfit, currentPrice, direction, symbol } = position;
 
         const newSL = entryPrice;
         try {
-            await updateTrailingStop(dealId, entryPrice, newSL, null, direction, symbol, true);
+            const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
+            if (tpProgress === null || tpProgress < 0.7) {
+                logger.info(`[SoftExit] Skipped breakeven: TP progress ${(tpProgress ?? 0).toFixed(2)} < 0.70 for ${dealId}`);
+                return;
+            }
+
+            await updateTrailingStop(dealId, currentPrice, entryPrice, takeProfit, direction, symbol);
 
             logger.info(`[SoftExit] ${symbol}: misalignment → moved SL to breakeven for ${dealId}`);
         } catch (e) {
