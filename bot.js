@@ -5,6 +5,7 @@ import tradingService from "./services/trading.js";
 import PositionGuard from "./services/positionGuard.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import { tradeTracker } from "./utils/tradeLogger.js";
+import { priceLogger } from "./utils/priceLogger.js";
 import logger from "./utils/logger.js";
 const { TIMEFRAMES, SYMBOLS } = ANALYSIS;
 import { isNewsTime } from "./utils/newsChecker.js";
@@ -22,6 +23,8 @@ class TradingBot {
         this.candleHistory = {}; // symbol -> array of candles
         this.monitorInterval = null; // Add monitor interval for open trades
         this.monitorInProgress = false; // Prevent overlapping monitor runs
+        this.priceMonitorInterval = null;
+        this.priceMonitorInProgress = false;
         this.dealIdMonitorInterval = null; // Interval handle for dealId monitor
         this.dealIdMonitorInProgress = false; // Prevent overlapping dealId checks
         this.maxCandleHistory = 200; // Rolling window size for indicators
@@ -72,6 +75,7 @@ class TradingBot {
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMonitorOpenTrades();
+            this.startPriceMonitor();
             // this.positionGuard.start();
             this.isRunning = true;
         } catch (error) {
@@ -244,6 +248,18 @@ class TradingBot {
 
         const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
+        if (
+            !d1Data?.prices ||
+            !h4Data?.prices ||
+            !h1Data?.prices ||
+            !m15Data?.prices ||
+            !m5Data?.prices ||
+            !m1Data?.prices
+        ) {
+            logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
+            return;
+        }
+
         // Overwrite candle history with fresh data
         this.candleHistory[symbol] = {
             D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
@@ -307,8 +323,33 @@ class TradingBot {
         clearInterval(this.analysisInterval);
         clearInterval(this.sessionRefreshInterval);
         clearInterval(this.dealIdMonitorInterval);
+        clearInterval(this.priceMonitorInterval);
         this.positionGuard.stop();
         webSocketService.disconnect();
+    }
+
+    startPriceMonitor() {
+        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
+        logger.info(`[PriceMonitor] Starting (every 5 minutes) after ${interval}ms at ${new Date().toISOString()}`);
+        if (this.priceMonitorInterval) clearInterval(this.priceMonitorInterval);
+
+        const run = async () => {
+            if (this.priceMonitorInProgress) {
+                logger.warn("[PriceMonitor] Previous tick still running; skipping.");
+                return;
+            }
+            this.priceMonitorInProgress = true;
+            try {
+                await priceLogger.logSnapshotsForSymbols(SYMBOLS);
+            } finally {
+                this.priceMonitorInProgress = false;
+            }
+        };
+
+        setTimeout(() => {
+            run();
+            this.priceMonitorInterval = setInterval(run, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
+        }, interval);
     }
 
     async startMonitorOpenTrades() {
@@ -342,15 +383,24 @@ class TradingBot {
             for (const pos of positions.positions) {
                 const symbol = pos.market ? pos.market.epic : pos.position.epic;
 
-                // Fetch recent candles for the symbol (M5 + M15 for trend alignment)
-                const [m15Data, m5Data] = await Promise.all([
-                    getHistorical(symbol, "MINUTE_15", 50),
-                    getHistorical(symbol, "MINUTE_5", 50),
-                ]);
-                const indicators = {
-                    m15: await calcIndicators(m15Data.prices),
-                    m5: await calcIndicators(m5Data.prices),
-                };
+                let indicators;
+                try {
+                    const [m15Data, m5Data] = await Promise.all([
+                        getHistorical(symbol, "MINUTE_15", 50),
+                        getHistorical(symbol, "MINUTE_5", 50),
+                    ]);
+                    if (!m15Data?.prices || !m5Data?.prices) {
+                        logger.warn(`[Monitoring] Missing candles for ${symbol}, skipping trailing stop update.`);
+                        continue;
+                    }
+                    indicators = {
+                        m15: await calcIndicators(m15Data.prices),
+                        m5: await calcIndicators(m5Data.prices),
+                    };
+                } catch (error) {
+                    logger.warn(`[Monitoring] Failed to fetch indicators for ${symbol}: ${error.message}`);
+                    continue;
+                }
 
                 const positionData = {
                     symbol,
