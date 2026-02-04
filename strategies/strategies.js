@@ -3,65 +3,132 @@ class Strategy {
     constructor() {}
 
     generateSignal({ symbol, indicators, bid, ask, candles }) {
-        const { h4, h1, m15 } = indicators;
-        const buyConditions = this.generateBuyConditions(h4, h1, m15, bid);
-        const sellConditions = this.generateSellConditions(h4, h1, m15, ask);
-        const { signal, buyScore, sellScore } = this.evaluateSignals(buyConditions, sellConditions);
+        const { h4, h1, m15, m5, m1 } = indicators;
+        const buyRules = this.generateBuyRules(h4, h1, m15, m5, m1, bid);
+        const sellRules = this.generateSellRules(h4, h1, m15, m5, m1, ask);
+        const { signal, buyScore, sellScore, reason, context } = this.evaluateRules(buyRules, sellRules);
         return {
             signal,
             buyScore,
             sellScore,
-            reason: "condition_evaluation",
-            context: {},
+            reason,
+            context,
         };
     }
 
-    generateBuyConditions(h4Indicators, h1Indicators, m15Indicators, bid) {
+    isNumber(value) {
+        return typeof value === "number" && Number.isFinite(value);
+    }
+
+    getEmaDiff(indicators) {
+        if (!indicators) return null;
+        const { ema9, ema21 } = indicators;
+        if (!this.isNumber(ema9) || !this.isNumber(ema21)) return null;
+        return ema9 - ema21;
+    }
+
+    getMacdHist(indicators) {
+        const hist = indicators?.macd?.histogram;
+        return this.isNumber(hist) ? hist : null;
+    }
+
+    getRsi(indicators) {
+        const rsi = indicators?.rsi;
+        return this.isNumber(rsi) ? rsi : null;
+    }
+
+    getBbPb(indicators) {
+        const pb = indicators?.bb?.pb;
+        return this.isNumber(pb) ? pb : null;
+    }
+
+    generateBuyRules(h4Indicators, h1Indicators, m15Indicators, m5Indicators, m1Indicators, bid) {
+        const h4Trend = this.pickTrend(h4Indicators);
+        const h1Trend = this.pickTrend(h1Indicators);
+        const m15EmaDiff = this.getEmaDiff(m15Indicators);
+        const m5EmaDiff = this.getEmaDiff(m5Indicators);
+        const m1MacdHist = this.getMacdHist(m1Indicators);
+
         return [
-            // H4 Trend conditions
-            h4Indicators.emaFast > h4Indicators.emaSlow, // Primary trend filter
-            h4Indicators.macd?.histogram > 0, // Trend confirmation
-
-            // H1 Setup confirmation
-            h1Indicators.ema9 > h1Indicators.ema21,
-            h1Indicators.rsi < 35, // Slightly relaxed RSI
-
-            // M15 Entry conditions
-            m15Indicators.isBullishCross,
-            m15Indicators.rsi < 30,
-            bid <= m15Indicators.bb?.lower,
+            {
+                name: "buy_h4_trend_pullback_m1_turn",
+                ok: h4Trend === "bullish" && this.isNumber(m15EmaDiff) && m15EmaDiff <= 0 && this.isNumber(m1MacdHist) && m1MacdHist > 0,
+            },
+            {
+                name: "buy_h1_trend_dual_pullback",
+                ok: h1Trend === "bullish" && this.isNumber(m15EmaDiff) && m15EmaDiff <= 0 && this.isNumber(m5EmaDiff) && m5EmaDiff <= 0,
+            },
         ];
     }
 
-    generateSellConditions(h4Indicators, h1Indicators, m15Indicators, ask) {
+    generateSellRules(h4Indicators, h1Indicators, m15Indicators, m5Indicators, m1Indicators, ask) {
+        const h4Trend = this.pickTrend(h4Indicators);
+        const m15Rsi = this.getRsi(m15Indicators);
+        const m15EmaDiff = this.getEmaDiff(m15Indicators);
+        const m5BbPb = this.getBbPb(m5Indicators);
+        const m1MacdHist = this.getMacdHist(m1Indicators);
+
         return [
-            // H4 Trend conditions
-            !h4Indicators.isBullishTrend,
-            h4Indicators.macd?.histogram < 0,
-
-            // H1 Setup confirmation
-            h1Indicators.ema9 < h1Indicators.ema21,
-            h1Indicators.rsi > 65,
-
-            // M15 Entry conditions
-            m15Indicators.isBearishCross,
-            m15Indicators.rsi > 70,
-            ask >= m15Indicators.bb?.upper,
+            {
+                name: "sell_m15_rsi_turn_m1_macd",
+                ok: this.isNumber(m15Rsi) && m15Rsi >= 55 && this.isNumber(m1MacdHist) && m1MacdHist < 0,
+            },
+            {
+                name: "sell_m5_bb_extension_m1_macd",
+                ok: this.isNumber(m5BbPb) && m5BbPb >= 0.7 && this.isNumber(m1MacdHist) && m1MacdHist < 0,
+            },
+            {
+                name: "sell_h4_trend_pullback_m1_turn",
+                ok: h4Trend === "bearish" && this.isNumber(m15EmaDiff) && m15EmaDiff >= 0 && this.isNumber(m1MacdHist) && m1MacdHist < 0,
+            },
         ];
     }
 
-    evaluateSignals(buyConditions, sellConditions) {
-        const buyScore = buyConditions.filter(Boolean).length;
-        const sellScore = sellConditions.filter(Boolean).length;
-        console.log(`[Signal] BuyScore: ${buyScore}/${buyConditions.length}, SellScore: ${sellScore}/${sellConditions.length}`);
-        let signal = null;
-        // Relaxed: only 3/6 conditions needed for a signal
-        if (buyScore >= 3) {
-            signal = "buy";
-        } else if (sellScore >= 3) {
-            signal = "sell";
+    evaluateRules(buyRules, sellRules) {
+        const buyScore = buyRules.filter((r) => r.ok).length;
+        const sellScore = sellRules.filter((r) => r.ok).length;
+        console.log(`[Signal] BuyRules: ${buyScore}/${buyRules.length}, SellRules: ${sellScore}/${sellRules.length}`);
+
+        const buyHit = buyRules.find((r) => r.ok);
+        const sellHit = sellRules.find((r) => r.ok);
+
+        if (buyHit && sellHit) {
+            return {
+                signal: null,
+                buyScore,
+                sellScore,
+                reason: "conflicting_rules",
+                context: { buyRule: buyHit.name, sellRule: sellHit.name },
+            };
         }
-        return { signal, buyScore, sellScore };
+
+        if (buyHit) {
+            return {
+                signal: "buy",
+                buyScore,
+                sellScore,
+                reason: buyHit.name,
+                context: { rule: buyHit.name },
+            };
+        }
+
+        if (sellHit) {
+            return {
+                signal: "sell",
+                buyScore,
+                sellScore,
+                reason: sellHit.name,
+                context: { rule: sellHit.name },
+            };
+        }
+
+        return {
+            signal: null,
+            buyScore,
+            sellScore,
+            reason: "no_rule_match",
+            context: {},
+        };
     }
 
     // ------------------------------------------------------------
