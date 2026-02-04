@@ -52,6 +52,7 @@ export const RISK = {
 };
 
 export const STRATEGY = {
+    MIN_SCORE: 2,
     // Settings for Bollinger Mean Reversion strategy (M5 entry, optional M15 filter)
     BOLLINGER_MR: {
         RSI_BUY_MAX: 30,

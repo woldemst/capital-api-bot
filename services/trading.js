@@ -100,9 +100,11 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask) {
         const price = signal === "buy" ? ask : bid;
         const atr = await this.calculateATR(symbol);
-        const stopLossPips = 1.5 * atr;
+        const atrMultiplier = Number.isFinite(RISK?.ATR_MULTIPLIER) ? RISK.ATR_MULTIPLIER : 1.5;
+        const rr = Number.isFinite(RISK?.RISK_REWARD) ? RISK.RISK_REWARD : Number.isFinite(RISK?.RR) ? RISK.RR : 2;
+        const stopLossPips = atrMultiplier * atr;
         const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-        const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
+        const takeProfitPips = rr * stopLossPips;
         const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
         console.log(`[calculateTradeParameters] Size: ${size}`);

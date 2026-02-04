@@ -87,9 +87,11 @@ export async function calcIndicators(bars) {
         const lc = Math.abs(lows[i] - closes[i - 1]);
         tr.push(Math.max(hl, hc, lc));
     }
-    const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
+    const trWindow = tr.slice(-14);
+    const atrManual = trWindow.length ? trWindow.reduce((sum, val) => sum + val, 0) / trWindow.length : undefined;
     const atrSeries = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
     const atrVal = atrSeries[atrSeries.length - 1];
+    const atr = Number.isFinite(atrVal) ? atrVal : atrManual;
     const lastClose = closes[closes.length - 1];
 
     // BackQuant Fourier For Loop signal (uses HLC3 internally)
@@ -108,6 +110,19 @@ export async function calcIndicators(bars) {
     const price_vs_ema9 = (lastClose - ema9) / ema9;
     const price_vs_ema21 = (lastClose - ema21) / ema21;
     const price_vs_bb_mid = bb && bb.middle ? (lastClose - bb.middle) / bb.middle : 0;
+
+    const macdSeries = MACD.calculate({
+        fastPeriod: 12,
+        slowPeriod: 26,
+        signalPeriod: 9,
+        values: closes,
+        SimpleMAOscillator: false,
+        SimpleMASignal: false,
+    });
+    const macd = macdSeries[macdSeries.length - 1];
+    const macdPrev = macdSeries[macdSeries.length - 2];
+    const macdHistPrev = macdPrev ? macdPrev.histogram : undefined;
+    const rsiPrev = rsiSeries.length > 1 ? rsiSeries[rsiSeries.length - 2] : undefined;
     return {
         maFast,
         maSlow,
@@ -140,6 +155,7 @@ export async function calcIndicators(bars) {
         lastClose,
         close: lastClose,
         rsi: rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1] : undefined,
+        rsiPrev,
         adx: currentADX,
         atr: atr,
         adaptiveRSI: (() => {
@@ -150,14 +166,8 @@ export async function calcIndicators(bars) {
             const baseADX = 20;
             return atrVal ? baseADX + Math.min(10, atrVal * 10) : baseADX;
         })(),
-        macd: MACD.calculate({
-            fastPeriod: 12,
-            slowPeriod: 26,
-            signalPeriod: 9,
-            values: closes,
-            SimpleMAOscillator: false,
-            SimpleMASignal: false,
-        }).pop(),
+        macd,
+        macdHistPrev,
         // --- Added series for strategies ---
         rsiSeries,
         bbSeries,

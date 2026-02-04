@@ -311,14 +311,25 @@ class TradeTracker {
                 if (!symbol) symbol = entry?.symbol ? String(entry.symbol) : null;
 
                 const existingReason = entry?.closeReason && String(entry.closeReason).trim() ? String(entry.closeReason) : "";
-                const closePrice = entry?.closePrice ?? null;
-                const finalReason = existingReason || "unknown";
+                let closePrice = entry?.closePrice ?? null;
 
+                if (closePrice === null) {
+                    closePrice = await this.getClosePrice(symbol, entry);
+                }
+
+                const inferredReason = this.inferCloseReason(entry, {
+                    closePrice,
+                    symbol,
+                    source: closePrice !== null ? "market_snapshot" : "unknown",
+                });
+                const finalReason = existingReason && existingReason !== "unknown" ? existingReason : inferredReason || "unknown";
+
+                const closePriceSource = entry?.closePrice !== null && entry?.closePrice !== undefined ? "existing_log" : closePrice !== null ? "market_snapshot" : "unknown";
                 logger.info("[Reconcile] Close snapshot", {
                     dealId: id,
                     symbol,
                     closePrice,
-                    source: closePrice !== null ? "existing_log" : "unknown",
+                    source: closePriceSource,
                 });
                 logger.info("[Reconcile] Close reason", {
                     dealId: id,
