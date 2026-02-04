@@ -27,6 +27,20 @@ function listLogFiles() {
         .map((file) => path.join(LOG_DIR, file));
 }
 
+function compactIndicators(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return snapshot;
+    const compact = {};
+    for (const [timeframe, data] of Object.entries(snapshot)) {
+        if (!data || typeof data !== "object") {
+            compact[timeframe] = data;
+            continue;
+        }
+        const { rsiSeries, bbSeries, bbUpperSeries, bbLowerSeries, ...rest } = data;
+        compact[timeframe] = rest;
+    }
+    return compact;
+}
+
 export function getSymbolLogPath(symbol = "unknown") {
     ensureLogDir();
     return path.join(LOG_DIR, `${sanitizeSymbol(symbol)}.jsonl`);
@@ -120,6 +134,7 @@ export function getTradeEntry(dealId, symbol) {
 
 export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicatorsOnOpening, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
+    const compactOpening = compactIndicators(indicatorsOnOpening);
     const payload = {
         dealId,
         symbol,
@@ -127,7 +142,7 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
         entryPrice,
         stopLoss,
         takeProfit,
-        indicatorsOnOpening,
+        indicatorsOnOpening: compactOpening,
         openedAt: timestamp,
         status: "open",
 
@@ -144,6 +159,7 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
 export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicatorsOnClosing, timestamp }) {
     const normalizedReason = normalizeCloseReason(closeReason);
     const closedAt = timestamp;
+    const compactClosing = compactIndicators(indicatorsOnClosing);
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
@@ -157,7 +173,7 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
 
             const hasClosePrice = closePrice !== undefined && closePrice !== null && closePrice !== "";
             const nextClosePrice = hasClosePrice ? closePrice : (entry.closePrice ?? null);
-            const nextIndicatorsOnClosing = indicatorsOnClosing ?? entry.indicatorsOnClosing ?? null;
+            const nextIndicatorsOnClosing = compactClosing ?? entry.indicatorsOnClosing ?? null;
 
             return {
                 ...entry,

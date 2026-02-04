@@ -91,7 +91,7 @@ class TradingService {
         const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-        const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
+        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
         console.log(`[calculateTradeParameters] Size: ${size}`);
 
         // Trailing stop parameters
@@ -105,6 +105,7 @@ class TradingService {
 
         return {
             size,
+            price,
             stopLossPrice,
             takeProfitPrice,
             stopLossPips,

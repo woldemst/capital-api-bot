@@ -342,9 +342,15 @@ class TradingBot {
             for (const pos of positions.positions) {
                 const symbol = pos.market ? pos.market.epic : pos.position.epic;
 
-                // Fetch recent candles for the symbol (e.g. M15)
-                const m15Data = await getHistorical(symbol, "MINUTE_15", 50);
-                const indicators = await calcIndicators(m15Data.prices);
+                // Fetch recent candles for the symbol (M5 + M15 for trend alignment)
+                const [m15Data, m5Data] = await Promise.all([
+                    getHistorical(symbol, "MINUTE_15", 50),
+                    getHistorical(symbol, "MINUTE_5", 50),
+                ]);
+                const indicators = {
+                    m15: await calcIndicators(m15Data.prices),
+                    m5: await calcIndicators(m5Data.prices),
+                };
 
                 const positionData = {
                     symbol,
