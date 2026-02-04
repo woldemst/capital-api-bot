@@ -133,7 +133,7 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
 
         // keep stable schema for later analysis
         closeReason: "",
-        indicatorsOnClosing: [],
+        indicatorsOnClosing: null,
         closePrice: null,
         closedAt: null,
     };
@@ -157,6 +157,7 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
 
             const hasClosePrice = closePrice !== undefined && closePrice !== null && closePrice !== "";
             const nextClosePrice = hasClosePrice ? closePrice : (entry.closePrice ?? null);
+            const nextIndicatorsOnClosing = indicatorsOnClosing ?? entry.indicatorsOnClosing ?? null;
 
             return {
                 ...entry,
@@ -165,7 +166,7 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
                 closeReason: finalReason,
                 closedAt: closedAt ?? entry.closedAt,
                 closePrice: nextClosePrice,
-                indicatorsOnClosing: indicatorsOnClosing,
+                indicatorsOnClosing: nextIndicatorsOnClosing,
             };
         });
 
@@ -293,15 +294,20 @@ class TradeTracker {
                 // If symbol wasn't mapped (e.g., after restart), fallback to the symbol stored in the log entry
                 if (!symbol) symbol = entry?.symbol ? String(entry.symbol) : null;
 
-                const closePrice = await this.getClosePrice(symbol, entry);
                 const existingReason = entry?.closeReason && String(entry.closeReason).trim() ? String(entry.closeReason) : "";
-                const inferredReason = existingReason || this.inferCloseReason(entry, { closePrice, symbol });
+                const closePrice = entry?.closePrice ?? null;
+                const finalReason = existingReason || "unknown";
 
-                logger.info("[Reconcile] Close snapshot", { dealId: id, symbol, closePrice, source: "market_snapshot" });
+                logger.info("[Reconcile] Close snapshot", {
+                    dealId: id,
+                    symbol,
+                    closePrice,
+                    source: closePrice !== null ? "existing_log" : "unknown",
+                });
                 logger.info("[Reconcile] Close reason", {
                     dealId: id,
-                    reason: inferredReason,
-                    source: existingReason ? "existing_log" : "no_broker_data",
+                    reason: finalReason,
+                    source: existingReason ? "existing_log" : "unknown",
                 });
 
                 // Compute REAL close indicators snapshot (current candles at closing time)
@@ -310,7 +316,7 @@ class TradeTracker {
                 const updated = logTradeClose({
                     symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
-                    closeReason: inferredReason,
+                    closeReason: finalReason,
                     indicatorsOnClosing,
                     closePrice: closePrice ?? null,
                     timestamp: new Date().toISOString(),
@@ -351,6 +357,7 @@ class TradeTracker {
         const raw = closeInfo?.reason ?? closeInfo?.status ?? closeInfo?.dealStatus ?? closeInfo?.result ?? closeInfo?.message ?? "";
         const normalized = normalizeCloseReason(raw);
         if (normalized && normalized !== "unknown") return normalized;
+        if (closeInfo?.source === "market_snapshot") return normalized || "unknown";
 
         const closePrice = toNumber(
             closeInfo?.closePrice ?? closeInfo?.closeLevel ?? closeInfo?.level ?? closeInfo?.price ?? entry?.closePrice ?? entry?.closeLevel ?? entry?.level,

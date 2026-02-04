@@ -214,6 +214,8 @@ class TradingService {
                 } else {
                     // const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
                     const entryPrice = confirmation?.level ?? price;
+                    const stopLossRounded = this.roundPrice(stopLossPrice, symbol);
+                    const takeProfitRounded = this.roundPrice(takeProfitPrice, symbol);
                     const logTimestamp = new Date().toISOString();
 
                     logTradeOpen({
@@ -221,8 +223,8 @@ class TradingService {
                         symbol,
                         signal,
                         entryPrice,
-                        stopLoss: stopLossPrice.toFixed(5),
-                        takeProfit: takeProfitPrice.toFixed(5),
+                        stopLoss: stopLossRounded,
+                        takeProfit: takeProfitRounded,
                         indicatorsOnOpening: indicators,
                         timestamp: logTimestamp,
                     });
@@ -408,7 +410,13 @@ class TradingService {
             const brokerReason =
                 confirmation?.reason ?? confirmation?.status ?? confirmation?.dealStatus ?? closePayload?.reason ?? closePayload?.status ?? null;
 
-            const finalReason = brokerReason || requestedReason || "unknown";
+            const brokerReasonText = brokerReason ? String(brokerReason) : "";
+            const requestedReasonText = requestedReason ? String(requestedReason) : "";
+            const hasExplicitBrokerReason = /stop|sl|limit|tp|take|profit|loss/i.test(brokerReasonText);
+            const hasGenericBrokerReason = /closed|close|deleted|cancel|rejected|filled|accepted/i.test(brokerReasonText);
+            const finalReason = hasExplicitBrokerReason
+                ? brokerReasonText
+                : requestedReasonText || (!hasGenericBrokerReason && brokerReasonText) || "unknown";
 
             logger.info("[ClosePos] Derived closeReason", {
                 dealId,
@@ -425,7 +433,7 @@ class TradingService {
                 symbol,
                 closePrice: brokerPrice ?? priceHint ?? null,
                 closeReason: finalReason,
-                indicators: indicatorSnapshot,
+                indicatorsOnClosing: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });
             if (updated) tradeTracker.markDealClosed(dealId);
