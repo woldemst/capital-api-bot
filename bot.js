@@ -1,12 +1,12 @@
-import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositions, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
+import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
+import { DEV, PROD, ANALYSIS, SESSIONS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
-import { tradeTracker } from "./utils/tradeLogger.js";
 import { priceLogger } from "./utils/priceLogger.js";
 import logger from "./utils/logger.js";
 import { isNewsTime } from "./utils/newsChecker.js";
+import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals } from "./bot/monitors.js";
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
@@ -335,178 +335,19 @@ class TradingBot {
     }
 
     async startMonitorOpenTrades() {
-        logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
-        if (this.monitorInterval) clearInterval(this.monitorInterval);
-        if (!this.dealIdMonitorInterval) this.logDeals();
-
-        this.monitorInterval = setInterval(async () => {
-            if (this.monitorInProgress) {
-                logger.warn("[Monitoring] Previous monitor tick still running; skipping.");
-                return;
-            }
-
-            this.monitorInProgress = true;
-            try {
-                await this.trailingStopCheck();
-                await this.delay(3000);
-                await this.maxHoldCheck();
-                await this.delay(3000);
-            } finally {
-                this.monitorInProgress = false;
-            }
-        }, MONITOR_INTERVAL_MS);
+        return startMonitorOpenTrades(this, MONITOR_INTERVAL_MS);
     }
 
     async trailingStopCheck() {
-        try {
-            logger.info(`[Monitoring] Trailing stop check at ${new Date().toISOString()}`);
-            const positions = await getOpenPositions();
-            if (!positions?.positions?.length) return;
-            for (const pos of positions.positions) {
-                const symbol = pos.market ? pos.market.epic : pos.position.epic;
-
-                let indicators;
-                try {
-                    const [m15Data, m5Data] = await Promise.all([getHistorical(symbol, "MINUTE_15", 50), getHistorical(symbol, "MINUTE_5", 50)]);
-                    if (!m15Data?.prices || !m5Data?.prices) {
-                        logger.warn(`[Monitoring] Missing candles for ${symbol}, skipping trailing stop update.`);
-                        continue;
-                    }
-                    indicators = {
-                        m15: await calcIndicators(m15Data.prices),
-                        m5: await calcIndicators(m5Data.prices),
-                    };
-                } catch (error) {
-                    logger.warn(`[Monitoring] Failed to fetch indicators for ${symbol}: ${error.message}`);
-                    continue;
-                }
-
-                const positionData = {
-                    symbol,
-                    dealId: pos.position.dealId,
-                    currency: pos.position.currency,
-                    direction: pos.position.direction,
-                    size: pos.position.size,
-                    leverage: pos.position.leverage,
-                    entryPrice: pos.position.level,
-                    takeProfit: pos.position.profitLevel,
-                    stopLoss: pos.position.stopLevel,
-                    currentPrice: pos.market.bid,
-                    trailingStop: pos.position.trailingStop,
-                };
-
-                // Pass indicators to trailing stop logic
-                await tradingService.updateTrailingStopIfNeeded(positionData, indicators);
-            }
-        } catch (error) {
-            logger.error("[bot.js][Bot] Error in monitorOpenTrades:", error);
-        }
+        return trailingStopCheck(this);
     }
 
     async maxHoldCheck() {
-        try {
-            const positions = await getOpenPositions();
-            if (!positions?.positions?.length) return;
-
-            const nowMs = Date.now();
-
-            for (const pos of positions.positions) {
-                const openRaw = pos?.position?.openTime ?? pos?.position?.createdDateUTC ?? pos?.position?.createdDate ?? pos?.openTime; // fallbacks, just in case
-
-                logger.debug(`[Bot] Position ${pos?.market?.epic} - Open Time raw: ${openRaw}`);
-
-                const openMs = this.parseOpenTimeMs(openRaw);
-
-                if (Number.isNaN(openMs)) {
-                    logger.error(`[Bot] Could not parse open time for ${pos?.market?.epic}: ${openRaw}`);
-                    continue;
-                }
-
-                // clamp in case of clock skew
-                const heldMs = Math.max(0, nowMs - openMs);
-                const minutesHeld = heldMs / 60000; // exact minutes
-
-                logger.debug(`[Bot] Position ${pos?.market?.epic} held for ${minutesHeld.toFixed(2)} minutes of max ${RISK.MAX_HOLD_TIME}`);
-
-                // RISK.MAX_HOLD_TIME is in minutes (15)
-                if (minutesHeld >= RISK.MAX_HOLD_TIME) {
-                    const dealId = pos?.position?.dealId ?? pos?.dealId;
-                    if (!dealId) {
-                        logger.error(`[Bot] Missing dealId for ${pos?.market?.epic}, cannot close.`);
-                        continue;
-                    }
-                    await tradingService.closePosition(dealId, "timeout");
-                    logger.info(`[Bot] Closed position ${pos?.market?.epic} after ${minutesHeld.toFixed(1)} minutes (max hold: ${RISK.MAX_HOLD_TIME})`);
-                }
-            }
-        } catch (error) {
-            logger.error("[Bot] Error in max hold monitor:", error);
-        }
+        return maxHoldCheck(this);
     }
 
     logDeals() {
-        if (this.dealIdMonitorInterval) {
-            logger.warn("[DealID Monitor] Already running; skipping start.");
-            return;
-        }
-        logger.info(`[DealID Monitor] Starting (every ${this.checkInterval}ms)`);
-
-        const run = async () => {
-            if (this.dealIdMonitorInProgress) {
-                logger.warn("[DealID Monitor] Previous tick still running; skipping.");
-                return;
-            }
-            this.dealIdMonitorInProgress = true;
-            logger.info(`[DealID Monitor] tick ${new Date().toISOString()}`);
-
-            try {
-                const res = await getOpenPositions();
-                const positions = Array.isArray(res?.positions) ? res.positions : [];
-                // console.log("open pos, ", positions);
-
-                // 1. DealIds currently open at broker
-                const brokerDeals = positions
-                    .map((p) => ({
-                        dealId: p?.position?.dealId ?? p?.dealId,
-                        symbol: p?.market?.epic ?? p?.position?.epic,
-                    }))
-                    .filter(Boolean);
-
-                const brokerDealIds = brokerDeals.map((d) => d.dealId);
-
-                // 2. Add new ones to memory
-                // are open in broker but not in memory
-                for (const { dealId, symbol } of brokerDeals) {
-                    if (!this.openedBrockerDealIds.includes(dealId)) {
-                        this.openedBrockerDealIds.push(dealId);
-                        tradeTracker.registerOpenBrockerDeal(dealId, symbol);
-                    }
-                }
-                console.log("openedBrockerDealIds:", this.openedBrockerDealIds);
-
-                // 3. Detect closed ones
-                const closedDealIds = this.openedBrockerDealIds.filter((id) => !brokerDealIds.includes(id));
-
-                // 4. Remove closed from memory
-                this.openedBrockerDealIds = this.openedBrockerDealIds.filter((id) => brokerDealIds.includes(id));
-
-                // 5. Return / handle closed IDs
-                if (closedDealIds.length) {
-                    console.log("closedDealIds", closedDealIds);
-                    await tradeTracker.reconcileClosedDeals(closedDealIds);
-                    closedDealIds.length = 0;
-                }
-                return [];
-            } catch (error) {
-                logger.error("[DealID Monitor] Error:", error);
-                return [];
-            } finally {
-                this.dealIdMonitorInProgress = false;
-            }
-        };
-
-        run(); // run once immediately
-        this.dealIdMonitorInterval = setInterval(run, this.checkInterval);
+        return logDeals(this);
     }
 
     scheduleMidnightSessionRefresh() {
@@ -592,36 +433,6 @@ class TradingBot {
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
-    }
-
-    // NEW: make timestamp parsing bulletproof (string/seconds/ms, with/without timezone)
-    parseOpenTimeMs(openTime) {
-        if (!openTime && openTime !== 0) return NaN;
-
-        // numeric: seconds vs ms
-        if (typeof openTime === "number") {
-            return openTime < 1e12 ? openTime * 1000 : openTime; // < 10^12 ⇒ seconds
-        }
-
-        if (typeof openTime === "string") {
-            let s = openTime.trim();
-
-            // Capital.com often returns ISO-like strings; ensure ISO form
-            // "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DDTHH:MM:SS"
-            if (/^\d{4}[-/]\d{2}[-/]\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
-                s = s.replace(" ", "T").replace(/\//g, "-");
-            }
-
-            // If there’s no explicit timezone, assume UTC to avoid local-time skew
-            if (!/[zZ]|[+\-]\d{2}:\d{2}$/.test(s)) {
-                s += "Z";
-            }
-
-            const t = Date.parse(s);
-            return Number.isNaN(t) ? NaN : t;
-        }
-
-        return NaN;
     }
 
     async isTradingAllowed(symbol) {
