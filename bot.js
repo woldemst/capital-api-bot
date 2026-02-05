@@ -2,13 +2,27 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getOpenPositi
 import { DEV, PROD, ANALYSIS, SESSIONS, RISK } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import PositionGuard from "./services/positionGuard.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import { tradeTracker } from "./utils/tradeLogger.js";
 import { priceLogger } from "./utils/priceLogger.js";
 import logger from "./utils/logger.js";
-const { TIMEFRAMES, SYMBOLS } = ANALYSIS;
 import { isNewsTime } from "./utils/newsChecker.js";
+
+const { TIMEFRAMES } = ANALYSIS;
+const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
+const MONITOR_INTERVAL_MS = 60 * 1000;
+const SYMBOL_ANALYSIS_DELAY_MS = 2000;
+const DEFAULT_TRADING_WINDOWS = [
+    // London: 08:15–16:45
+    { start: 8 * 60 + 15, end: 16 * 60 + 45 },
+    // NY: 13:15–20:45
+    { start: 13 * 60 + 15, end: 20 * 60 + 45 },
+    // Sydney: 22:15–6:45 (overnight, so split into two ranges)
+    { start: 22 * 60 + 15, end: 23 * 60 + 59 },
+    { start: 0, end: 6 * 60 + 45 },
+    // Tokyo: 0:15–8:45
+    { start: 0 * 60 + 15, end: 8 * 60 + 45 },
+];
 
 class TradingBot {
     constructor() {
@@ -32,19 +46,9 @@ class TradingBot {
 
         this.openedBrockerDealIds = [];
         this.activeSymbols = this.getActiveSymbols();
+        this.positionGuard = null;
 
-        // Define allowed trading windows (UTC, Berlin time for example)
-        this.allowedTradingWindows = [
-            // London: 08:15–16:45
-            { start: 8 * 60 + 15, end: 16 * 60 + 45 },
-            // NY: 13:15–20:45
-            { start: 13 * 60 + 15, end: 20 * 60 + 45 },
-            // Sydney: 22:15–6:45 (overnight, so split into two ranges)
-            { start: 22 * 60 + 15, end: 23 * 60 + 59 },
-            { start: 0, end: 6 * 60 + 45 },
-            // Tokyo: 0:15–8:45
-            { start: 0 * 60 + 15, end: 8 * 60 + 45 },
-        ];
+        this.allowedTradingWindows = DEFAULT_TRADING_WINDOWS;
     }
 
     async initialize() {
@@ -77,7 +81,6 @@ class TradingBot {
             this.startAnalysisInterval();
             this.startMonitorOpenTrades();
             this.startPriceMonitor();
-            // this.positionGuard.start();
             this.isRunning = true;
         } catch (error) {
             logger.error("[bot.js][Bot] Error starting live trading:", error);
@@ -150,13 +153,13 @@ class TradingBot {
         };
 
         // First run: align to next 5th minute + 5 seconds
-        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
+        const interval = this.getInitialIntervalMs();
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
         setTimeout(() => {
             runAnalysis();
             // After first run, repeat every 5 minutes
-            this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
+            this.analysisInterval = setInterval(runAnalysis, this.getRepeatIntervalMs());
         }, interval);
     }
 
@@ -221,11 +224,11 @@ class TradingBot {
                 return;
             }
             await this.analyzeSymbol(symbol);
-            await this.delay(2000);
+            await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
         }
     }
 
-    async fetchAllCandles(symbol, getHistorical, timeframes, historyLength) {
+    async fetchAllCandles(symbol, timeframes, historyLength) {
         try {
             const [d1Data, h4Data, h1Data, m15Data, m5Data, m1Data] = await Promise.all([
                 getHistorical(symbol, timeframes.D1, historyLength),
@@ -247,29 +250,15 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`\n\n=== Processing ${symbol} ===`);
 
-        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
+        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.maxCandleHistory);
 
         if (!d1Data?.prices || !h4Data?.prices || !h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
             logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
             return;
         }
 
-        // Overwrite candle history with fresh data
-        this.candleHistory[symbol] = {
-            D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
-            H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
-            H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
-            M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
-            M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
-            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
-        };
-
-        const d1Candles = this.candleHistory[symbol].D1;
-        const h4Candles = this.candleHistory[symbol].H4;
-        const h1Candles = this.candleHistory[symbol].H1;
-        const m15Candles = this.candleHistory[symbol].M15;
-        const m5Candles = this.candleHistory[symbol].M5;
-        const m1Candles = this.candleHistory[symbol].M1;
+        this.storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data });
+        const { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles } = this.getCandleHistory(symbol);
 
         if (!d1Candles || !h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(
@@ -278,26 +267,25 @@ class TradingBot {
             return;
         }
 
-        const indicators = {
-            d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
-            h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
-            h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
-            m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
-            m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
-            m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
-        };
+        const indicators = await this.buildIndicatorsSnapshot({
+            symbol,
+            d1Candles,
+            h4Candles,
+            h1Candles,
+            m15Candles,
+            m5Candles,
+            m1Candles,
+        });
 
         const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
         // --- Fetch real-time bid/ask ---
-        const marketDetails = await getMarketDetails(symbol);
-        const bid = marketDetails?.snapshot?.bid;
-        const ask = marketDetails?.snapshot?.offer;
+        const { bid, ask } = await this.getBidAsk(symbol);
 
         // console.log(marketDetails);
 
         // Guard: skip analysis if we don't have valid prices yet
-        if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) {
+        if (!this.isValidPricePair(bid, ask)) {
             logger.warn(`[bot.js][analyzeSymbol] Skipping ${symbol}: invalid bid/ask (bid=${bid}, ask=${ask})`);
             return;
         }
@@ -318,12 +306,12 @@ class TradingBot {
         clearInterval(this.sessionRefreshInterval);
         clearInterval(this.dealIdMonitorInterval);
         clearInterval(this.priceMonitorInterval);
-        this.positionGuard.stop();
+        if (this.positionGuard?.stop) this.positionGuard.stop();
         webSocketService.disconnect();
     }
 
     startPriceMonitor() {
-        const interval = DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
+        const interval = this.getInitialIntervalMs();
         logger.info(`[PriceMonitor] Starting (every 5 minutes) after ${interval}ms at ${new Date().toISOString()}`);
         if (this.priceMonitorInterval) clearInterval(this.priceMonitorInterval);
 
@@ -334,7 +322,7 @@ class TradingBot {
             }
             this.priceMonitorInProgress = true;
             try {
-                await priceLogger.logSnapshotsForSymbols(SYMBOLS);
+                await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
             } finally {
                 this.priceMonitorInProgress = false;
             }
@@ -342,7 +330,7 @@ class TradingBot {
 
         setTimeout(() => {
             run();
-            this.priceMonitorInterval = setInterval(run, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
+            this.priceMonitorInterval = setInterval(run, this.getRepeatIntervalMs());
         }, interval);
     }
 
@@ -366,7 +354,7 @@ class TradingBot {
             } finally {
                 this.monitorInProgress = false;
             }
-        }, 60 * 1000);
+        }, MONITOR_INTERVAL_MS);
     }
 
     async trailingStopCheck() {
@@ -545,7 +533,65 @@ class TradingBot {
     }
 
     async closeAllPositions() {
+        if (!this.positionGuard?.closeAllPositions) {
+            logger.warn("[Bot] PositionGuard disabled; closeAllPositions skipped.");
+            return false;
+        }
         return this.positionGuard.closeAllPositions();
+    }
+
+    getInitialIntervalMs() {
+        return DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
+    }
+
+    getRepeatIntervalMs() {
+        return DEV.MODE ? DEV.INTERVAL : ANALYSIS_REPEAT_MS;
+    }
+
+    async getBidAsk(symbol) {
+        const marketDetails = await getMarketDetails(symbol);
+        return {
+            bid: marketDetails?.snapshot?.bid,
+            ask: marketDetails?.snapshot?.offer,
+        };
+    }
+
+    isValidPricePair(bid, ask) {
+        return Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0;
+    }
+
+    storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data }) {
+        this.candleHistory[symbol] = {
+            D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
+            H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
+            H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
+            M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
+            M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
+            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
+        };
+    }
+
+    getCandleHistory(symbol) {
+        const history = this.candleHistory[symbol] || {};
+        return {
+            d1Candles: history.D1,
+            h4Candles: history.H4,
+            h1Candles: history.H1,
+            m15Candles: history.M15,
+            m5Candles: history.M5,
+            m1Candles: history.M1,
+        };
+    }
+
+    async buildIndicatorsSnapshot({ symbol, d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles }) {
+        return {
+            d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
+            h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
+            h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
+            m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
+            m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
+            m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
+        };
     }
 
     // NEW: make timestamp parsing bulletproof (string/seconds/ms, with/without timezone)
