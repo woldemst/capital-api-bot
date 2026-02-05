@@ -1,13 +1,5 @@
-import {
-    placePosition,
-    updateTrailingStop,
-    getDealConfirmation,
-    getAllowedTPRange,
-    closePosition as apiClosePosition,
-    getHistorical,
-    getOpenPositions,
-} from "../api.js";
-import { RISK, ANALYSIS, STRATEGY } from "../config.js";
+import { placePosition, updateTrailingStop, getDealConfirmation, closePosition as apiClosePosition, getOpenPositions } from "../api.js";
+import { RISK } from "../config.js";
 import logger from "../utils/logger.js";
 import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
@@ -32,6 +24,33 @@ class TradingService {
     setAvailableMargin(m) {
         this.availableMargin = m;
     }
+
+    normalizeDirection(direction) {
+        return String(direction || "").toUpperCase();
+    }
+
+    toNumber(value) {
+        if (value === undefined || value === null || value === "") return null;
+        const num = typeof value === "number" ? value : Number(value);
+        return Number.isFinite(num) ? num : null;
+    }
+
+    firstNumber(...values) {
+        for (const value of values) {
+            const num = this.toNumber(value);
+            if (num !== null) return num;
+        }
+        return null;
+    }
+
+    resolveMarketPrice(direction, bid, ask) {
+        const dir = this.normalizeDirection(direction);
+        if (dir === "BUY" && Number.isFinite(ask)) return ask;
+        if (dir === "SELL" && Number.isFinite(bid)) return bid;
+        if (Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2;
+        return bid ?? ask ?? null;
+    }
+
     getPipValue(symbol) {
         return symbol.includes("JPY") ? 0.01 : 0.0001;
     }
@@ -52,7 +71,7 @@ class TradingService {
         if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(price)) return null;
         const tpDist = Math.abs(tp - entry);
         if (tpDist <= 0) return null;
-        const dir = String(direction || "").toUpperCase();
+        const dir = this.normalizeDirection(direction);
         if (dir === "BUY") return (price - entry) / tpDist;
         if (dir === "SELL") return (entry - price) / tpDist;
         return null;
@@ -77,14 +96,7 @@ class TradingService {
 
             const bid = match?.market?.bid;
             const ask = match?.market?.offer ?? match?.market?.ask;
-            const price =
-                direction === "BUY" && Number.isFinite(ask)
-                    ? ask
-                    : direction === "SELL" && Number.isFinite(bid)
-                      ? bid
-                      : Number.isFinite(bid) && Number.isFinite(ask)
-                        ? (bid + ask) / 2
-                        : (bid ?? ask ?? null);
+            const price = this.resolveMarketPrice(direction, bid, ask);
 
             return { symbol, direction, price };
         } catch (error) {
@@ -97,12 +109,21 @@ class TradingService {
     //               ATR-Based Trade Parameters
     // ============================================================
 
+    async resolveAtr(indicators, symbol) {
+        const indicatorAtr = indicators?.m15?.atr ?? indicators?.m5?.atr ?? indicators?.h1?.atr;
+        if (Number.isFinite(indicatorAtr) && indicatorAtr > 0) return indicatorAtr;
+        logger.warn(`[ATR] Missing indicator ATR for ${symbol}; skipping trade.`);
+        return null;
+    }
+
     async calculateTradeParameters(signal, symbol, bid, ask, indicators) {
         const side = String(signal || "").toLowerCase();
         const isBuy = side === "buy";
         const price = isBuy ? ask : bid;
-        const indicatorAtr = indicators?.m15?.atr ?? indicators?.m5?.atr ?? indicators?.h1?.atr;
-        const atr = Number.isFinite(indicatorAtr) && indicatorAtr > 0 ? indicatorAtr : await this.calculateATR(symbol);
+        const atr = await this.resolveAtr(indicators, symbol);
+        if (!Number.isFinite(atr) || atr <= 0) {
+            throw new Error(`[ATR] Invalid indicator ATR for ${symbol}`);
+        }
         const stopLossPips = 1.5 * atr;
         const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
@@ -153,15 +174,17 @@ class TradingService {
         // --- Margin check for 5 simultaneous trades ---
         // Assume leverage is 30:1 for forex (can be adjusted)
         const leverage = 30;
+        // Normalize JPY pricing (100x) to keep margin check consistent with non-JPY pairs
+        const priceForMargin = symbol.includes("JPY") ? entryPrice / 100 : entryPrice;
         // Margin required = (size * entryPrice) / leverage
-        const marginRequired = (size * entryPrice) / leverage;
+        const marginRequired = (size * priceForMargin) / leverage;
         // Use available margin from account (set by updateAccountInfo)
         const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
         // Ensure margin for one trade is no more than 1/5 of available
         const maxMarginPerTrade = availableMargin / 5;
         if (marginRequired > maxMarginPerTrade) {
             // Reduce size so marginRequired == maxMarginPerTrade
-            size = Math.floor((maxMarginPerTrade * leverage) / entryPrice / 100) * 100;
+            size = Math.floor((maxMarginPerTrade * leverage) / priceForMargin / 100) * 100;
             if (size < 100) size = 100;
             console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
         }
@@ -169,31 +192,6 @@ class TradingService {
             `[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`,
         );
         return size;
-    }
-
-    async calculateATR(symbol) {
-        try {
-            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.ENTRY, 15);
-            if (!data?.prices || data.prices.length < 14) {
-                throw new Error("Insufficient data for ATR calculation");
-            }
-            let tr = [];
-            const prices = data.prices;
-            for (let i = 1; i < prices.length; i++) {
-                const high = prices[i].highPrice?.ask || prices[i].high;
-                const low = prices[i].lowPrice?.bid || prices[i].low;
-                const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
-                const tr1 = high - low;
-                const tr2 = Math.abs(high - prevClose);
-                const tr3 = Math.abs(low - prevClose);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-            const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-            return atr;
-        } catch (error) {
-            console.error("[ATR] Error:", error);
-            return 0.001;
-        }
     }
 
     // ============================================================
@@ -325,7 +323,7 @@ class TradingService {
         const tpDist = Math.abs(tp - entry);
         if (tpDist <= 0) return;
 
-        const dir = String(direction || "").toUpperCase();
+        const dir = this.normalizeDirection(direction);
         const activation = dir === "BUY" ? entry + tpDist * 0.7 : entry - tpDist * 0.7;
 
         const activated = (dir === "BUY" && price >= activation) || (dir === "SELL" && price <= activation);
@@ -417,21 +415,7 @@ class TradingService {
                 }
             }
 
-            const toNumber = (value) => {
-                if (value === undefined || value === null || value === "") return null;
-                const num = typeof value === "number" ? value : Number(value);
-                return Number.isFinite(num) ? num : null;
-            };
-
-            const firstNumber = (...values) => {
-                for (const value of values) {
-                    const num = toNumber(value);
-                    if (num !== null) return num;
-                }
-                return null;
-            };
-
-            const brokerPrice = firstNumber(
+            const brokerPrice = this.firstNumber(
                 confirmation?.closeLevel,
                 confirmation?.level,
                 confirmation?.dealLevel,
