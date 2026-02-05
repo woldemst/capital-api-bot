@@ -155,7 +155,7 @@ class TradingBot {
         setTimeout(() => {
             runAnalysis();
             // After first run, repeat every 5 minutes
-            this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 15 * 60 * 1000);
+            this.analysisInterval = setInterval(runAnalysis, DEV.MODE ? DEV.INTERVAL : 5 * 60 * 1000);
         }, interval);
     }
 
