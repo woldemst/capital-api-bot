@@ -1,7 +1,7 @@
 class Strategy {
     constructor() {}
 
-    generateSignal({ indicators }) {
+    generateSignal({ indicators, bid, ask }) {
         if (!indicators) {
             return { signal: null, reason: "no_indicators", context: {} };
         }
@@ -26,6 +26,11 @@ class Strategy {
 
         const m15Macd = this.macdHist(m15);
         const m5Macd = this.macdHist(m5);
+
+        const slowH4 = this.slowTrend(h4);
+        const h4Macd = this.macdHist(h4);
+        const h1EmaBull = this.isNumber(h1?.ema9) && this.isNumber(h1?.ema21) && h1.ema9 > h1.ema21;
+        const h1EmaBear = this.isNumber(h1?.ema9) && this.isNumber(h1?.ema21) && h1.ema9 < h1.ema21;
 
         const momentumUp = this.allNumbers(m15Macd, m5Macd) && m15Macd > 0 && m5Macd > 0;
         const momentumDown = this.allNumbers(m15Macd, m5Macd) && m15Macd < 0 && m5Macd < 0;
@@ -171,6 +176,30 @@ class Strategy {
             };
         }
 
+        const legacyBuy =
+            slowH4 === "bullish" &&
+            this.isNumber(h4Macd) &&
+            h4Macd > 0 &&
+            h1EmaBull &&
+            (m15?.isBullishCross || (this.isNumber(m15Rsi) && m15Rsi < 30) || this.bbTouchLower(m15, bid)) &&
+            (!this.isNumber(h1Rsi) || h1Rsi < 35);
+
+        const legacySell =
+            slowH4 === "bearish" &&
+            this.isNumber(h4Macd) &&
+            h4Macd < 0 &&
+            h1EmaBear &&
+            (m15?.isBearishCross || (this.isNumber(m15Rsi) && m15Rsi > 70) || this.bbTouchUpper(m15, ask)) &&
+            (!this.isNumber(h1Rsi) || h1Rsi > 65);
+
+        if (legacyBuy) {
+            return { signal: "BUY", reason: "legacy_smooth", context: { slowH4, h4Macd, h1Rsi, m15Rsi } };
+        }
+
+        if (legacySell) {
+            return { signal: "SELL", reason: "legacy_smooth", context: { slowH4, h4Macd, h1Rsi, m15Rsi } };
+        }
+
         return { signal: null, reason: "no_rule_match", context: { trend, h1Rsi, h1Adx, m15Adx } };
     }
 
@@ -226,6 +255,26 @@ class Strategy {
         if (trend === "bullish" || trend === "bearish") return trend;
 
         return "neutral";
+    }
+
+    slowTrend(ind) {
+        const fast = this.isNumber(ind?.emaFastTrend) ? ind.emaFastTrend : ind?.emaFast;
+        const slow = this.isNumber(ind?.emaSlowTrend) ? ind.emaSlowTrend : ind?.emaSlow;
+        if (this.isNumber(fast) && this.isNumber(slow)) {
+            if (fast > slow) return "bullish";
+            if (fast < slow) return "bearish";
+        }
+        return "neutral";
+    }
+
+    bbTouchLower(ind, bid) {
+        const lower = ind?.bb?.lower;
+        return this.isNumber(lower) && this.isNumber(bid) && bid <= lower;
+    }
+
+    bbTouchUpper(ind, ask) {
+        const upper = ind?.bb?.upper;
+        return this.isNumber(upper) && this.isNumber(ask) && ask >= upper;
     }
 }
 

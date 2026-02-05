@@ -40,7 +40,7 @@ export const RISK = {
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     BUFFER_PIPS: 2, // Buffer for SL calculation
     RR: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 120, // Maximum hold time in minutes
+    MAX_HOLD_TIME: 180, // Maximum hold time in minutes
     PARTIAL_TP_ENABLED: true,
     PARTIAL_TP_PERCENTAGE: 0.5,
     MAX_SLIPPAGE_PIPS: 2,
