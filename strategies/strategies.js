@@ -131,6 +131,8 @@ class Strategy {
             h4Macd > 0 &&
             h1EmaBull &&
             (m15?.isBullishCross || (this.isNumber(m15Rsi) && m15Rsi < 30) || this.bbTouchLower(m15, bid)) &&
+            this.isNumber(m5Pullback) &&
+            m5Pullback <= 0 &&
             (!this.isNumber(h1Rsi) || h1Rsi < 45);
 
         const isLegacySell =
@@ -139,7 +141,20 @@ class Strategy {
             h4Macd < 0 &&
             h1EmaBear &&
             (m15?.isBearishCross || (this.isNumber(m15Rsi) && m15Rsi > 70) || this.bbTouchUpper(m15, ask)) &&
+            this.isNumber(m5Pullback) &&
+            m5Pullback >= 0 &&
             (!this.isNumber(h1Rsi) || h1Rsi > 55);
+
+        const trendFilterSignal = trend === "bullish" ? "BUY" : trend === "bearish" ? "SELL" : null;
+        const m15FilterSignal = m15Trend === "bullish" ? "BUY" : m15Trend === "bearish" ? "SELL" : null;
+
+        if (!trendFilterSignal) {
+            return { signal: null, reason: "trend_filter_neutral", context: { h1Trend, h4Trend } };
+        }
+
+        if (!m15FilterSignal) {
+            return { signal: null, reason: "m15_trend_neutral", context: { m15Trend } };
+        }
 
         const rules = [
             {
@@ -218,6 +233,8 @@ class Strategy {
 
         for (const rule of rules) {
             if (!rule.when) continue;
+            if (trendFilterSignal && rule.signal !== trendFilterSignal) continue;
+            if (m15FilterSignal && rule.signal !== m15FilterSignal) continue;
             const payload = { signal: rule.signal, reason: rule.reason, context: rule.context };
             if (typeof rule.buyScore === "number") payload.buyScore = rule.buyScore;
             if (typeof rule.sellScore === "number") payload.sellScore = rule.sellScore;

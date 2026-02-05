@@ -218,10 +218,11 @@ class TradingBot {
     // Analyzes all symbols in the trading universe.
 
     async analyzeAllSymbols() {
+        this.activeSymbols = this.getActiveSymbols();
         for (const symbol of this.activeSymbols) {
             if (!(await this.isTradingAllowed(symbol))) {
                 logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                return;
+                continue;
             }
             await this.analyzeSymbol(symbol);
             await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
