@@ -31,6 +31,7 @@ class TradingBot {
         this.openedPositions = {}; // Track opened positions
 
         this.openedBrockerDealIds = [];
+        this.activeSymbols = this.getActiveSymbols();
 
         // Define allowed trading windows (UTC, Berlin time for example)
         this.allowedTradingWindows = [
@@ -186,35 +187,35 @@ class TradingBot {
         }
     }
 
-    // getActiveSymbols() {
-    //     const now = new Date();
-    //     const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+    getActiveSymbols() {
+        const now = new Date();
+        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
 
-    //     // Helper to check if hour is in session
-    //     const inSession = (start, end) => {
-    //         if (start < end) return hour >= start && hour < end;
-    //         return hour >= start || hour < end; // Overnight session
-    //     };
+        // Helper to check if hour is in session
+        const inSession = (start, end) => {
+            if (start < end) return hour >= start && hour < end;
+            return hour >= start || hour < end; // Overnight session
+        };
 
-    //     const activeSessions = [];
-    //     if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
-    //     if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
-    //     if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
-    //     if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
+        const activeSessions = [];
+        if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
+        if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
+        if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
+        if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
 
-    //     // Combine symbols from all active sessions, remove duplicates
-    //     let combined = [];
-    //     activeSessions.forEach((arr) => combined.push(...arr));
-    //     combined = [...new Set(combined)];
+        // Combine symbols from all active sessions, remove duplicates
+        let combined = [];
+        activeSessions.forEach((arr) => combined.push(...arr));
+        combined = [...new Set(combined)];
 
-    //     logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
-    //     return combined;
-    // }
+        logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
+        return combined;
+    }
 
     // Analyzes all symbols in the trading universe.
 
     async analyzeAllSymbols() {
-        for (const symbol of SYMBOLS) {
+        for (const symbol of this.activeSymbols) {
             if (!(await this.isTradingAllowed(symbol))) {
                 logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
                 return;
@@ -248,14 +249,7 @@ class TradingBot {
 
         const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, getHistorical, TIMEFRAMES, this.maxCandleHistory);
 
-        if (
-            !d1Data?.prices ||
-            !h4Data?.prices ||
-            !h1Data?.prices ||
-            !m15Data?.prices ||
-            !m5Data?.prices ||
-            !m1Data?.prices
-        ) {
+        if (!d1Data?.prices || !h4Data?.prices || !h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
             logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
             return;
         }
@@ -385,10 +379,7 @@ class TradingBot {
 
                 let indicators;
                 try {
-                    const [m15Data, m5Data] = await Promise.all([
-                        getHistorical(symbol, "MINUTE_15", 50),
-                        getHistorical(symbol, "MINUTE_5", 50),
-                    ]);
+                    const [m15Data, m5Data] = await Promise.all([getHistorical(symbol, "MINUTE_15", 50), getHistorical(symbol, "MINUTE_5", 50)]);
                     if (!m15Data?.prices || !m5Data?.prices) {
                         logger.warn(`[Monitoring] Missing candles for ${symbol}, skipping trailing stop update.`);
                         continue;

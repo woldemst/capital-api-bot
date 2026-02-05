@@ -100,13 +100,11 @@ class TradingService {
     async calculateTradeParameters(signal, symbol, bid, ask) {
         const price = signal === "buy" ? ask : bid;
         const atr = await this.calculateATR(symbol);
-        const atrMultiplier = Number.isFinite(RISK?.ATR_MULTIPLIER) ? RISK.ATR_MULTIPLIER : 1.5;
-        const rr = Number.isFinite(RISK?.RISK_REWARD) ? RISK.RISK_REWARD : Number.isFinite(RISK?.RR) ? RISK.RR : 2;
-        const stopLossPips = atrMultiplier * atr;
+        const stopLossPips = 1.5 * atr;
         const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
-        const takeProfitPips = rr * stopLossPips;
+        const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+        const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
         console.log(`[calculateTradeParameters] Size: ${size}`);
 
         // Trailing stop parameters
@@ -451,9 +449,7 @@ class TradingService {
             const requestedReasonText = requestedReason ? String(requestedReason) : "";
             const hasExplicitBrokerReason = /stop|sl|limit|tp|take|profit|loss/i.test(brokerReasonText);
             const hasGenericBrokerReason = /closed|close|deleted|cancel|rejected|filled|accepted/i.test(brokerReasonText);
-            const finalReason = hasExplicitBrokerReason
-                ? brokerReasonText
-                : requestedReasonText || (!hasGenericBrokerReason && brokerReasonText) || "unknown";
+            const finalReason = hasExplicitBrokerReason ? brokerReasonText : requestedReasonText || (!hasGenericBrokerReason && brokerReasonText) || "unknown";
 
             logger.info("[ClosePos] Derived closeReason", {
                 dealId,
