@@ -97,20 +97,23 @@ class TradingService {
     //               ATR-Based Trade Parameters
     // ============================================================
 
-    async calculateTradeParameters(signal, symbol, bid, ask) {
-        const price = signal === "buy" ? ask : bid;
-        const atr = await this.calculateATR(symbol);
+    async calculateTradeParameters(signal, symbol, bid, ask, indicators) {
+        const side = String(signal || "").toLowerCase();
+        const isBuy = side === "buy";
+        const price = isBuy ? ask : bid;
+        const indicatorAtr = indicators?.m15?.atr ?? indicators?.m5?.atr ?? indicators?.h1?.atr;
+        const atr = Number.isFinite(indicatorAtr) && indicatorAtr > 0 ? indicatorAtr : await this.calculateATR(symbol);
         const stopLossPips = 1.5 * atr;
-        const stopLossPrice = signal === "buy" ? price - stopLossPips : price + stopLossPips;
+        const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
-        const takeProfitPrice = signal === "buy" ? price + takeProfitPips : price - takeProfitPips;
-        const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
+        const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
+        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
         console.log(`[calculateTradeParameters] Size: ${size}`);
 
         // Trailing stop parameters
         const trailingStopParams = {
             activationPrice:
-                signal === "buy"
+                isBuy
                     ? price + stopLossPips // Activate at 1R profit
                     : price - stopLossPips,
             trailingDistance: atr, // Trail by 1 ATR
@@ -124,10 +127,7 @@ class TradingService {
             stopLossPips,
             takeProfitPips,
             trailingStopParams,
-            partialTakeProfit:
-                signal === "buy"
-                    ? price + stopLossPips // Take partial at 1R
-                    : price - stopLossPips,
+            partialTakeProfit: isBuy ? price + stopLossPips : price - stopLossPips,
         };
     }
 
@@ -201,7 +201,7 @@ class TradingService {
     // ============================================================
     async executeTrade(symbol, signal, bid, ask, indicators, context) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, context);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators);
 
             const pos = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 

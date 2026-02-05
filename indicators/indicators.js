@@ -60,8 +60,6 @@ export async function calcIndicators(bars) {
     const rsiSeries = RSI.calculate({ period: 14, values: closes });
     // Bollinger Bands series for Mean Reversion
     const bbSeries = BollingerBands.calculate({ period: 20, stdDev: 2, values: closes });
-    const bbUpperSeries = bbSeries.map((b) => b.upper);
-    const bbLowerSeries = bbSeries.map((b) => b.lower);
 
     const bb = bbSeries.length > 0 ? bbSeries[bbSeries.length - 1] : undefined;
     const emaFastPrev = ema12Series[ema12Series.length - 2] ?? emaFast;
@@ -169,10 +167,7 @@ export async function calcIndicators(bars) {
         macd,
         macdHistPrev,
         // --- Added series for strategies ---
-        rsiSeries,
-        bbSeries,
-        bbUpperSeries,
-        bbLowerSeries,
+        // series removed from payload to keep snapshots light
         trend: maFast > maSlow ? "bullish" : maFast < maSlow ? "bearish" : "neutral",
         trendStrength: currentADX,
         trendDetails: {
