@@ -1,4 +1,4 @@
-import { SMA, EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
+import { EMA, RSI, BollingerBands, MACD, ADX, ATR } from "technicalindicators";
 import { ANALYSIS } from "../config.js";
 import { calculateBackQuantSignal } from "./BackQuant.js";
 
@@ -82,22 +82,12 @@ export async function calcIndicators(bars) {
     });
     const currentADX = last(adxSeries);
 
-    const maFast = last(SMA.calculate({ period: 5, values: closes }));
-    const maSlow = last(SMA.calculate({ period: 20, values: closes }));
+    // Keep legacy field names but align trend basis with strategy pickTrend (EMA20/EMA50).
+    const maFast = ema20;
+    const maSlow = ema50;
 
-    // ATR (library + manual fallback)
-    const tr = [];
-    for (let i = 1; i < bars.length; i++) {
-        const hl = highs[i] - lows[i];
-        const hc = Math.abs(highs[i] - closes[i - 1]);
-        const lc = Math.abs(lows[i] - closes[i - 1]);
-        tr.push(Math.max(hl, hc, lc));
-    }
-    const trWindow = tr.slice(-ATR_PERIOD);
-    const atrManual = trWindow.length ? trWindow.reduce((sum, val) => sum + val, 0) / trWindow.length : undefined;
     const atrSeries = ATR.calculate({ period: ATR_PERIOD, high: highs, low: lows, close: closes });
-    const atrVal = last(atrSeries);
-    const atr = Number.isFinite(atrVal) ? atrVal : atrManual;
+    const atr = last(atrSeries);
 
     const lastClose = closes[closes.length - 1];
 
@@ -113,8 +103,8 @@ export async function calcIndicators(bars) {
         lower: -10,
     });
 
-    const price_vs_ema9 = (lastClose - ema9) / ema9;
-    const price_vs_ema21 = (lastClose - ema21) / ema21;
+    const price_vs_ema9 = Number.isFinite(lastClose) && Number.isFinite(ema9) && ema9 !== 0 ? (lastClose - ema9) / ema9 : 0;
+    const price_vs_ema21 = Number.isFinite(lastClose) && Number.isFinite(ema21) && ema21 !== 0 ? (lastClose - ema21) / ema21 : 0;
     const price_vs_bb_mid = bb?.middle ? (lastClose - bb.middle) / bb.middle : 0;
 
     const macdSeries = MACD.calculate({
@@ -124,6 +114,8 @@ export async function calcIndicators(bars) {
     const macd = last(macdSeries);
     const macdPrev = macdSeries.length > 1 ? macdSeries[macdSeries.length - 2] : undefined;
     const macdHistPrev = macdPrev ? macdPrev.histogram : undefined;
+
+    const trend = ema20 > ema50 ? "bullish" : ema20 < ema50 ? "bearish" : "neutral";
 
     return {
         maFast,
@@ -161,16 +153,16 @@ export async function calcIndicators(bars) {
         atr,
         adaptiveRSI: (() => {
             const baseRSI = 50;
-            return atrVal ? baseRSI + Math.min(10, atrVal * 100) : baseRSI;
+            return atr ? baseRSI + Math.min(10, atr * 100) : baseRSI;
         })(),
         adaptiveADX: (() => {
             const baseADX = 20;
-            return atrVal ? baseADX + Math.min(10, atrVal * 10) : baseADX;
+            return atr ? baseADX + Math.min(10, atr * 10) : baseADX;
         })(),
         macd,
         macdHistPrev,
         // series removed from payload to keep snapshots light
-        trend: maFast > maSlow ? "bullish" : maFast < maSlow ? "bearish" : "neutral",
+        trend,
         trendStrength: currentADX,
         trendDetails: {
             adx: currentADX,

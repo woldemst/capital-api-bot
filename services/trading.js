@@ -124,7 +124,9 @@ class TradingService {
         if (!Number.isFinite(atr) || atr <= 0) {
             throw new Error(`[ATR] Invalid indicator ATR for ${symbol}`);
         }
-        const stopLossPips = 1.5 * atr;
+        const spread = Number.isFinite(ask) && Number.isFinite(bid) ? Math.abs(ask - bid) : 0;
+        const minStopFromSpread = spread > 0 ? spread * 2 : 0;
+        const stopLossPips = Math.max(2 * atr, minStopFromSpread);
         const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
@@ -179,7 +181,7 @@ class TradingService {
         // Margin required = (size * entryPrice) / leverage
         const marginRequired = (size * priceForMargin) / leverage;
         // Use available margin from account (set by updateAccountInfo)
-        const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
+        const availableMargin = Number.isFinite(this.availableMargin) && this.availableMargin > 0 ? this.availableMargin : this.accountBalance;
         // Ensure margin for one trade is no more than 1/5 of available
         const maxMarginPerTrade = availableMargin / 5;
         if (marginRequired > maxMarginPerTrade) {
