@@ -32,106 +32,53 @@ class Strategy {
         const momentumUp = this.allNumbers(m15Macd, m5Macd) && (m15Macd > 0 || m5Macd > 0);
         const momentumDown = this.allNumbers(m15Macd, m5Macd) && (m15Macd < 0 || m5Macd < 0);
 
-        const isTrendPullbackBuy =
-            h1Trend === "bullish" &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback <= 0 &&
-            this.isNumber(m15Rsi) &&
-            m15Rsi >= 40 &&
-            m15Rsi <= 62 &&
-            this.isNumber(m1Rsi) &&
-            m1Rsi <= 56 &&
-            this.isNumber(m5Bb) &&
-            m5Bb >= 0.1 &&
-            m5Bb <= 0.9 &&
-            this.isNumber(m1Bb) &&
-            m1Bb <= 0.92 &&
-            this.isNumber(m15Adx) &&
-            m15Adx >= 15 &&
-            m15Adx <= 40 &&
-            momentumUp;
+        const buyChecks = {
+            pullback: this.isNumber(m5Pullback) && m5Pullback <= 0,
+            rsiBand: this.isNumber(m15Rsi) && m15Rsi >= 40 && m15Rsi <= 65,
+            microRsi: this.isNumber(m1Rsi) && m1Rsi <= 58,
+            bbBand: this.isNumber(m5Bb) && m5Bb >= 0.05 && m5Bb <= 0.95,
+            microBb: this.isNumber(m1Bb) && m1Bb <= 0.95,
+            adxBand: this.isNumber(m15Adx) && m15Adx >= 10 && m15Adx <= 28,
+            momentum: momentumUp,
+        };
 
-        const isTrendPullbackSell =
-            h1Trend === "bearish" &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback >= 0 &&
-            this.isNumber(m15Rsi) &&
-            m15Rsi >= 48 &&
-            m15Rsi <= 65 &&
-            this.isNumber(m1Rsi) &&
-            m1Rsi >= 55 &&
-            this.isNumber(m5Bb) &&
-            m5Bb <= 0.95 &&
-            this.isNumber(m1Bb) &&
-            m1Bb >= 0.65 &&
-            this.isNumber(m15Adx) &&
-            m15Adx >= 10 &&
-            m15Adx <= 35 &&
-            momentumDown;
+        const sellChecks = {
+            pullback: this.isNumber(m5Pullback) && m5Pullback >= 0,
+            rsiBand: this.isNumber(m15Rsi) && m15Rsi >= 46 && m15Rsi <= 68,
+            microRsi: this.isNumber(m1Rsi) && m1Rsi >= 52,
+            bbBand: this.isNumber(m5Bb) && m5Bb <= 0.97,
+            microBb: this.isNumber(m1Bb) && m1Bb >= 0.6,
+            adxBand: this.isNumber(m15Adx) && m15Adx >= 10 && m15Adx <= 28,
+            momentum: momentumDown,
+        };
 
-        const isOverboughtSpikeSell =
-            h1Trend === "bearish" &&
-            this.isNumber(m15Rsi) &&
-            m15Rsi >= 68 &&
-            this.isNumber(m15Bb) &&
-            m15Bb >= 0.85 &&
-            this.isNumber(m5Rsi) &&
-            m5Rsi >= 65 &&
-            this.isNumber(m5Bb) &&
-            m5Bb >= 0.75 &&
-            this.isNumber(m15Adx) &&
-            m15Adx >= 12 &&
-            m15Adx <= 40 &&
-            momentumDown;
+        const buyScore = this.scoreChecks(buyChecks);
+        const sellScore = this.scoreChecks(sellChecks);
 
-        const isOversoldSpikeBuy =
-            h1Trend === "bullish" &&
-            this.isNumber(m15Rsi) &&
-            m15Rsi <= 32 &&
-            this.isNumber(m15Bb) &&
-            m15Bb <= 0.15 &&
-            this.isNumber(m5Rsi) &&
-            m5Rsi <= 35 &&
-            this.isNumber(m5Bb) &&
-            m5Bb <= 0.25 &&
-            this.isNumber(m15Adx) &&
-            m15Adx >= 12 &&
-            m15Adx <= 40 &&
-            momentumUp;
+        const BUY_SCORE_THRESHOLD = 5;
+        const SELL_SCORE_THRESHOLD = 5;
 
-        if (isOverboughtSpikeSell) {
-            return {
-                signal: "SELL",
-                reason: "overbought_spike",
-                context: { d1Trend, h1Trend, h4Trend, m15Rsi, m15Bb, m5Rsi, m5Bb, m15Adx, m15Macd, m5Macd },
-            };
-        }
-
-        if (isOversoldSpikeBuy) {
-            return {
-                signal: "BUY",
-                reason: "oversold_spike",
-                context: { d1Trend, h1Trend, h4Trend, m15Rsi, m15Bb, m5Rsi, m5Bb, m15Adx, m15Macd, m5Macd },
-            };
-        }
-
-        if (isTrendPullbackBuy) {
+        if (h1Trend === "bullish" && buyScore >= BUY_SCORE_THRESHOLD) {
             return {
                 signal: "BUY",
                 reason: "trend_pullback",
-                context: { d1Trend, h1Trend, h4Trend, m15Trend, m5Trend, m15Rsi, m1Rsi, m1Bb, m15Adx, m5Pullback, m15Macd, m5Macd },
+                context: { d1Trend, h1Trend, h4Trend, m15Trend, m5Trend, buyScore, buyChecks, m15Rsi, m1Rsi, m1Bb, m15Adx, m5Pullback, m15Macd, m5Macd },
             };
         }
 
-        if (isTrendPullbackSell) {
+        if (h1Trend === "bearish" && sellScore >= SELL_SCORE_THRESHOLD) {
             return {
                 signal: "SELL",
                 reason: "trend_pullback",
-                context: { d1Trend, h1Trend, h4Trend, m15Trend, m5Trend, m15Rsi, m1Rsi, m1Bb, m15Adx, m5Pullback, m15Macd, m5Macd },
+                context: { d1Trend, h1Trend, h4Trend, m15Trend, m5Trend, sellScore, sellChecks, m15Rsi, m1Rsi, m1Bb, m15Adx, m5Pullback, m15Macd, m5Macd },
             };
         }
 
-        return { signal: null, reason: "no_rule_match", context: { d1Trend, h1Trend, h4Trend, m15Trend, m5Trend, h1Rsi, m15Rsi, m5Rsi, m1Rsi } };
+        return {
+            signal: null,
+            reason: "score_below_threshold",
+            context: { d1Trend, h1Trend, h4Trend, m15Trend, m5Trend, h1Rsi, m15Rsi, m5Rsi, m1Rsi, m15Bb, m5Bb, m1Bb, m15Adx, buyScore, sellScore },
+        };
     }
 
     isNumber(value) {
@@ -140,6 +87,11 @@ class Strategy {
 
     allNumbers(...values) {
         return values.every((value) => this.isNumber(value));
+    }
+
+    scoreChecks(checks) {
+        if (!checks || typeof checks !== "object") return 0;
+        return Object.values(checks).reduce((score, passed) => score + (passed ? 1 : 0), 0);
     }
 
     rsi(indicators) {

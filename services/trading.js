@@ -126,9 +126,13 @@ class TradingService {
         }
         const spread = Number.isFinite(ask) && Number.isFinite(bid) ? Math.abs(ask - bid) : 0;
         const minStopFromSpread = spread > 0 ? spread * 2 : 0;
-        const stopLossPips = Math.max(2 * atr, minStopFromSpread);
+        const ATR_STOP_MULTIPLIER = 1.4;
+        const REWARD_TO_RISK = 2.0;
+
+        // Tuned for 180-minute max-hold so TP is reachable before timeout.
+        const stopLossPips = Math.max(ATR_STOP_MULTIPLIER * atr, minStopFromSpread);
         const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
-        const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
+        const takeProfitPips = REWARD_TO_RISK * stopLossPips;
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
         console.log(`[calculateTradeParameters] Size: ${size}`);
