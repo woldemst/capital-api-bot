@@ -44,106 +44,132 @@ class Strategy {
         const momentumUp = this.allNumbers(m15Macd, m5Macd) && m15Macd > 0 && m5Macd > 0;
         const momentumDown = this.allNumbers(m15Macd, m5Macd) && m15Macd < 0 && m5Macd < 0;
 
-        const isOverboughtSpikeSell =
-            this.isNumber(m15Rsi) &&
-            m15Rsi >= 75 &&
-            this.isNumber(m15Bb) &&
-            m15Bb >= 0.9 &&
-            this.isNumber(m5Rsi) &&
-            m5Rsi >= 70 &&
-            this.isNumber(m5Bb) &&
-            m5Bb >= 0.8 &&
-            this.isNumber(m15Adx) &&
-            m15Adx >= 25 &&
-            (d1Trend === "bearish" || (this.isNumber(h1Bb) && h1Bb >= 1.05)) &&
-            this.allNumbers(m15Macd, m5Macd) &&
-            (m15Macd < 0 || m5Macd < 0);
+        const scoreRule = (name, conditions) => {
+            const passed = conditions.filter(Boolean).length;
+            const total = conditions.length;
+            const matched = passed === total;
+            console.log(`${name}: ${passed}/${total}`, matched);
+            return matched;
+        };
 
-        const isCountertrendContinuationBuy =
-            d1Trend === "bearish" &&
-            h4Trend === "bearish" &&
-            h1Trend === "bullish" &&
-            m15Trend === "bullish" &&
-            m5Trend === "bearish" &&
-            this.isNumber(m15Macd) &&
-            m15Macd <= 0 &&
-            this.isNumber(m5Macd) &&
-            m5Macd <= 0 &&
-            this.isNumber(m5Pullback) &&
-            Math.abs(m5Pullback) <= 0.0002 &&
-            this.isNumber(m1Bb) &&
-            m1Bb <= 0.9;
+        const isOverboughtSpikeSell = scoreRule("SPIKE SELL", [
+            this.isNumber(m15Rsi),
+            this.isNumber(m15Rsi) && m15Rsi >= 75,
+            this.isNumber(m15Bb),
+            this.isNumber(m15Bb) && m15Bb >= 0.9,
+            this.isNumber(m5Rsi),
+            this.isNumber(m5Rsi) && m5Rsi >= 70,
+            this.isNumber(m5Bb),
+            this.isNumber(m5Bb) && m5Bb >= 0.8,
+            this.isNumber(m15Adx),
+            this.isNumber(m15Adx) && m15Adx >= 25,
+            d1Trend === "bearish" || (this.isNumber(h1Bb) && h1Bb >= 1.05),
+            this.allNumbers(m15Macd, m5Macd),
+            this.allNumbers(m15Macd, m5Macd) && (m15Macd < 0 || m5Macd < 0),
+        ]);
 
-        const isPullbackFadeSell =
-            m15Trend === "bearish" &&
-            m5Trend === "bearish" &&
-            this.isNumber(m15Macd) &&
-            m15Macd < 0 &&
-            this.isNumber(m5Macd) &&
-            m5Macd > 0 &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback > 0 &&
-            m5Pullback <= 0.00035 &&
-            this.isNumber(m15Adx) &&
-            m15Adx <= 30 &&
-            this.isNumber(m1Rsi) &&
-            m1Rsi >= 65 &&
-            this.isNumber(m1Bb) &&
-            m1Bb >= 0.9;
+        const isCountertrendContinuationBuy = scoreRule("COUNTERTREND CONT BUY", [
+            d1Trend === "bearish",
+            h4Trend === "bearish",
+            h1Trend === "bullish",
+            m15Trend === "bullish",
+            m5Trend === "bearish",
+            this.isNumber(m15Macd),
+            this.isNumber(m15Macd) && m15Macd <= 0,
+            this.isNumber(m5Macd),
+            this.isNumber(m5Macd) && m5Macd <= 0,
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && Math.abs(m5Pullback) <= 0.0002,
+            this.isNumber(m1Bb),
+            this.isNumber(m1Bb) && m1Bb <= 0.9,
+        ]);
 
-        const isPullbackBounceBuy =
-            trend === "bearish" &&
-            m15Trend === "bearish" &&
-            m5Trend === "bearish" &&
-            this.isNumber(m15Macd) &&
-            m15Macd > 0 &&
-            this.isNumber(m5Macd) &&
-            m5Macd > 0 &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback >= 0 &&
-            this.isNumber(m1Rsi) &&
-            m1Rsi <= 65 &&
-            this.isNumber(m1Bb) &&
-            m1Bb <= 0.85;
+        const isPullbackFadeSell = scoreRule("PULLBACK FADE SELL", [
+            m15Trend === "bearish",
+            m5Trend === "bearish",
+            this.isNumber(m15Macd),
+            this.isNumber(m15Macd) && m15Macd < 0,
+            this.isNumber(m5Macd),
+            this.isNumber(m5Macd) && m5Macd > 0,
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback > 0,
+            this.isNumber(m5Pullback) && m5Pullback <= 0.00035,
+            this.isNumber(m15Adx),
+            this.isNumber(m15Adx) && m15Adx <= 30,
+            this.isNumber(m1Rsi),
+            this.isNumber(m1Rsi) && m1Rsi >= 65,
+            this.isNumber(m1Bb),
+            this.isNumber(m1Bb) && m1Bb >= 0.9,
+        ]);
 
-        const isCounterTrendBuy =
-            trend === "bearish" &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback <= 0 &&
-            momentumUp &&
-            (!this.isNumber(h1Rsi) || h1Rsi <= 50);
+        const isPullbackBounceBuy = scoreRule("PULLBACK BOUNCE BUY", [
+            trend === "bearish",
+            m15Trend === "bearish",
+            m5Trend === "bearish",
+            this.isNumber(m15Macd),
+            this.isNumber(m15Macd) && m15Macd > 0,
+            this.isNumber(m5Macd),
+            this.isNumber(m5Macd) && m5Macd > 0,
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback >= 0,
+            this.isNumber(m1Rsi),
+            this.isNumber(m1Rsi) && m1Rsi <= 65,
+            this.isNumber(m1Bb),
+            this.isNumber(m1Bb) && m1Bb <= 0.85,
+        ]);
 
-        const isCounterTrendSell = trend === "bullish" && this.isNumber(m5Pullback) && m5Pullback >= 0 && momentumDown;
+        const isCounterTrendBuy = scoreRule("COUNTERTREND BUY", [
+            trend === "bearish",
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback <= 0,
+            momentumUp,
+            !this.isNumber(h1Rsi) || h1Rsi <= 50,
+        ]);
 
-        const isTrendBuy =
-            trend === "bullish" &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback <= 0 &&
-            momentumUp &&
-            (!this.isNumber(h1Rsi) || h1Rsi <= 55) &&
-            (!this.isNumber(m15Rsi) || m15Rsi <= 60);
+        const isCounterTrendSell = scoreRule("COUNTERTREND SELL", [
+            trend === "bullish",
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback >= 0,
+            momentumDown,
+        ]);
 
-        const isTrendSell = trend === "bearish" && this.isNumber(m5Pullback) && m5Pullback >= 0 && momentumDown;
+        const isTrendBuy = scoreRule("TREND BUY", [
+            trend === "bullish",
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback <= 0,
+            momentumUp,
+            !this.isNumber(h1Rsi) || h1Rsi <= 55,
+            !this.isNumber(m15Rsi) || m15Rsi <= 60,
+        ]);
 
-        const isLegacyBuy =
-            slowH4 === "bullish" &&
-            this.isNumber(h4Macd) &&
-            h4Macd > 0 &&
-            h1EmaBull &&
-            (m15?.isBullishCross || (this.isNumber(m15Rsi) && m15Rsi < 30) || this.bbTouchLower(m15, bid)) &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback <= 0 &&
-            (!this.isNumber(h1Rsi) || h1Rsi < 45);
+        const isTrendSell = scoreRule("TREND SELL", [
+            trend === "bearish",
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback >= 0,
+            momentumDown,
+        ]);
 
-        const isLegacySell =
-            slowH4 === "bearish" &&
-            this.isNumber(h4Macd) &&
-            h4Macd < 0 &&
-            h1EmaBear &&
-            (m15?.isBearishCross || (this.isNumber(m15Rsi) && m15Rsi > 70) || this.bbTouchUpper(m15, ask)) &&
-            this.isNumber(m5Pullback) &&
-            m5Pullback >= 0 &&
-            (!this.isNumber(h1Rsi) || h1Rsi > 55);
+        const isLegacyBuy = scoreRule("LEGACY BUY", [
+            slowH4 === "bullish",
+            this.isNumber(h4Macd),
+            this.isNumber(h4Macd) && h4Macd > 0,
+            h1EmaBull,
+            m15?.isBullishCross || (this.isNumber(m15Rsi) && m15Rsi < 30) || this.bbTouchLower(m15, bid),
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback <= 0,
+            !this.isNumber(h1Rsi) || h1Rsi < 45,
+        ]);
+
+        const isLegacySell = scoreRule("LEGACY SELL", [
+            slowH4 === "bearish",
+            this.isNumber(h4Macd),
+            this.isNumber(h4Macd) && h4Macd < 0,
+            h1EmaBear,
+            m15?.isBearishCross || (this.isNumber(m15Rsi) && m15Rsi > 70) || this.bbTouchUpper(m15, ask),
+            this.isNumber(m5Pullback),
+            this.isNumber(m5Pullback) && m5Pullback >= 0,
+            !this.isNumber(h1Rsi) || h1Rsi > 55,
+        ]);
 
         const trendFilterSignal = trend === "bullish" ? "BUY" : trend === "bearish" ? "SELL" : null;
         const m15FilterSignal = m15Trend === "bullish" ? "BUY" : m15Trend === "bearish" ? "SELL" : null;

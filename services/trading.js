@@ -197,7 +197,7 @@ class TradingService {
     // ============================================================
     //                    Place the Trade
     // ============================================================
-    async executeTrade(symbol, signal, bid, ask, indicators, context) {
+    async executeTrade(symbol, signal, bid, ask, indicators, reason, context) {
         try {
             const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators);
 
@@ -234,6 +234,7 @@ class TradingService {
                         dealId: affectedDealId,
                         symbol,
                         signal,
+                        openReason: reason,
                         entryPrice,
                         stopLoss: stopLossRounded,
                         takeProfit: takeProfitRounded,
@@ -272,7 +273,7 @@ class TradingService {
 
             const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
 
-            const { signal, reason = {}, context = {} } = result;
+            const { signal, reason = "", context = {} } = result;
 
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
@@ -280,7 +281,7 @@ class TradingService {
             }
 
             logger.info(`[Signal] ${symbol}: ${signal}`);
-            await this.executeTrade(symbol, signal, bid, ask, indicators, context);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context);
         } catch (err) {
             logger.error(`[ProcessPrice] Error:`, err);
         }

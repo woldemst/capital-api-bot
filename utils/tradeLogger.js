@@ -132,13 +132,15 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicatorsOnOpening, timestamp }) {
+export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPrice, stopLoss, takeProfit, indicatorsOnOpening, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
     const compactOpening = compactIndicators(indicatorsOnOpening);
+    const normalizedOpenReason = openReason === undefined || openReason === null ? "" : String(openReason);
     const payload = {
         dealId,
         symbol,
         signal,
+        openReason: normalizedOpenReason,
         entryPrice,
         stopLoss,
         takeProfit,
