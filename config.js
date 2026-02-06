@@ -88,4 +88,3 @@ export const DEV = {
 export const PROD = {
     INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
 };
-
