@@ -197,7 +197,7 @@ class TradingService {
     // ============================================================
     //                    Place the Trade
     // ============================================================
-    async executeTrade(symbol, signal, bid, ask, indicators, context) {
+    async executeTrade(symbol, signal, bid, ask, indicators, reason, context) {
         try {
             const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators);
 
@@ -205,13 +205,13 @@ class TradingService {
 
             if (!pos?.dealReference) {
                 logger.error(`[Order] Missing deal reference for ${symbol}`);
-                return;
+                return false;
             }
 
             const confirmation = await getDealConfirmation(pos.dealReference);
             if (!["ACCEPTED", "OPEN"].includes(confirmation.dealStatus)) {
                 logger.error(`[Order] Not placed: ${confirmation.reason}`);
-                return;
+                return false;
             }
 
             logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
@@ -234,6 +234,7 @@ class TradingService {
                         dealId: affectedDealId,
                         symbol,
                         signal,
+                        openReason: reason,
                         entryPrice,
                         stopLoss: stopLossRounded,
                         takeProfit: takeProfitRounded,
@@ -249,40 +250,56 @@ class TradingService {
             }
 
             this.openTrades.push(symbol);
+            return true;
         } catch (error) {
             logger.error(`[Order] Error placing order for ${symbol}:`, error);
+            return false;
         }
     }
 
     // ============================================================
     //                   MAIN PRICE LOOP
     // ============================================================
-    async processPrice({ symbol, indicators, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, candles, bid, ask, directionFilter = null }) {
         try {
             await this.syncOpenTradesFromBroker();
-            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance} EUR`);
+
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
-                return;
+                return { executed: false, signal: null, reason: "max_positions" };
             }
+
             if (this.isSymbolTraded(symbol)) {
                 logger.debug(`[ProcessPrice] ${symbol} already in market.`);
-                return;
+                return { executed: false, signal: null, reason: "symbol_already_traded" };
             }
 
             const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-
-            const { signal, reason = {}, context = {} } = result;
+            const { signal, reason = "", context = {} } = result;
 
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
-                return;
+                return { executed: false, signal: null, reason, context };
+            }
+
+            const normalizedFilter = directionFilter ? this.normalizeDirection(directionFilter) : null;
+            if (normalizedFilter && this.normalizeDirection(signal) !== normalizedFilter) {
+                logger.debug(`[Signal] ${symbol}: blocked by setup direction ${normalizedFilter} (got ${signal}).`);
+                return {
+                    executed: false,
+                    signal: null,
+                    reason: "direction_filter_block",
+                    context: { ...context, directionFilter: normalizedFilter },
+                };
             }
 
             logger.info(`[Signal] ${symbol}: ${signal}`);
-            await this.executeTrade(symbol, signal, bid, ask, indicators, context);
+            const executed = await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context);
+            return { executed, signal, reason, context };
         } catch (err) {
             logger.error(`[ProcessPrice] Error:`, err);
+            return { executed: false, signal: null, reason: "process_error", error: err?.message || String(err) };
         }
     }
 

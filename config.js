@@ -77,17 +77,15 @@ export const ANALYSIS = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 60 * 1000, // 60 seconds between analyses
+    INTERVAL: 15 * 1000, // 60 seconds between analyses
     MODE: false,
 };
-
-const calcProdIntervalMs = () =>
-    ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
 
 // 1 min
 // export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
 
 // 5 min
 export const PROD = {
-    INTERVAL: calcProdIntervalMs(),
+    INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
 };
+
