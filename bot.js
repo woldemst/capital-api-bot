@@ -191,27 +191,43 @@ class TradingBot {
     }
 
     getActiveSymbols() {
+        // SESSIONS in config.js are defined in UTC (see config.js), so we must evaluate in UTC as well.
         const now = new Date();
-        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
+        const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
 
-        // Helper to check if hour is in session
-        const inSession = (start, end) => {
-            if (start < end) return hour >= start && hour < end;
-            return hour >= start || hour < end; // Overnight session
+        const parseMinutes = (hhmm) => {
+            if (typeof hhmm !== "string") return NaN;
+            const [hh, mm] = hhmm.split(":").map((p) => Number(p));
+            if (!Number.isInteger(hh) || !Number.isInteger(mm)) return NaN;
+            return hh * 60 + mm;
+        };
+
+        const inSession = (startMinutes, endMinutes) => {
+            if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
+            if (startMinutes < endMinutes) return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+            return currentMinutes >= startMinutes || currentMinutes < endMinutes; // Overnight session
         };
 
         const activeSessions = [];
-        if (inSession(8, 17)) activeSessions.push(SESSIONS.LONDON.SYMBOLS);
-        if (inSession(13, 21)) activeSessions.push(SESSIONS.NY.SYMBOLS);
-        if (inSession(22, 7)) activeSessions.push(SESSIONS.SYDNEY.SYMBOLS);
-        if (inSession(0, 9)) activeSessions.push(SESSIONS.TOKYO.SYMBOLS);
+        const activeSessionNames = [];
+
+        for (const [name, session] of Object.entries(SESSIONS)) {
+            const startMinutes = parseMinutes(session?.START);
+            const endMinutes = parseMinutes(session?.END);
+            if (!inSession(startMinutes, endMinutes)) continue;
+
+            activeSessions.push(session.SYMBOLS);
+            activeSessionNames.push(name);
+        }
 
         // Combine symbols from all active sessions, remove duplicates
-        let combined = [];
-        activeSessions.forEach((arr) => combined.push(...arr));
-        combined = [...new Set(combined)];
+        const combinedSet = new Set();
+        activeSessions.forEach((arr) => (arr || []).forEach((symbol) => combinedSet.add(symbol)));
+        const combined = [...combinedSet];
 
-        logger.info(`[Bot] Active sessions: ${activeSessions.length}, Trading symbols: ${combined.join(", ")}`);
+        logger.info(
+            `[Bot] Active sessions (UTC): ${activeSessions.length} (${activeSessionNames.length ? activeSessionNames.join(", ") : "none"}), Trading symbols: ${combined.join(", ")}`,
+        );
         return combined;
     }
 
@@ -445,9 +461,9 @@ class TradingBot {
             return false;
         }
 
-        // Get current time in minutes (Berlin time)
-        const hour = Number(now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" }));
-        const minute = Number(now.toLocaleString("en-US", { minute: "2-digit", timeZone: "Europe/Berlin" }));
+        // Session windows in this bot are defined in UTC.
+        const hour = now.getUTCHours();
+        const minute = now.getUTCMinutes();
         const currentMinutes = hour * 60 + minute;
 
         // Check if current time is inside any allowed window

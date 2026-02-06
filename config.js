@@ -81,13 +81,10 @@ export const DEV = {
     MODE: true,
 };
 
-const calcProdIntervalMs = () =>
-    ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000;
-
 // 1 min
 // export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
 
 // 5 min
 export const PROD = {
-    INTERVAL: calcProdIntervalMs(),
+    INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
 };
