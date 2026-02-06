@@ -11,6 +11,7 @@ import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals } fro
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
 const MONITOR_INTERVAL_MS = 60 * 1000;
+const PRICE_MONITOR_REPEAT_MS = 60 * 1000;
 const SYMBOL_ANALYSIS_DELAY_MS = 2000;
 const DEFAULT_TRADING_WINDOWS = [
     // London: 08:15–16:45
@@ -328,8 +329,8 @@ class TradingBot {
     }
 
     startPriceMonitor() {
-        const interval = this.getInitialIntervalMs();
-        logger.info(`[PriceMonitor] Starting (every 5 minutes) after ${interval}ms at ${new Date().toISOString()}`);
+        const interval = this.getPriceMonitorInitialIntervalMs();
+        logger.info(`[PriceMonitor] Starting (every 1 minute) after ${interval}ms at ${new Date().toISOString()}`);
         if (this.priceMonitorInterval) clearInterval(this.priceMonitorInterval);
 
         const run = async () => {
@@ -347,7 +348,7 @@ class TradingBot {
 
         setTimeout(() => {
             run();
-            this.priceMonitorInterval = setInterval(run, this.getRepeatIntervalMs());
+            this.priceMonitorInterval = setInterval(run, this.getPriceMonitorRepeatIntervalMs());
         }, interval);
     }
 
@@ -404,6 +405,15 @@ class TradingBot {
 
     getRepeatIntervalMs() {
         return DEV.MODE ? DEV.INTERVAL : ANALYSIS_REPEAT_MS;
+    }
+
+    getPriceMonitorInitialIntervalMs() {
+        const now = new Date();
+        return (60 - now.getUTCSeconds()) * 1000 - now.getUTCMilliseconds() + 1000;
+    }
+
+    getPriceMonitorRepeatIntervalMs() {
+        return PRICE_MONITOR_REPEAT_MS;
     }
 
     async getBidAsk(symbol) {

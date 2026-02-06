@@ -64,6 +64,26 @@ class PriceLogger {
         return Number.isFinite(num) ? num : null;
     }
 
+    toIsoTimestamp(value) {
+        if (value === undefined || value === null || value === "") return null;
+        if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
+        const parsed = new Date(value);
+        return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+    }
+
+    getLastClosedCandle(candles = []) {
+        if (!Array.isArray(candles) || candles.length === 0) return null;
+        // Use the penultimate candle as a safe "last closed" candidate.
+        const candle = candles.length > 1 ? candles[candles.length - 2] : candles[candles.length - 1];
+        return {
+            t: this.toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC),
+            o: this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask),
+            h: this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask),
+            l: this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask),
+            c: this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask),
+        };
+    }
+
     getActiveSessionsUtc() {
         const now = new Date();
         const hour = now.getUTCHours();
@@ -127,16 +147,29 @@ class PriceLogger {
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
 
-        return compactIndicators(indicators);
+        const candles = {
+            d1: this.getLastClosedCandle(d1Candles),
+            h4: this.getLastClosedCandle(h4Candles),
+            h1: this.getLastClosedCandle(h1Candles),
+            m15: this.getLastClosedCandle(m15Candles),
+            m5: this.getLastClosedCandle(m5Candles),
+            m1: this.getLastClosedCandle(m1Candles),
+        };
+
+        return {
+            indicators: compactIndicators(indicators),
+            candles,
+        };
     }
 
     async logSnapshot(symbol) {
         try {
-            const indicators = await this.buildIndicatorsSnapshot(symbol);
-            if (!indicators) {
+            const snapshot = await this.buildIndicatorsSnapshot(symbol);
+            if (!snapshot?.indicators) {
                 logger.warn(`[PriceLogger] Missing candles/indicators for ${symbol}, skipping snapshot.`);
                 return false;
             }
+            const { indicators, candles } = snapshot;
 
             let bid = null;
             let ask = null;
@@ -176,6 +209,7 @@ class PriceLogger {
                 price: referencePrice,
                 sessions,
                 newsBlocked,
+                candles,
                 indicators,
             };
 

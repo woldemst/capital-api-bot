@@ -19,9 +19,11 @@ export async function calcIndicators(bars) {
         return null;
     }
 
-    const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
-    const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
-    const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
+    // Use closed candles only to avoid indicator drift from a still-forming live bar.
+    const stableBars = bars.length > 1 ? bars.slice(0, -1) : bars;
+    const closes = stableBars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
+    const highs = stableBars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
+    const lows = stableBars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
 
     const last = (series) => (Array.isArray(series) && series.length ? series[series.length - 1] : undefined);
 
@@ -68,8 +70,6 @@ export async function calcIndicators(bars) {
     const trend = ema20 > ema50 ? "bullish" : ema20 < ema50 ? "bearish" : "neutral";
 
     return {
-        maFast: ema20,
-        maSlow: ema50,
         ema9,
         ema20,
         ema50,
