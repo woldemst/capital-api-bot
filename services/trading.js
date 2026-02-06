@@ -124,17 +124,12 @@ class TradingService {
         if (!Number.isFinite(atr) || atr <= 0) {
             throw new Error(`[ATR] Invalid indicator ATR for ${symbol}`);
         }
-        const spread = Number.isFinite(ask) && Number.isFinite(bid) ? Math.abs(ask - bid) : 0;
-        const minStopFromSpread = spread > 0 ? spread * 2 : 0;
-        const ATR_STOP_MULTIPLIER = 1.4;
-        const REWARD_TO_RISK = 2.0;
-
-        // Tuned for 180-minute max-hold so TP is reachable before timeout.
-        const stopLossPips = Math.max(ATR_STOP_MULTIPLIER * atr, minStopFromSpread);
+        const stopLossPips = 1.5 * atr;
         const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
-        const takeProfitPips = REWARD_TO_RISK * stopLossPips;
+        const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
-        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+        // Keep legacy behavior from profitable version: pass SL distance into sizing.
+        const size = this.positionSize(this.accountBalance, price, stopLossPips, symbol);
         console.log(`[calculateTradeParameters] Size: ${size}`);
 
         // Trailing stop parameters
@@ -185,7 +180,7 @@ class TradingService {
         // Margin required = (size * entryPrice) / leverage
         const marginRequired = (size * priceForMargin) / leverage;
         // Use available margin from account (set by updateAccountInfo)
-        const availableMargin = Number.isFinite(this.availableMargin) && this.availableMargin > 0 ? this.availableMargin : this.accountBalance;
+        const availableMargin = this.accountBalance;
         // Ensure margin for one trade is no more than 1/5 of available
         const maxMarginPerTrade = availableMargin / 5;
         if (marginRequired > maxMarginPerTrade) {
