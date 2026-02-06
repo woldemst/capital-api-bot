@@ -146,7 +146,8 @@ class TradingService {
         }
 
         const atr = await this.calculateATR(symbol);
-        const stopLossPips = 1.5 * atr;
+        const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
+        const stopLossPips = Math.max(1.5 * atr, spread * 2);
         const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
