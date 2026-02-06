@@ -133,17 +133,38 @@ export const getOpenPositions = async () =>
         return response.data;
     });
 
+function parseHistoricalTimestampMs(value) {
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const direct = Date.parse(raw);
+    if (!Number.isNaN(direct)) return direct;
+
+    const normalized = raw.replace(/\//g, "-").replace(" ", "T");
+    const withZone = /[zZ]|[+\-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`;
+    const parsed = Date.parse(withZone);
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
 export async function getHistorical(symbol, resolution, count) {
     // logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
     const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
     return {
-        prices: response.data.prices.map((p) => ({
-            close: p.closePrice?.bid,
-            high: p.highPrice?.bid,
-            low: p.lowPrice?.bid,
-            open: p.openPrice?.bid,
-            timestamp: new Date(p.snapshotTime).toLocaleString(), // Human readable timestamp
-        })),
+        prices: response.data.prices.map((p) => {
+            const rawTimestamp = p.snapshotTimeUTC ?? p.snapshotTime ?? null;
+            const timestampMs = parseHistoricalTimestampMs(rawTimestamp);
+            return {
+                close: p.closePrice?.bid,
+                high: p.highPrice?.bid,
+                low: p.lowPrice?.bid,
+                open: p.openPrice?.bid,
+                timestamp: rawTimestamp,
+                timestampMs,
+            };
+        }),
     };
 }
 

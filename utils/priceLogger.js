@@ -47,6 +47,8 @@ class PriceLogger {
         this.historyLength = 200;
         this.requestDelayMs = 250;
         this.symbolDelayMs = 1000;
+        this.higherIndicatorsCache = new Map();
+        this.lastHigherBucketBySymbol = new Map();
     }
 
     sleep(ms) {
@@ -56,6 +58,20 @@ class PriceLogger {
     toNumber(value) {
         const num = typeof value === "number" ? value : Number(value);
         return Number.isFinite(num) ? num : null;
+    }
+
+    getM15BucketMs(date = new Date()) {
+        const d = new Date(date);
+        d.setUTCSeconds(0, 0);
+        const minute = d.getUTCMinutes();
+        d.setUTCMinutes(Math.floor(minute / 15) * 15);
+        return d.getTime();
+    }
+
+    shouldRefreshHigherIndicators(symbol, now = new Date()) {
+        const bucket = this.getM15BucketMs(now);
+        const last = this.lastHigherBucketBySymbol.get(symbol);
+        return bucket !== last;
     }
 
     getActiveSessionsUtc() {
@@ -79,7 +95,7 @@ class PriceLogger {
         return sessions;
     }
 
-    async fetchAllCandles(symbol, timeframes, historyLength) {
+    async fetchHigherCandles(symbol, timeframes, historyLength) {
         try {
             const d1Data = await getHistorical(symbol, timeframes.D1, historyLength);
             await this.sleep(this.requestDelayMs);
@@ -88,45 +104,88 @@ class PriceLogger {
             const h1Data = await getHistorical(symbol, timeframes.H1, historyLength);
             await this.sleep(this.requestDelayMs);
             const m15Data = await getHistorical(symbol, timeframes.M15, historyLength);
-            await this.sleep(this.requestDelayMs);
-            const m5Data = await getHistorical(symbol, timeframes.M5, historyLength);
-            await this.sleep(this.requestDelayMs);
-            const m1Data = await getHistorical(symbol, timeframes.M1, historyLength);
-            return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
+            return { d1Data, h4Data, h1Data, m15Data };
         } catch (error) {
-            logger.warn(`[PriceLogger] Candle fetch failed for ${symbol}: ${error.message}`);
+            logger.warn(`[PriceLogger] Higher-timeframe candle fetch failed for ${symbol}: ${error.message}`);
             return {};
         }
     }
 
-    async buildIndicatorsSnapshot(symbol) {
-        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.historyLength);
+    async fetchEntryCandles(symbol, timeframes, historyLength) {
+        try {
+            const m5Data = await getHistorical(symbol, timeframes.M5, historyLength);
+            await this.sleep(this.requestDelayMs);
+            const m1Data = await getHistorical(symbol, timeframes.M1, historyLength);
+            return { m5Data, m1Data };
+        } catch (error) {
+            logger.warn(`[PriceLogger] Entry-timeframe candle fetch failed for ${symbol}: ${error.message}`);
+            return {};
+        }
+    }
+
+    async buildHigherIndicators(symbol) {
+        const { d1Data, h4Data, h1Data, m15Data } = await this.fetchHigherCandles(symbol, TIMEFRAMES, this.historyLength);
         const d1Candles = d1Data?.prices?.slice(-this.historyLength) || [];
         const h4Candles = h4Data?.prices?.slice(-this.historyLength) || [];
         const h1Candles = h1Data?.prices?.slice(-this.historyLength) || [];
         const m15Candles = m15Data?.prices?.slice(-this.historyLength) || [];
-        const m5Candles = m5Data?.prices?.slice(-this.historyLength) || [];
-        const m1Candles = m1Data?.prices?.slice(-this.historyLength) || [];
 
-        if (!d1Candles.length || !h4Candles.length || !h1Candles.length || !m15Candles.length || !m5Candles.length || !m1Candles.length) {
+        if (!d1Candles.length || !h4Candles.length || !h1Candles.length || !m15Candles.length) {
             return null;
         }
 
-        const indicators = {
+        return {
             d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
             h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
+        };
+    }
+
+    async buildEntryIndicators(symbol) {
+        const { m5Data, m1Data } = await this.fetchEntryCandles(symbol, TIMEFRAMES, this.historyLength);
+        const m5Candles = m5Data?.prices?.slice(-this.historyLength) || [];
+        const m1Candles = m1Data?.prices?.slice(-this.historyLength) || [];
+
+        if (!m5Candles.length || !m1Candles.length) {
+            return null;
+        }
+
+        return {
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
             m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
         };
-
-        return compactIndicators(indicators);
     }
 
-    async logSnapshot(symbol) {
+    async buildIndicatorsSnapshot(symbol, options = {}) {
+        const now = options?.now instanceof Date ? options.now : new Date();
+        const forceHigherRefresh = Boolean(options?.forceHigherRefresh);
+
+        const entryIndicators = await this.buildEntryIndicators(symbol);
+        if (!entryIndicators) return null;
+
+        let higherIndicators = this.higherIndicatorsCache.get(symbol) || null;
+        const shouldRefreshHigher = forceHigherRefresh || this.shouldRefreshHigherIndicators(symbol, now) || !higherIndicators;
+
+        if (shouldRefreshHigher) {
+            const freshHigher = await this.buildHigherIndicators(symbol);
+            if (freshHigher) {
+                higherIndicators = freshHigher;
+                this.higherIndicatorsCache.set(symbol, freshHigher);
+                this.lastHigherBucketBySymbol.set(symbol, this.getM15BucketMs(now));
+            }
+        }
+
+        return compactIndicators({
+            ...(higherIndicators || {}),
+            ...entryIndicators,
+        });
+    }
+
+    async logSnapshot(symbol, options = {}) {
         try {
-            const indicators = await this.buildIndicatorsSnapshot(symbol);
+            const now = options?.now instanceof Date ? options.now : new Date();
+            const indicators = await this.buildIndicatorsSnapshot(symbol, options);
             if (!indicators) {
                 logger.warn(`[PriceLogger] Missing candles/indicators for ${symbol}, skipping snapshot.`);
                 return false;
@@ -162,7 +221,7 @@ class PriceLogger {
 
             const payload = {
                 symbol,
-                timestamp: new Date().toISOString(),
+                timestamp: now.toISOString(),
                 bid,
                 ask,
                 mid,
@@ -181,12 +240,17 @@ class PriceLogger {
         }
     }
 
-    async logSnapshotsForSymbols(symbols = []) {
+    async logSnapshotsForSymbols(symbols = [], options = {}) {
         if (!Array.isArray(symbols) || symbols.length === 0) return;
+        const now = options?.now instanceof Date ? options.now : new Date();
         for (const symbol of symbols) {
-            await this.logSnapshot(symbol);
+            await this.logSnapshot(symbol, { ...options, now });
             await this.sleep(this.symbolDelayMs);
         }
+    }
+
+    async logOneMinuteSnapshotsForSymbols(symbols = []) {
+        return this.logSnapshotsForSymbols(symbols);
     }
 }
 

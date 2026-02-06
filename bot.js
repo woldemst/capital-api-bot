@@ -2,6 +2,7 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTok
 import { DEV, PROD, ANALYSIS, SESSIONS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
+import Strategy from "./strategies/strategies.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import { priceLogger } from "./utils/priceLogger.js";
 import logger from "./utils/logger.js";
@@ -10,8 +11,18 @@ import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals } fro
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
+const ENTRY_CHECK_REPEAT_MS = 60 * 1000;
+const M15_SETUP_TTL_MS = 15 * 60 * 1000;
 const MONITOR_INTERVAL_MS = 60 * 1000;
 const SYMBOL_ANALYSIS_DELAY_MS = 2000;
+const TIMEFRAME_MINUTES = {
+    D1: 24 * 60,
+    H4: 4 * 60,
+    H1: 60,
+    M15: 15,
+    M5: 5,
+    M1: 1,
+};
 const DEFAULT_TRADING_WINDOWS = [
     // London: 08:15–16:45
     { start: 8 * 60 + 15, end: 16 * 60 + 45 },
@@ -39,6 +50,8 @@ class TradingBot {
         this.monitorInProgress = false; // Prevent overlapping monitor runs
         this.priceMonitorInterval = null;
         this.priceMonitorInProgress = false;
+        this.entryTriggerInterval = null;
+        this.entryTriggerInProgress = false;
         this.dealIdMonitorInterval = null; // Interval handle for dealId monitor
         this.dealIdMonitorInProgress = false; // Prevent overlapping dealId checks
         this.maxCandleHistory = 200; // Rolling window size for indicators
@@ -47,6 +60,8 @@ class TradingBot {
         this.openedBrockerDealIds = [];
         this.activeSymbols = this.getActiveSymbols();
         this.positionGuard = null;
+        this.activeM15Setups = new Map();
+        this.lastProcessedM15Candle = new Map();
 
         this.allowedTradingWindows = DEFAULT_TRADING_WINDOWS;
     }
@@ -79,6 +94,7 @@ class TradingBot {
             // this.setupWebSocket(tokens);
             this.startSessionPing();
             this.startAnalysisInterval();
+            this.startEntryTriggerInterval();
             this.startMonitorOpenTrades();
             this.startPriceMonitor();
             this.isRunning = true;
@@ -163,6 +179,32 @@ class TradingBot {
         }, interval);
     }
 
+    startEntryTriggerInterval() {
+        const interval = this.getEntryInitialIntervalMs();
+        logger.info(`[EntryTrigger] Starting (every ${this.getEntryRepeatIntervalMs()}ms) after ${interval}ms`);
+        if (this.entryTriggerInterval) clearInterval(this.entryTriggerInterval);
+
+        const run = async () => {
+            if (this.entryTriggerInProgress) {
+                logger.warn("[EntryTrigger] Previous tick still running; skipping.");
+                return;
+            }
+            this.entryTriggerInProgress = true;
+            try {
+                await this.triggerEntriesFromActiveSetups();
+            } catch (error) {
+                logger.error("[EntryTrigger] Error:", error);
+            } finally {
+                this.entryTriggerInProgress = false;
+            }
+        };
+
+        setTimeout(() => {
+            run();
+            this.entryTriggerInterval = setInterval(run, this.getEntryRepeatIntervalMs());
+        }, interval);
+    }
+
     // Updates account balance, margin, and open trades in the trading service.
     async updateAccountInfo() {
         let retries = 3;
@@ -231,17 +273,87 @@ class TradingBot {
         return combined;
     }
 
-    // Analyzes all symbols in the trading universe.
-
+    // Build M15 setup (higher-timeframe signal) only on new closed M15 candles.
     async analyzeAllSymbols() {
         this.activeSymbols = this.getActiveSymbols();
         for (const symbol of this.activeSymbols) {
             if (!(await this.isTradingAllowed(symbol))) {
-                logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
+                logger.info("[Bot] Skipping setup analysis: Trading not allowed at this time.");
                 continue;
             }
-            await this.analyzeSymbol(symbol);
+            await this.refreshM15Setup(symbol);
             await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
+        }
+    }
+
+    async triggerEntriesFromActiveSetups() {
+        if (!this.activeM15Setups.size) return;
+
+        for (const [symbol, setup] of this.activeM15Setups.entries()) {
+            if (!(await this.isTradingAllowed(symbol))) continue;
+
+            if (Number.isFinite(setup?.expiresAtMs) && Date.now() > setup.expiresAtMs) {
+                logger.info(`[EntryTrigger] ${symbol}: setup expired (${setup.setupKey}).`);
+                this.activeM15Setups.delete(symbol);
+                continue;
+            }
+
+            await this.tryTriggerEntry(symbol, setup);
+            await this.delay(300);
+        }
+    }
+
+    async tryTriggerEntry(symbol, setup) {
+        const { m5Data, m1Data } = await this.fetchEntryCandles(symbol, TIMEFRAMES, this.maxCandleHistory);
+        if (!m5Data?.prices || !m1Data?.prices) {
+            logger.warn(`[EntryTrigger] Missing M5/M1 candles for ${symbol}, skipping.`);
+            return;
+        }
+
+        const m5Candles = this.getClosedCandles(m5Data.prices, TIMEFRAME_MINUTES.M5);
+        const m1Candles = this.getClosedCandles(m1Data.prices, TIMEFRAME_MINUTES.M1);
+        if (!m5Candles.length || !m1Candles.length) {
+            logger.warn(`[EntryTrigger] No closed M5/M1 candles for ${symbol}, skipping.`);
+            return;
+        }
+
+        const [m5, m1] = await Promise.all([calcIndicators(m5Candles, symbol, TIMEFRAMES.M5), calcIndicators(m1Candles, symbol, TIMEFRAMES.M1)]);
+        if (!m5 || !m1) {
+            logger.warn(`[EntryTrigger] Indicator build failed for ${symbol}, skipping.`);
+            return;
+        }
+
+        const indicators = {
+            ...setup.higherIndicators,
+            m5,
+            m1,
+        };
+
+        const { bid, ask } = await this.getBidAsk(symbol);
+        if (!this.isValidPricePair(bid, ask)) {
+            logger.warn(`[EntryTrigger] Skipping ${symbol}: invalid bid/ask (bid=${bid}, ask=${ask})`);
+            return;
+        }
+
+        const result = await tradingService.processPrice({
+            symbol,
+            indicators,
+            candles: { m5Candles, m1Candles },
+            bid,
+            ask,
+            directionFilter: setup.direction,
+        });
+
+        if (!result) return;
+
+        if (result.signal) {
+            logger.info(`[EntryTrigger] ${symbol}: consumed setup ${setup.setupKey} with signal ${result.signal} (${result.reason || "signal"}).`);
+            this.activeM15Setups.delete(symbol);
+            return;
+        }
+
+        if (result.reason === "symbol_already_traded") {
+            this.activeM15Setups.delete(symbol);
         }
     }
 
@@ -263,64 +375,85 @@ class TradingBot {
         }
     }
 
-    // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
-    async analyzeSymbol(symbol) {
-        logger.info(`\n\n=== Processing ${symbol} ===`);
+    async fetchEntryCandles(symbol, timeframes, historyLength) {
+        try {
+            const [m5Data, m1Data] = await Promise.all([
+                getHistorical(symbol, timeframes.M5, historyLength),
+                getHistorical(symbol, timeframes.M1, historyLength),
+            ]);
+            return { m5Data, m1Data };
+        } catch (error) {
+            logger.error(`[CandleFetch] Error fetching entry candles for ${symbol}: ${error.message}`);
+            return {};
+        }
+    }
+
+    async refreshM15Setup(symbol) {
+        logger.info(`\n\n=== Setup Scan ${symbol} ===`);
 
         const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.maxCandleHistory);
 
         if (!d1Data?.prices || !h4Data?.prices || !h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
-            logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
+            logger.warn(`[Setup] Missing candle data for ${symbol}, skipping setup scan.`);
             return;
         }
 
         this.storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data });
-        const { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles } = this.getCandleHistory(symbol);
+        const { d1Candles, h4Candles, h1Candles, m15Candles } = this.getCandleHistory(symbol);
 
-        if (!d1Candles || !h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
-            logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( D1: ${!!d1Candles}, H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`,
-            );
+        const d1Closed = this.getClosedCandles(d1Candles, TIMEFRAME_MINUTES.D1);
+        const h4Closed = this.getClosedCandles(h4Candles, TIMEFRAME_MINUTES.H4);
+        const h1Closed = this.getClosedCandles(h1Candles, TIMEFRAME_MINUTES.H1);
+        const m15Closed = this.getClosedCandles(m15Candles, TIMEFRAME_MINUTES.M15);
+
+        if (!d1Closed.length || !h4Closed.length || !h1Closed.length || !m15Closed.length) {
+            logger.warn(`[Setup] Missing closed candles for ${symbol}, skipping setup scan.`);
             return;
         }
 
-        const indicators = await this.buildIndicatorsSnapshot({
-            symbol,
-            d1Candles,
-            h4Candles,
-            h1Candles,
-            m15Candles,
-            m5Candles,
-            m1Candles,
-        });
-
-        const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
-
-        // --- Fetch real-time bid/ask ---
-        const { bid, ask } = await this.getBidAsk(symbol);
-
-        // console.log(marketDetails);
-
-        // Guard: skip analysis if we don't have valid prices yet
-        if (!this.isValidPricePair(bid, ask)) {
-            logger.warn(`[bot.js][analyzeSymbol] Skipping ${symbol}: invalid bid/ask (bid=${bid}, ask=${ask})`);
+        const lastClosedM15 = m15Closed[m15Closed.length - 1];
+        const setupKey = this.buildCandleKey(symbol, lastClosedM15);
+        if (!setupKey) {
+            logger.warn(`[Setup] Could not build setup key for ${symbol}, skipping.`);
             return;
         }
 
-        // Pass bid/ask to trading logic
-        await tradingService.processPrice({
-            symbol,
-            indicators,
-            candles,
-            bid,
-            ask,
-        });
+        const lastProcessed = this.lastProcessedM15Candle.get(symbol);
+        if (lastProcessed === setupKey) {
+            logger.debug(`[Setup] ${symbol}: candle already processed (${setupKey}).`);
+            return;
+        }
+
+        this.lastProcessedM15Candle.set(symbol, setupKey);
+
+        const [d1, h4, h1, m15] = await Promise.all([
+            calcIndicators(d1Closed, symbol, TIMEFRAMES.D1),
+            calcIndicators(h4Closed, symbol, TIMEFRAMES.H4),
+            calcIndicators(h1Closed, symbol, TIMEFRAMES.H1),
+            calcIndicators(m15Closed, symbol, TIMEFRAMES.M15),
+        ]);
+
+        const setup = this.buildM15Setup(symbol, { d1, h4, h1, m15 }, setupKey, lastClosedM15);
+
+        if (!setup) {
+            logger.info(`[Setup] ${symbol}: no H1/H4 + M15 aligned setup on candle ${setupKey}.`);
+            this.activeM15Setups.delete(symbol);
+            return;
+        }
+
+        this.activeM15Setups.set(symbol, setup);
+        logger.info(`[Setup] ${symbol}: activated ${setup.direction} setup on ${setup.setupKey}.`);
+    }
+
+    async analyzeSymbol(symbol) {
+        return this.refreshM15Setup(symbol);
     }
 
     async shutdown() {
         this.isRunning = false;
         clearInterval(this.analysisInterval);
         clearInterval(this.sessionRefreshInterval);
+        clearInterval(this.entryTriggerInterval);
         clearInterval(this.dealIdMonitorInterval);
         clearInterval(this.priceMonitorInterval);
         if (this.positionGuard?.stop) this.positionGuard.stop();
@@ -328,8 +461,8 @@ class TradingBot {
     }
 
     startPriceMonitor() {
-        const interval = this.getInitialIntervalMs();
-        logger.info(`[PriceMonitor] Starting (every 5 minutes) after ${interval}ms at ${new Date().toISOString()}`);
+        const interval = this.getEntryInitialIntervalMs();
+        logger.info(`[PriceMonitor] Starting (every 1 minute) after ${interval}ms at ${new Date().toISOString()}`);
         if (this.priceMonitorInterval) clearInterval(this.priceMonitorInterval);
 
         const run = async () => {
@@ -339,7 +472,7 @@ class TradingBot {
             }
             this.priceMonitorInProgress = true;
             try {
-                await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
+                await priceLogger.logOneMinuteSnapshotsForSymbols(this.activeSymbols);
             } finally {
                 this.priceMonitorInProgress = false;
             }
@@ -347,7 +480,7 @@ class TradingBot {
 
         setTimeout(() => {
             run();
-            this.priceMonitorInterval = setInterval(run, this.getRepeatIntervalMs());
+            this.priceMonitorInterval = setInterval(run, this.getEntryRepeatIntervalMs());
         }, interval);
     }
 
@@ -404,6 +537,116 @@ class TradingBot {
 
     getRepeatIntervalMs() {
         return DEV.MODE ? DEV.INTERVAL : ANALYSIS_REPEAT_MS;
+    }
+
+    getEntryInitialIntervalMs() {
+        if (DEV.MODE) return DEV.INTERVAL;
+        return this.delayToNextMinuteMs(5000);
+    }
+
+    getEntryRepeatIntervalMs() {
+        return DEV.MODE ? DEV.INTERVAL : ENTRY_CHECK_REPEAT_MS;
+    }
+
+    delayToNextMinuteMs(extraMs = 0) {
+        const now = new Date();
+        return (60 - now.getSeconds()) * 1000 - now.getMilliseconds() + extraMs;
+    }
+
+    toNumber(value) {
+        if (value === undefined || value === null || value === "") return null;
+        const num = typeof value === "number" ? value : Number(value);
+        return Number.isFinite(num) ? num : null;
+    }
+
+    parseTimestampMs(value) {
+        if (typeof value === "number") return value > 1e12 ? value : value * 1000;
+        if (typeof value !== "string") return NaN;
+
+        const trimmed = value.trim();
+        if (!trimmed) return NaN;
+
+        const direct = Date.parse(trimmed);
+        if (!Number.isNaN(direct)) return direct;
+
+        const normalized = trimmed.replace(/\//g, "-").replace(" ", "T");
+        const withZone = /[zZ]|[+\-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`;
+        const parsed = Date.parse(withZone);
+        return Number.isNaN(parsed) ? NaN : parsed;
+    }
+
+    getCandleTimestampMs(candle) {
+        if (!candle || typeof candle !== "object") return NaN;
+
+        const raw = candle.timestampMs ?? candle.timestamp ?? candle.snapshotTimeUTC ?? candle.snapshotTime ?? null;
+        if (raw === null) return NaN;
+
+        if (typeof raw === "number" && Number.isFinite(raw)) return raw > 1e12 ? raw : raw * 1000;
+        return this.parseTimestampMs(String(raw));
+    }
+
+    getClosedCandles(candles, timeframeMinutes) {
+        if (!Array.isArray(candles) || !candles.length) return [];
+        if (candles.length === 1) return candles.slice();
+
+        const last = candles[candles.length - 1];
+        const lastTs = this.getCandleTimestampMs(last);
+        const tfMs = timeframeMinutes * 60 * 1000;
+
+        if (!Number.isFinite(lastTs)) {
+            // Conservative fallback: drop the newest bar when timestamp cannot be trusted.
+            return candles.slice(0, -1);
+        }
+
+        const isClosed = Date.now() >= lastTs + tfMs;
+        return isClosed ? candles.slice() : candles.slice(0, -1);
+    }
+
+    buildCandleKey(symbol, candle) {
+        const ts = this.getCandleTimestampMs(candle);
+        if (Number.isFinite(ts)) return `${symbol}:${ts}`;
+
+        const open = this.toNumber(candle?.open);
+        const high = this.toNumber(candle?.high);
+        const low = this.toNumber(candle?.low);
+        const close = this.toNumber(candle?.close);
+        if ([open, high, low, close].some((v) => v === null)) return null;
+
+        return `${symbol}:${open}:${high}:${low}:${close}`;
+    }
+
+    buildM15Setup(symbol, indicators, setupKey, lastClosedM15) {
+        const { d1, h4, h1, m15 } = indicators || {};
+        if (!h1 || !h4 || !m15) return null;
+
+        const trendBias = Strategy.trendBias(h1, h4);
+        const h1Trend = Strategy.pickTrend(h1);
+        const h4Trend = Strategy.pickTrend(h4);
+        const m15Trend = Strategy.pickTrend(m15);
+
+        if (trendBias === "neutral" || m15Trend === "neutral") return null;
+
+        const direction = trendBias === "bullish" ? "BUY" : "SELL";
+        const aligned = (direction === "BUY" && m15Trend === "bullish") || (direction === "SELL" && m15Trend === "bearish");
+        if (!aligned) return null;
+
+        const closedTs = this.getCandleTimestampMs(lastClosedM15);
+        const expiresAtMs = Number.isFinite(closedTs) ? closedTs + M15_SETUP_TTL_MS : Date.now() + M15_SETUP_TTL_MS;
+
+        return {
+            symbol,
+            setupKey,
+            direction,
+            activatedAt: new Date().toISOString(),
+            expiresAtMs,
+            context: {
+                trendBias,
+                h1Trend,
+                h4Trend,
+                m15Trend,
+            },
+            higherIndicators: { d1, h4, h1, m15 },
+        };
     }
 
     async getBidAsk(symbol) {
