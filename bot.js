@@ -325,12 +325,14 @@ class TradingBot {
         }
 
         // Pass bid/ask to trading logic
-        await tradingService.processPrice({
+        const symbolTradingService = tradingService.getServiceForSymbol(symbol);
+        await symbolTradingService.processPrice({
             symbol,
             indicators,
             candles,
             bid,
             ask,
+            timeframes: TIMEFRAMES,
         });
     }
 
