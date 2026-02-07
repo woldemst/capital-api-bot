@@ -1,8 +1,8 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import { calcIndicators } from "./indicators/indicators.js";
+import { calcIndicators, tradeWatchIndicators } from "./indicators/indicators.js";
 import { priceLogger } from "./utils/priceLogger.js";
 import logger from "./utils/logger.js";
 import { isNewsTime } from "./utils/newsChecker.js";
@@ -46,8 +46,7 @@ class TradingBot {
         this.openedPositions = {}; // Track opened positions
 
         this.openedBrockerDealIds = [];
-        this.activeSymbols = this.getActiveSymbols();
-        this.positionGuard = null;
+        this.activeSymbols = [];
 
         this.allowedTradingWindows = DEFAULT_TRADING_WINDOWS;
     }
@@ -191,31 +190,43 @@ class TradingBot {
         }
     }
 
-    getActiveSymbols() {
+    isCryptoSymbol(symbol) {
+        return CRYPTO_SYMBOLS.includes(symbol);
+    }
+
+    parseMinutes(hhmm) {
+        if (typeof hhmm !== "string") return NaN;
+        const [hh, mm] = hhmm.split(":").map((p) => Number(p));
+        if (!Number.isInteger(hh) || !Number.isInteger(mm)) return NaN;
+        return hh * 60 + mm;
+    }
+
+    inSession(currentMinutes, startMinutes, endMinutes, { inclusiveEnd = false } = {}) {
+        if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
+        if (startMinutes < endMinutes) {
+            return currentMinutes >= startMinutes && (inclusiveEnd ? currentMinutes <= endMinutes : currentMinutes < endMinutes);
+        }
+        return currentMinutes >= startMinutes || (inclusiveEnd ? currentMinutes <= endMinutes : currentMinutes < endMinutes); // Overnight session
+    }
+
+    async getActiveSymbols() {
         // SESSIONS in config.js are defined in UTC (see config.js), so we must evaluate in UTC as well.
         const now = new Date();
         const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-
-        const parseMinutes = (hhmm) => {
-            if (typeof hhmm !== "string") return NaN;
-            const [hh, mm] = hhmm.split(":").map((p) => Number(p));
-            if (!Number.isInteger(hh) || !Number.isInteger(mm)) return NaN;
-            return hh * 60 + mm;
-        };
-
-        const inSession = (startMinutes, endMinutes) => {
-            if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
-            if (startMinutes < endMinutes) return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-            return currentMinutes >= startMinutes || currentMinutes < endMinutes; // Overnight session
-        };
 
         const activeSessions = [];
         const activeSessionNames = [];
 
         for (const [name, session] of Object.entries(SESSIONS)) {
-            const startMinutes = parseMinutes(session?.START);
-            const endMinutes = parseMinutes(session?.END);
-            if (!inSession(startMinutes, endMinutes)) continue;
+            if (name === "CRYPTO") {
+                activeSessions.push(session?.SYMBOLS || []);
+                activeSessionNames.push(name);
+                continue;
+            }
+
+            const startMinutes = this.parseMinutes(session?.START);
+            const endMinutes = this.parseMinutes(session?.END);
+            if (!this.inSession(currentMinutes, startMinutes, endMinutes)) continue;
 
             activeSessions.push(session.SYMBOLS);
             activeSessionNames.push(name);
@@ -224,23 +235,28 @@ class TradingBot {
         // Combine symbols from all active sessions, remove duplicates
         const combinedSet = new Set();
         activeSessions.forEach((arr) => (arr || []).forEach((symbol) => combinedSet.add(symbol)));
-        const combined = [...combinedSet];
+        const sessionSymbols = [...combinedSet];
+        const tradableSymbols = [];
+
+        for (const symbol of sessionSymbols) {
+            if (await this.isTradingAllowed(symbol, { now, currentMinutes })) {
+                tradableSymbols.push(symbol);
+            }
+        }
 
         logger.info(
-            `[Bot] Active sessions (UTC): ${activeSessions.length} (${activeSessionNames.length ? activeSessionNames.join(", ") : "none"}), Trading symbols: ${combined.join(", ")}`,
+            `[Bot] Active sessions (UTC): ${activeSessions.length} (${activeSessionNames.length ? activeSessionNames.join(", ") : "none"}), Tradable symbols: ${
+                tradableSymbols.length ? tradableSymbols.join(", ") : "none"
+            }`,
         );
-        return combined;
+        return tradableSymbols;
     }
 
     // Analyzes all symbols in the trading universe.
 
     async analyzeAllSymbols() {
-        this.activeSymbols = this.getActiveSymbols();
+        this.activeSymbols = await this.getActiveSymbols();
         for (const symbol of this.activeSymbols) {
-            if (!(await this.isTradingAllowed(symbol))) {
-                logger.info("[Bot] Skipping analysis: Trading not allowed at this time.");
-                continue;
-            }
             await this.analyzeSymbol(symbol);
             await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
         }
@@ -340,7 +356,7 @@ class TradingBot {
             }
             this.priceMonitorInProgress = true;
             try {
-                await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
+                // await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
             } finally {
                 this.priceMonitorInProgress = false;
             }
@@ -462,38 +478,32 @@ class TradingBot {
         };
     }
 
-    async isTradingAllowed(symbol) {
-        const now = new Date();
+    async isTradingAllowed(symbol, context = {}) {
+        const now = context.now instanceof Date ? context.now : new Date();
+        const currentMinutes = Number.isFinite(context.currentMinutes) ? context.currentMinutes : now.getUTCHours() * 60 + now.getUTCMinutes();
+        const isCrypto = this.isCryptoSymbol(symbol);
 
-        const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+        // Crypto symbols trade 24/7, so no weekday/session-window restrictions.
+        if (isCrypto) {
+            return true;
+        }
+
+        const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
         if (day === 0 || day === 6) {
-            logger.info("[Bot] Trading blocked: Weekend.");
             return false;
         }
 
-        // Session windows in this bot are defined in UTC.
-        const hour = now.getUTCHours();
-        const minute = now.getUTCMinutes();
-        const currentMinutes = hour * 60 + minute;
-
         // Check if current time is inside any allowed window
         const allowed = this.allowedTradingWindows.some((win) => {
-            if (win.start <= win.end) {
-                return currentMinutes >= win.start && currentMinutes <= win.end;
-            } else {
-                // Overnight session (e.g. Sydney)
-                return currentMinutes >= win.start || currentMinutes <= win.end;
-            }
+            return this.inSession(currentMinutes, win.start, win.end, { inclusiveEnd: true });
         });
 
         if (!allowed) {
-            logger.info("[Bot] Trading blocked: Not in allowed session window (first/last 15 min excluded).");
             return false;
         }
 
         const newsBlocked = await isNewsTime(symbol);
         if (newsBlocked) {
-            logger.info("[Bot] Trading blocked: High-impact news event detected.");
             return false;
         }
         return true;

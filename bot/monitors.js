@@ -5,7 +5,7 @@ import tradingService from "../services/trading.js";
 import { tradeTracker } from "../utils/tradeLogger.js";
 import logger from "../utils/logger.js";
 
-const DEFAULT_MONITOR_INTERVAL_MS = 60 * 1000;
+const DEFAULT_MONITOR_INTERVAL_MS = 20 * 1000;
 
 export async function startMonitorOpenTrades(bot, intervalMs = DEFAULT_MONITOR_INTERVAL_MS) {
     logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
