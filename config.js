@@ -1,106 +1,83 @@
 import "dotenv/config";
 
+const ENV = process.env;
+
 // API Configuration
 export const API = {
-    KEY: process.env.API_KEY,
-    IDENTIFIER: process.env.API_IDENTIFIER,
-    PASSWORD: process.env.API_PASSWORD,
-    BASE_URL: `${process.env.BASE_URL}${process.env.API_PATH}`,
-    WS_URL: process.env.WS_BASE_URL,
+    KEY: ENV.API_KEY,
+    IDENTIFIER: ENV.API_IDENTIFIER,
+    PASSWORD: ENV.API_PASSWORD,
+    BASE_URL: `${ENV.BASE_URL}${ENV.API_PATH}`,
+    WS_URL: ENV.WS_BASE_URL,
 };
 
 // Trading Sessions (UTC times)
+const SESSION_SYMBOLS = {
+    LONDON: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+    NY: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+    SYDNEY: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
+    TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
+};
+
 export const SESSIONS = {
     LONDON: {
         START: "08:00",
         END: "17:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+        SYMBOLS: SESSION_SYMBOLS.LONDON,
     },
     NY: {
         START: "13:00",
         END: "21:00",
-        SYMBOLS: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+        SYMBOLS: SESSION_SYMBOLS.NY,
     },
     SYDNEY: {
         START: "22:00",
         END: "07:00",
-        SYMBOLS: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
+        SYMBOLS: SESSION_SYMBOLS.SYDNEY,
     },
     TOKYO: {
         START: "00:00",
         END: "09:00",
-        SYMBOLS: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
+        SYMBOLS: SESSION_SYMBOLS.TOKYO,
     },
-    CRYPTO: ["BTC/USD", "ETH/USD"],
 };
 
 export const RISK = {
-    LEVERAGE: 30,
     PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
-    BUFFER_PIPS: 2, // Buffer for SL calculation
-    RR: 2, // 2:1 reward-to-risk ratio
-    MAX_HOLD_TIME: 30, // Maximum hold time in minutes
-    PARTIAL_TP_ENABLED: true,
-    PARTIAL_TP_PERCENTAGE: 0.5,
-    MAX_SLIPPAGE_PIPS: 2,
-    MAX_DAILY_LOSS: 0.04, // 4% daily loss limit
-    MAX_DAILY_PROFIT: 0.06, // 6% daily profit limit
-    ATR_MULTIPLIER: 1.8, // ATR multiplier for SL calculation
-    RISK_REWARD: 2, // Reward-to-risk ratio
-    REQUIRED_SCORE: 6, // Must have total score or more
+    MAX_HOLD_TIME: 180, // Maximum hold time in minutes
 };
 
-export const STRATEGY = {
-    // Which strategy to run in live trading. Options supported by services/trading.js:
-    // "green_red" | "bollinger_mean_reversion"
-    // MODE: "bollinger_mean_reversion",
-    MODE: "green_red",
+const TIMEFRAMES = {
+    D1: "DAY", // Daily trend direction
+    H4: "HOUR_4", // 4-hour trend direction
+    H1: "HOUR", // 1-hour entry timeframe
+    M15: "MINUTE_15", // 15-minute entry timeframe
+    M5: "MINUTE_5", // 5-minute entry timeframe
+    M1: "MINUTE", // 1-minute entry timeframe
+};
 
-    // Settings for Bollinger Mean Reversion strategy (M5 entry, optional M15 filter)
-    BOLLINGER_MR: {
-        RSI_BUY_MAX: 30,
-        RSI_SELL_MIN: 70,
-        ADX_MAX: 28.0,
-        USE_EMA200_FILTER: false,
-        USE_M15_TREND_FILTER: false,
+const EMA = {
+    TREND: {
+        FAST: 50,
+        SLOW: 200,
+    },
+    ENTRY: {
+        FAST: 9,
+        SLOW: 21,
     },
 };
 
 // Technical Analysis Configuration
 export const ANALYSIS = {
-    TIMEFRAMES: {
-        D1: "DAY", // Daily trend direction
-        H4: "HOUR_4", // 4-hour trend direction
-        H1: "HOUR", // 1-hour entry timeframe
-        M15: "MINUTE_15", // 15-minute entry timeframe
-        M5: "MINUTE_5", // 5-minute entry timeframe
-        M1: "MINUTE", // 1-minute entry timeframe
-    },
-
-    EMA: {
-        TREND: {
-            FAST: 50,
-            SLOW: 200,
-        },
-        ENTRY: {
-            FAST: 9,
-            SLOW: 21,
-        },
-    },
-
-    RSI: {
-        PERIOD: 14,
-        OVERBOUGHT: 70,
-        OVERSOLD: 30,
-        EXIT_OVERBOUGHT: 65, // Earlier exit
-        EXIT_OVERSOLD: 35,
-    },
+    TIMEFRAMES,
+    SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
+    EMA,
 };
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 15 seconds between analyses
+    INTERVAL: 15 * 1000, // 60 seconds between analyses
     MODE: false,
 };
 

@@ -27,6 +27,26 @@ function listLogFiles() {
         .map((file) => path.join(LOG_DIR, file));
 }
 
+function compactIndicators(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return snapshot;
+    const indicatorKeys = ["close", "lastClose", "ema9", "ema20", "ema50", "price_vs_ema9", "bb", "rsi", "rsiPrev", "adx", "atr", "macd", "macdHistPrev", "trend"];
+    const compact = {};
+    for (const [timeframe, data] of Object.entries(snapshot)) {
+        if (!data || typeof data !== "object") {
+            compact[timeframe] = data;
+            continue;
+        }
+        const reduced = {};
+        for (const key of indicatorKeys) {
+            if (Object.prototype.hasOwnProperty.call(data, key)) {
+                reduced[key] = data[key];
+            }
+        }
+        compact[timeframe] = reduced;
+    }
+    return compact;
+}
+
 export function getSymbolLogPath(symbol = "unknown") {
     ensureLogDir();
     return path.join(LOG_DIR, `${sanitizeSymbol(symbol)}.jsonl`);
@@ -87,7 +107,11 @@ function toNumber(value) {
 }
 
 function getPipSize(symbol) {
-    return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
+    return String(symbol || "")
+        .toUpperCase()
+        .includes("JPY")
+        ? 0.01
+        : 0.0001;
 }
 
 export function getTradeEntry(dealId, symbol) {
@@ -114,22 +138,25 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, takeProfit, indicators, timestamp }) {
+export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPrice, stopLoss, takeProfit, indicatorsOnOpening, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
+    const compactOpening = compactIndicators(indicatorsOnOpening);
+    const normalizedOpenReason = openReason === undefined || openReason === null ? "" : String(openReason);
     const payload = {
         dealId,
         symbol,
         signal,
+        openReason: normalizedOpenReason,
         entryPrice,
         stopLoss,
         takeProfit,
-        indicators,
+        indicatorsOnOpening: compactOpening,
         openedAt: timestamp,
         status: "open",
 
         // keep stable schema for later analysis
         closeReason: "",
-        indicatorsClose: null,
+        indicatorsOnClosing: null,
         closePrice: null,
         closedAt: null,
     };
@@ -137,9 +164,10 @@ export function logTradeOpen({ dealId, symbol, signal, entryPrice, stopLoss, tak
     appendLine(logPath, payload);
 }
 
-export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicators, timestamp }) {
+export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicatorsOnClosing, timestamp }) {
     const normalizedReason = normalizeCloseReason(closeReason);
     const closedAt = timestamp;
+    const compactClosing = compactIndicators(indicatorsOnClosing);
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
@@ -152,24 +180,17 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
             const finalReason = shouldUseNormalized ? normalizedReason : existingReason || normalizedReason || "unknown";
 
             const hasClosePrice = closePrice !== undefined && closePrice !== null && closePrice !== "";
-            const nextClosePrice = hasClosePrice ? closePrice : entry.closePrice ?? null;
-
-            const incoming = indicators ?? entry.indicatorsClose ?? null;
-            const indicatorsClose = incoming && typeof incoming === "object" ? { ...incoming } : incoming;
-
-            // Always ensure price exists if we know it
-            if (indicatorsClose && typeof indicatorsClose === "object" && hasClosePrice) {
-                indicatorsClose.price = nextClosePrice;
-            }
+            const nextClosePrice = hasClosePrice ? closePrice : (entry.closePrice ?? null);
+            const nextIndicatorsOnClosing = compactClosing ?? entry.indicatorsOnClosing ?? null;
 
             return {
                 ...entry,
                 openedAt: openedTimestamp,
                 status: "closed",
                 closeReason: finalReason,
-                closedAt: closedAt ?? entry.closedAt ?? null,
+                closedAt: closedAt ?? entry.closedAt,
                 closePrice: nextClosePrice,
-                indicatorsClose: indicatorsClose ?? null,
+                indicatorsOnClosing: nextIndicatorsOnClosing,
             };
         });
 
@@ -297,25 +318,41 @@ class TradeTracker {
                 // If symbol wasn't mapped (e.g., after restart), fallback to the symbol stored in the log entry
                 if (!symbol) symbol = entry?.symbol ? String(entry.symbol) : null;
 
-                const closePrice = await this.getClosePrice(symbol, entry);
                 const existingReason = entry?.closeReason && String(entry.closeReason).trim() ? String(entry.closeReason) : "";
-                const inferredReason = existingReason || this.inferCloseReason(entry, { closePrice, symbol });
+                let closePrice = entry?.closePrice ?? null;
 
-                logger.info("[Reconcile] Close snapshot", { dealId: id, symbol, closePrice, source: "market_snapshot" });
+                if (closePrice === null) {
+                    closePrice = await this.getClosePrice(symbol, entry);
+                }
+
+                const inferredReason = this.inferCloseReason(entry, {
+                    closePrice,
+                    symbol,
+                    source: closePrice !== null ? "market_snapshot" : "unknown",
+                });
+                const finalReason = existingReason && existingReason !== "unknown" ? existingReason : inferredReason || "unknown";
+
+                const closePriceSource = entry?.closePrice !== null && entry?.closePrice !== undefined ? "existing_log" : closePrice !== null ? "market_snapshot" : "unknown";
+                logger.info("[Reconcile] Close snapshot", {
+                    dealId: id,
+                    symbol,
+                    closePrice,
+                    source: closePriceSource,
+                });
                 logger.info("[Reconcile] Close reason", {
                     dealId: id,
-                    reason: inferredReason,
-                    source: existingReason ? "existing_log" : "no_broker_data",
+                    reason: finalReason,
+                    source: existingReason ? "existing_log" : "unknown",
                 });
 
                 // Compute REAL close indicators snapshot (current candles at closing time)
-                const indicatorsClose = await this.getCloseIndicators(symbol);
+                const indicatorsOnClosing = await this.getCloseIndicators(symbol);
 
                 const updated = logTradeClose({
                     symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
-                    closeReason: inferredReason,
-                    indicators: indicatorsClose,
+                    closeReason: finalReason,
+                    indicatorsOnClosing,
                     closePrice: closePrice ?? null,
                     timestamp: new Date().toISOString(),
                 });
@@ -352,27 +389,18 @@ class TradeTracker {
 
     inferCloseReason(entry, closeInfo = null) {
         if (!entry) return "unknown";
-        const raw =
-            closeInfo?.reason ??
-            closeInfo?.status ??
-            closeInfo?.dealStatus ??
-            closeInfo?.result ??
-            closeInfo?.message ??
-            "";
+        const raw = closeInfo?.reason ?? closeInfo?.status ?? closeInfo?.dealStatus ?? closeInfo?.result ?? closeInfo?.message ?? "";
         const normalized = normalizeCloseReason(raw);
         if (normalized && normalized !== "unknown") return normalized;
+        if (closeInfo?.source === "market_snapshot") return normalized || "unknown";
 
         const closePrice = toNumber(
-            closeInfo?.closePrice ??
-                closeInfo?.closeLevel ??
-                closeInfo?.level ??
-                closeInfo?.price ??
-                entry?.closePrice ??
-                entry?.closeLevel ??
-                entry?.level
+            closeInfo?.closePrice ?? closeInfo?.closeLevel ?? closeInfo?.level ?? closeInfo?.price ?? entry?.closePrice ?? entry?.closeLevel ?? entry?.level,
         );
         const stopLoss = toNumber(entry?.stopLoss ?? entry?.stopLevel ?? closeInfo?.stopLoss ?? closeInfo?.stopLevel);
-        const takeProfit = toNumber(entry?.takeProfit ?? entry?.limitLevel ?? entry?.profitLevel ?? closeInfo?.takeProfit ?? closeInfo?.limitLevel ?? closeInfo?.profitLevel);
+        const takeProfit = toNumber(
+            entry?.takeProfit ?? entry?.limitLevel ?? entry?.profitLevel ?? closeInfo?.takeProfit ?? closeInfo?.limitLevel ?? closeInfo?.profitLevel,
+        );
 
         if (closePrice === null || (stopLoss === null && takeProfit === null)) return normalized || "unknown";
 

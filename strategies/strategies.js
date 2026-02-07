@@ -1,171 +1,221 @@
-import { STRATEGY } from "../config.js";
 class Strategy {
     constructor() {}
 
-    // ------------------------------------------------------------
-    //     Strategy A: Bollinger Mean-Reversion (M5) + Filters
-    // ------------------------------------------------------------
-    getSignalBollingerMeanReversion({ symbol, indicators, candles, bid, ask }) {
-        const { m5, m15 } = indicators;
-
-        const m5Candles = candles?.m5Candles;
-        if (m5Candles.length < 3) {
-            return { signal: null, reason: "insufficient_m5_candles", context: {} };
+    generateSignal({ indicators, bid, ask }) {
+        if (!indicators) {
+            return { signal: null, reason: "no_indicators", context: {} };
         }
 
-        // last CLOSED candles
-        const prev = m5Candles[m5Candles.length - 3];
-        const last = m5Candles[m5Candles.length - 2];
-        if (!prev || !last) return { signal: null, reason: "missing_prev_last", context: {} };
+        const { d1, h4, h1, m15, m5, m1 } = indicators;
+        const d1Trend = this.pickTrend(d1);
+        const h4Trend = this.pickTrend(h4);
+        const h1Trend = this.pickTrend(h1);
+        const m15Trend = this.pickTrend(m15);
+        const m5Trend = this.pickTrend(m5);
 
-        // Align indicators with the last closed candle (not the still-forming candle).
-        const bb = m5.bbSeries[m5.bbSeries.length - 2];
-        const rsi = m5.rsiSeries[m5.rsiSeries.length - 2];
+        const h1Rsi = this.rsi(h1);
+        const m15Rsi = this.rsi(m15);
+        const m5Rsi = this.rsi(m5);
+        const m1Rsi = this.rsi(m1);
 
-        const adx = m5?.adx.adx;
-        const ema200 = m5?.ema200;
+        const m15Adx = this.adx(m15);
 
-        if (!bb || !Number.isFinite(bb.lower) || !Number.isFinite(bb.upper) || !Number.isFinite(bb.middle)) {
-            return { signal: null, reason: "missing_bb", context: { last, prev } };
-        }
-        if (!Number.isFinite(rsi) || !Number.isFinite(adx)) {
-            return { signal: null, reason: "missing_rsi_adx", context: { last, prev, bb } };
-        }
+        const m5Pullback = this.priceVsEma9(m5);
 
-        // Tunables (env overrides)
-        const mrConfig = STRATEGY?.BOLLINGER_MR;
-        const rsiBuyMax = mrConfig.RSI_BUY_MAX;
-        const rsiSellMin = mrConfig?.RSI_SELL_MIN;
-        const adxMax = mrConfig?.ADX_MAX;
-        const useEma200Filter = mrConfig?.USE_EMA200_FILTER;
-        const useM15TrendFilter = mrConfig?.USE_M15_TREND_FILTER;
+        const m15Bb = m15?.bb?.pb;
+        const m5Bb = m5?.bb?.pb;
+        const m1Bb = m1?.bb?.pb;
 
-        // Avoid strong trends
-        console.log(`ADX: ${adx}, ADX Max: ${adxMax}`);
+        const m15Macd = this.macdHist(m15);
+        const m5Macd = this.macdHist(m5);
 
-        if (adx >= adxMax) {
-            return { signal: null, reason: "adx_too_high", context: { last, prev, adx, adxMax } };
-        }
+        const momentumUp = this.allNumbers(m15Macd, m5Macd) && (m15Macd > 0 || m5Macd > 0);
+        const momentumDown = this.allNumbers(m15Macd, m5Macd) && m15Macd < 0 && m5Macd < 0;
 
-        // Optional M15 trend filter (avoid fading strong HTF trend)
-        if (useM15TrendFilter && m15) {
-            const m15Trend = this.pickTrend(m15);
-            if (m15Trend === "bullish" && last.close >= bb.upper) {
-                return { signal: null, reason: "m15_bull_avoid_top_fade", context: { last, prev, m15Trend } };
-            }
-            if (m15Trend === "bearish" && last.close <= bb.lower) {
-                return { signal: null, reason: "m15_bear_avoid_bottom_fade", context: { last, prev, m15Trend } };
-            }
-        }
+        const buyTrendAligned = this.countTrendVotes([d1Trend, h4Trend, h1Trend], "bullish") >= 2;
+        const sellTrendAligned = h1Trend === "bearish";
 
-        // BUY conditions
-        if (last.low <= bb.lower && rsi <= rsiBuyMax) {
-            if (useEma200Filter && last.close <= ema200) {
-                return { signal: null, reason: "ema200_filter_block_buy", context: { last, prev, ema200 } };
-            }
+        const buyChecks = {
+            pullback: this.isNumber(m5Pullback) && m5Pullback <= 0,
+            rsiBand: this.isNumber(m15Rsi) && m15Rsi >= 42 && m15Rsi <= 55,
+            microRsi: this.isNumber(m1Rsi) && m1Rsi <= 52,
+            bbBand: this.isNumber(m5Bb) && m5Bb >= 0.2 && m5Bb <= 0.8,
+            microBb: this.isNumber(m1Bb) && m1Bb <= 0.9,
+            adxBand: this.isNumber(m15Adx) && m15Adx >= 8 && m15Adx <= 28,
+            momentum: momentumUp,
+        };
 
+        const sellChecks = {
+            pullback: this.isNumber(m5Pullback) && m5Pullback >= -0.0001,
+            rsiBand: this.isNumber(m15Rsi) && m15Rsi >= 42 && m15Rsi <= 55,
+            microRsi: this.isNumber(m1Rsi) && m1Rsi >= 48,
+            bbBand: this.isNumber(m5Bb) && m5Bb >= 0.35 && m5Bb <= 0.75,
+            microBb: this.isNumber(m1Bb) && m1Bb >= 0.55,
+            adxBand: this.isNumber(m15Adx) && m15Adx >= 10 && m15Adx <= 28,
+            momentum: momentumDown,
+        };
+
+        const buyScore = this.scoreChecks(buyChecks);
+        const sellScore = this.scoreChecks(sellChecks);
+
+        const BUY_SCORE_THRESHOLD = 5;
+        const SELL_SCORE_THRESHOLD = 5;
+
+        if (buyTrendAligned && buyScore >= BUY_SCORE_THRESHOLD) {
             return {
                 signal: "BUY",
-                reason: "bb_mean_reversion_buy",
-                // TP target: mean (middle band)
-                context: { last, prev, tpTarget: bb.middle, bb, rsi, adx },
+                reason: "trend_pullback",
+                context: {
+                    d1Trend,
+                    h1Trend,
+                    h4Trend,
+                    m15Trend,
+                    m5Trend,
+                    buyTrendAligned,
+                    buyScore,
+                    buyChecks,
+                    m15Rsi,
+                    m1Rsi,
+                    m1Bb,
+                    m15Adx,
+                    m5Pullback,
+                    m15Macd,
+                    m5Macd,
+                },
             };
         }
 
-        // SELL conditions
-        if (last.high >= bb.upper && rsi >= rsiSellMin) {
-            if (useEma200Filter && last.close >= ema200) {
-                return { signal: null, reason: "ema200_filter_block_sell", context: { last, prev, ema200 } };
-            }
-
+        if (sellTrendAligned && sellScore >= SELL_SCORE_THRESHOLD) {
             return {
                 signal: "SELL",
-                reason: "bb_mean_reversion_sell",
-                context: { last, prev, tpTarget: bb.middle, bb, rsi, adx },
+                reason: "trend_pullback",
+                context: {
+                    d1Trend,
+                    h1Trend,
+                    h4Trend,
+                    m15Trend,
+                    m5Trend,
+                    sellTrendAligned,
+                    sellScore,
+                    sellChecks,
+                    m15Rsi,
+                    m1Rsi,
+                    m1Bb,
+                    m15Adx,
+                    m5Pullback,
+                    m15Macd,
+                    m5Macd,
+                },
             };
         }
 
-        return { signal: null, reason: "no_signal", context: { last, prev, bb, rsi, adx } };
+        return {
+            signal: null,
+            reason: "score_below_threshold",
+            context: {
+                d1Trend,
+                h1Trend,
+                h4Trend,
+                m15Trend,
+                m5Trend,
+                buyTrendAligned,
+                sellTrendAligned,
+                h1Rsi,
+                m15Rsi,
+                m5Rsi,
+                m1Rsi,
+                m15Bb,
+                m5Bb,
+                m1Bb,
+                m15Adx,
+                buyScore,
+                sellScore,
+            },
+        };
     }
 
-    // ------------------------------------------------------------
-    //                       PRICE ACTION PATTERN | "GREEN RED"
-    // ------------------------------------------------------------
-    getSignalGreenRed({ indicators, candles }) {
-        const { m5, m15 } = indicators;
-        const m5Candles = candles?.m5Candles ?? [];
-        const m15Candles = candles?.m15Candles ?? [];
-
-        if (m5Candles.length < 3) {
-            return { signal: null, reason: "insufficient_m5_candles", context: {} };
-        }
-        if (m15Candles.length < 3) {
-            return { signal: null, reason: "insufficient_m15_candles", context: {} };
-        }
-
-        // Use the last CLOSED candles (avoid the still-forming candle at the end)
-        const m5Prev = m5Candles[m5Candles.length - 3];
-        const m5Last = m5Candles[m5Candles.length - 2];
-        if (!m5Prev || !m5Last) return { signal: null, reason: "missing_m5_closed", context: {} };
-
-        const adx = m5?.adx?.adx;
-        const m5Signal = this.greenRedCandlePattern(m5Prev, m5Last);
-        const m5Trend = this.pickTrend(m5);
-        const m15Trend = this.pickTrend(m15);
-        const trendsAligned = m5Trend === m15Trend && (m5Trend === "bullish" || m5Trend === "bearish");
-
-        if (Number.isFinite(adx) && adx >= 28) {
-            return { signal: null, reason: "adx_too_high", context: { last: m5Last, prev: m5Prev, adx } };
-        }
-
-        if (trendsAligned && m5Signal === m5Trend) {
-            const signal = m5Trend === "bullish" ? "BUY" : "SELL";
-            return { signal, reason: "green_red_pattern", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, adx } };
-        }
-
-        return { signal: null, reason: "no_signal", context: { last: m5Last, prev: m5Prev, m5Trend, m15Trend, m5Signal, adx } };
+    isNumber(value) {
+        return typeof value === "number" && Number.isFinite(value);
     }
 
-    greenRedCandlePattern(prev, last) {
-        if (!prev || !last) return false;
+    allNumbers(...values) {
+        return values.every((value) => this.isNumber(value));
+    }
 
-        const isBull = (c) => c.close > c.open;
-        const isBear = (c) => c.close < c.open;
+    countTrendVotes(trends, side) {
+        if (!Array.isArray(trends)) return 0;
+        return trends.reduce((count, trend) => count + (trend === side ? 1 : 0), 0);
+    }
 
-        // --- Candle body strength check ---
-        const body = Math.abs(last.close - last.open);
-        const range = last.high - last.low;
-        const strong = range > 0 && body / range >= 0.3;
+    scoreChecks(checks) {
+        if (!checks || typeof checks !== "object") return 0;
+        return Object.values(checks).reduce((score, passed) => score + (passed ? 1 : 0), 0);
+    }
 
-        if (isBear(prev) && isBull(last) && strong) return "bullish";
-        if (isBull(prev) && isBear(last) && strong) return "bearish";
+    rsi(indicators) {
+        const rsi = indicators?.rsi;
+        return this.isNumber(rsi) ? rsi : null;
+    }
 
-        return false;
+    adx(indicators) {
+        const adx = indicators?.adx;
+        if (this.isNumber(adx)) return adx;
+        if (adx && this.isNumber(adx.adx)) return adx.adx;
+        return null;
+    }
+
+    macdHist(indicators) {
+        const hist = indicators?.macd?.histogram;
+        return this.isNumber(hist) ? hist : null;
+    }
+
+    priceVsEma9(indicators) {
+        const direct = indicators?.price_vs_ema9;
+        if (this.isNumber(direct)) return direct;
+        const price = indicators?.close ?? indicators?.lastClose;
+        const ema9 = indicators?.ema9;
+        if (this.isNumber(price) && this.isNumber(ema9) && ema9 !== 0) return (price - ema9) / ema9;
+        return null;
+    }
+
+    trendBias(h1, h4) {
+        const h1Trend = this.pickTrend(h1);
+        const h4Trend = this.pickTrend(h4);
+        if (h1Trend === h4Trend) return h1Trend;
+        if (h1Trend === "neutral") return h4Trend;
+        if (h4Trend === "neutral") return h1Trend;
+        return "neutral";
     }
 
     pickTrend(indicator) {
-        const { ema20, ema50, emaFast, emaSlow, ema9, ema21, trend } = indicator;
+        if (!indicator || typeof indicator !== "object") return "neutral";
+        const { ema20, ema50, trend } = indicator;
 
-        if (Number.isFinite(ema20) && Number.isFinite(ema50)) {
-            if (ema20 > ema50) return "bullish";
-            if (ema20 < ema50) return "bearish";
-        }
-
-        if (Number.isFinite(emaFast) && Number.isFinite(emaSlow)) {
-            if (emaFast > emaSlow) return "bullish";
-            if (emaFast < emaSlow) return "bearish";
-        }
-
-        if (Number.isFinite(ema9) && Number.isFinite(ema21)) {
-            if (ema9 > ema21) return "bullish";
-            if (ema9 < ema21) return "bearish";
-        }
-
-        if (trend === "bullish" || trend === "bearish") {
-            return trend;
-        }
+        if (ema20 > ema50) return "bullish";
+        if (ema20 < ema50) return "bearish";
+        if (trend === "bullish" || trend === "bearish") return trend;
 
         return "neutral";
+    }
+
+    slowTrend(ind) {
+        const fast = this.isNumber(ind?.emaFastTrend) ? ind.emaFastTrend : ind?.emaFast;
+        const slow = this.isNumber(ind?.emaSlowTrend) ? ind.emaSlowTrend : ind?.emaSlow;
+        if (this.isNumber(fast) && this.isNumber(slow)) {
+            if (fast > slow) return "bullish";
+            if (fast < slow) return "bearish";
+        }
+        return "neutral";
+    }
+
+    bbTouchLower(ind, bid) {
+        const lower = ind?.bb?.lower;
+        return this.isNumber(lower) && this.isNumber(bid) && bid <= lower;
+    }
+
+    bbTouchUpper(ind, ask) {
+        const upper = ind?.bb?.upper;
+        return this.isNumber(upper) && this.isNumber(ask) && ask >= upper;
     }
 }
 
