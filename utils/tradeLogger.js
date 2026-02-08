@@ -29,7 +29,28 @@ function listLogFiles() {
 
 function compactIndicators(snapshot) {
     if (!snapshot || typeof snapshot !== "object") return snapshot;
-    const indicatorKeys = ["close", "lastClose", "ema9", "ema20", "ema50", "price_vs_ema9", "bb", "rsi", "rsiPrev", "adx", "atr", "macd", "macdHistPrev", "trend"];
+    const indicatorKeys = [
+        "close",
+        "lastClose",
+        "ema9",
+        "ema20",
+        "ema50",
+        "price_vs_ema9",
+        "bb",
+        "rsi",
+        "rsiPrev",
+        "adx",
+        "adxValue",
+        "pdi",
+        "mdi",
+        "atr",
+        "atrPrev",
+        "macd",
+        "macdHist",
+        "macdHistPrev",
+        "macdHistDelta",
+        "trend",
+    ];
     const compact = {};
     for (const [timeframe, data] of Object.entries(snapshot)) {
         if (!data || typeof data !== "object") {
@@ -197,6 +218,40 @@ export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicat
         if (updated) return true;
     }
 
+    return false;
+}
+
+export function logTradeManagementEvent({
+    dealId,
+    symbol,
+    action,
+    reasonCodes = [],
+    metrics = {},
+    indicatorsSnapshot = null,
+    timestamp = new Date().toISOString(),
+}) {
+    const compactSnapshot = compactIndicators(indicatorsSnapshot);
+    const event = {
+        ts: timestamp,
+        action: action || "NO_ACTION",
+        reasonCodes: Array.isArray(reasonCodes) ? reasonCodes : [],
+        metrics,
+        indicators: compactSnapshot,
+    };
+
+    const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
+    const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
+
+    for (const logPath of candidates) {
+        const updated = updateEntry(logPath, dealId, (entry) => {
+            const events = Array.isArray(entry.managementEvents) ? entry.managementEvents : [];
+            return {
+                ...entry,
+                managementEvents: [...events, event],
+            };
+        });
+        if (updated) return true;
+    }
     return false;
 }
 

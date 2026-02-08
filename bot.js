@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, LIVE_MANAGEMENT } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators, tradeWatchIndicators } from "./indicators/indicators.js";
@@ -10,7 +10,7 @@ import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals } fro
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
-const MONITOR_INTERVAL_MS = 60 * 1000;
+const MONITOR_INTERVAL_MS = LIVE_MANAGEMENT.LOOP_MS;
 const PRICE_MONITOR_REPEAT_MS = 60 * 1000;
 const SYMBOL_ANALYSIS_DELAY_MS = 2000;
 const DEFAULT_TRADING_WINDOWS = [
@@ -36,6 +36,7 @@ class TradingBot {
         this.retryDelay = 30000; // 30 seconds
         this.latestCandles = {}; // Store latest candles for each symbol
         this.candleHistory = {}; // symbol -> array of candles
+        this.analysisInProgress = false;
         this.monitorInterval = null; // Add monitor interval for open trades
         this.monitorInProgress = false; // Prevent overlapping monitor runs
         this.priceMonitorInterval = null;
@@ -143,12 +144,19 @@ class TradingBot {
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
         const runAnalysis = async () => {
+            if (this.analysisInProgress) {
+                logger.warn("[Bot] Previous analysis cycle still running; skipping this tick.");
+                return;
+            }
+
+            this.analysisInProgress = true;
             try {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
-                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
+            } finally {
+                this.analysisInProgress = false;
             }
         };
 
@@ -252,13 +260,23 @@ class TradingBot {
         return tradableSymbols;
     }
 
-    // Analyzes all symbols in the trading universe.
+    // Phase A: scan all active symbols and collect standardized MTF data.
+    async scanActiveSymbols(symbols = []) {
+        const scans = [];
+        for (const symbol of symbols) {
+            const scan = await this.scanSymbol(symbol);
+            if (scan) scans.push(scan);
+            await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
+        }
+        return scans;
+    }
 
+    // Analyzes all symbols in the trading universe.
     async analyzeAllSymbols() {
         this.activeSymbols = await this.getActiveSymbols();
-        for (const symbol of this.activeSymbols) {
-            await this.analyzeSymbol(symbol);
-            await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
+        const scans = await this.scanActiveSymbols(this.activeSymbols);
+        for (const scan of scans) {
+            await this.analyzeSymbol(scan);
         }
     }
 
@@ -280,25 +298,29 @@ class TradingBot {
         }
     }
 
-    // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
-    async analyzeSymbol(symbol) {
-        logger.info(`\n\n=== Processing ${symbol} ===`);
+    buildBarsMeta(candles = [], timeframe) {
+        const lastBar = Array.isArray(candles) && candles.length ? candles[candles.length - 1] : null;
+        return {
+            timeframe,
+            count: Array.isArray(candles) ? candles.length : 0,
+            lastTimestamp: lastBar?.timestamp ?? lastBar?.snapshotTime ?? null,
+        };
+    }
 
+    async scanSymbol(symbol) {
+        logger.info(`\n\n=== Processing ${symbol} ===`);
         const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.maxCandleHistory);
 
         if (!d1Data?.prices || !h4Data?.prices || !h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
-            logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
-            return;
+            logger.warn(`[Scan] Missing candle data for ${symbol}, skipping.`);
+            return null;
         }
 
         this.storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data });
         const { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles } = this.getCandleHistory(symbol);
-
         if (!d1Candles || !h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
-            logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( D1: ${!!d1Candles}, H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`,
-            );
-            return;
+            logger.warn(`[Scan] Incomplete history for ${symbol}, skipping.`);
+            return null;
         }
 
         const indicators = await this.buildIndicatorsSnapshot({
@@ -311,7 +333,33 @@ class TradingBot {
             m1Candles,
         });
 
-        const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
+        return {
+            symbol,
+            tf: {
+                D1: { indicators: indicators.d1, barsMeta: this.buildBarsMeta(d1Candles, "D1") },
+                H4: { indicators: indicators.h4, barsMeta: this.buildBarsMeta(h4Candles, "H4") },
+                H1: { indicators: indicators.h1, barsMeta: this.buildBarsMeta(h1Candles, "H1") },
+                M15: { indicators: indicators.m15, barsMeta: this.buildBarsMeta(m15Candles, "M15") },
+                M5: { indicators: indicators.m5, barsMeta: this.buildBarsMeta(m5Candles, "M5") },
+                M1: { indicators: indicators.m1, barsMeta: this.buildBarsMeta(m1Candles, "M1") },
+            },
+            candles: { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles },
+        };
+    }
+
+    // Phases B/C/D execution based on one pre-scanned symbol packet.
+    async analyzeSymbol(scan) {
+        if (!scan?.symbol || !scan?.tf) return;
+        const { symbol } = scan;
+        const indicators = {
+            d1: scan.tf?.D1?.indicators,
+            h4: scan.tf?.H4?.indicators,
+            h1: scan.tf?.H1?.indicators,
+            m15: scan.tf?.M15?.indicators,
+            m5: scan.tf?.M5?.indicators,
+            m1: scan.tf?.M1?.indicators,
+        };
+        const candles = scan.candles || {};
 
         // --- Fetch real-time bid/ask ---
         const { bid, ask } = await this.getBidAsk(symbol);
@@ -356,9 +404,13 @@ class TradingBot {
                 logger.warn("[PriceMonitor] Previous tick still running; skipping.");
                 return;
             }
+            if (this.analysisInProgress) {
+                logger.debug("[PriceMonitor] Analysis in progress; skipping snapshot tick.");
+                return;
+            }
             this.priceMonitorInProgress = true;
             try {
-                // await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
+                await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
             } finally {
                 this.priceMonitorInProgress = false;
             }

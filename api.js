@@ -4,6 +4,23 @@ import logger from "./utils/logger.js";
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
+const TOO_MANY_REQUESTS_STATUS = 429;
+const HISTORICAL_MAX_RETRIES = 4;
+const HISTORICAL_BASE_BACKOFF_MS = 350;
+const HISTORICAL_JITTER_MS = 120;
+const HISTORICAL_MIN_GAP_MS = 120;
+
+let historicalRequestChain = Promise.resolve();
+let lastHistoricalRequestAt = 0;
+
+const RESOLUTION_MAP = {
+    M1: "MINUTE",
+    M5: "MINUTE_5",
+    M15: "MINUTE_15",
+    H1: "HOUR",
+    H4: "HOUR_4",
+    D1: "DAY",
+};
 
 export const getHeaders = (includeContentType = false) => {
     const baseHeaders = {
@@ -133,18 +150,81 @@ export const getOpenPositions = async () =>
         return response.data;
     });
 
-export async function getHistorical(symbol, resolution, count) {
-    // logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
-    const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
-    return {
-        prices: response.data.prices.map((p) => ({
-            close: p.closePrice?.bid,
-            high: p.highPrice?.bid,
-            low: p.lowPrice?.bid,
-            open: p.openPrice?.bid,
-            timestamp: new Date(p.snapshotTime).toLocaleString(), // Human readable timestamp
-        })),
+function normalizeResolution(resolution) {
+    const key = String(resolution || "").toUpperCase().trim();
+    return RESOLUTION_MAP[key] || resolution;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTooManyRequests(error) {
+    const status = error?.response?.status;
+    const code = String(error?.response?.data?.errorCode || "").toLowerCase();
+    return status === TOO_MANY_REQUESTS_STATUS || code.includes("too-many.requests");
+}
+
+function getRetryAfterMs(error) {
+    const retryAfter = error?.response?.headers?.["retry-after"];
+    if (!retryAfter) return 0;
+
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+    return 0;
+}
+
+async function enqueueHistoricalRequest(task) {
+    const runner = async () => {
+        const waitMs = Math.max(0, HISTORICAL_MIN_GAP_MS - (Date.now() - lastHistoricalRequestAt));
+        if (waitMs > 0) await sleep(waitMs);
+        lastHistoricalRequestAt = Date.now();
+        return task();
     };
+
+    const queued = historicalRequestChain.then(runner, runner);
+    historicalRequestChain = queued.catch(() => undefined);
+    return queued;
+}
+
+export async function getHistorical(symbol, resolution, count) {
+    const normalizedResolution = normalizeResolution(resolution);
+    const url = `${API.BASE_URL}/prices/${symbol}?resolution=${normalizedResolution}&max=${count}`;
+
+    for (let attempt = 0; attempt <= HISTORICAL_MAX_RETRIES; attempt++) {
+        try {
+            // Queue + small spacing to avoid request bursts from analysis/monitor overlap.
+            const response = await enqueueHistoricalRequest(() => axios.get(url, { headers: getHeaders(true) }));
+            return {
+                prices: response.data.prices.map((p) => ({
+                    close: p.closePrice?.bid,
+                    high: p.highPrice?.bid,
+                    low: p.lowPrice?.bid,
+                    open: p.openPrice?.bid,
+                    timestamp: p.snapshotTime || p.snapshotTimeUTC || null,
+                    snapshotTime: p.snapshotTime || p.snapshotTimeUTC || null,
+                })),
+            };
+        } catch (error) {
+            if (!isTooManyRequests(error) || attempt >= HISTORICAL_MAX_RETRIES) {
+                throw error;
+            }
+
+            const retryAfterMs = getRetryAfterMs(error);
+            const backoffMs = Math.max(
+                retryAfterMs,
+                HISTORICAL_BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.floor(Math.random() * HISTORICAL_JITTER_MS)
+            );
+
+            logger.warn(`[API] 429 on getHistorical(${symbol}, ${normalizedResolution}). Retry ${attempt + 1}/${HISTORICAL_MAX_RETRIES} in ${backoffMs}ms.`);
+            await sleep(backoffMs);
+        }
+    }
+
+    throw new Error(`Failed to fetch historical prices for ${symbol} (${normalizedResolution}).`);
 }
 
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
@@ -284,6 +364,29 @@ export async function closePosition(dealId) {
         return response.data;
     } catch (error) {
         logger.error(`[api.js][API] Failed to close position for dealId: ${dealId}`, error.response?.data || error.message);
+        throw error;
+    }
+}
+
+export async function closePositionPartially({ dealId, direction, size, orderType = "MARKET" }) {
+    try {
+        const payload = {
+            size: Number(size),
+            direction: String(direction || "").toUpperCase(),
+            orderType,
+        };
+
+        logger.info(`[API] Partial close request for ${dealId}:`, payload);
+
+        const response = await axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
+            headers: getHeaders(true),
+            data: payload,
+        });
+
+        logger.info(`[API] Partial close response for ${dealId}:`, response.data);
+        return response.data;
+    } catch (error) {
+        logger.error(`[API] Partial close failed for ${dealId}:`, error.response?.data || error.message);
         throw error;
     }
 }

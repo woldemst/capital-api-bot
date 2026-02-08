@@ -47,14 +47,14 @@ export async function calcIndicators(bars) {
         }),
     );
 
-    const atr = last(
-        ATR.calculate({
-            period: ATR_PERIOD,
-            high: highs,
-            low: lows,
-            close: closes,
-        }),
-    );
+    const atrSeries = ATR.calculate({
+        period: ATR_PERIOD,
+        high: highs,
+        low: lows,
+        close: closes,
+    });
+    const atr = last(atrSeries);
+    const atrPrev = atrSeries.length > 1 ? atrSeries[atrSeries.length - 2] : undefined;
 
     const macdSeries = MACD.calculate({
         ...MACD_CONFIG,
@@ -62,7 +62,16 @@ export async function calcIndicators(bars) {
     });
     const macd = last(macdSeries);
     const macdPrev = macdSeries.length > 1 ? macdSeries[macdSeries.length - 2] : undefined;
+    const macdHist = macd?.histogram;
     const macdHistPrev = macdPrev?.histogram;
+    const macdHistDelta =
+        Number.isFinite(macdHist) && Number.isFinite(macdHistPrev)
+            ? macdHist - macdHistPrev
+            : null;
+
+    const adxValue = Number.isFinite(adx?.adx) ? adx.adx : adx;
+    const pdi = Number.isFinite(adx?.pdi) ? adx.pdi : null;
+    const mdi = Number.isFinite(adx?.mdi) ? adx.mdi : null;
 
     const lastClose = closes[closes.length - 1];
     const price_vs_ema9 = Number.isFinite(lastClose) && Number.isFinite(ema9) && ema9 !== 0 ? (lastClose - ema9) / ema9 : null;
@@ -80,15 +89,20 @@ export async function calcIndicators(bars) {
         rsi,
         rsiPrev,
         adx,
+        adxValue,
+        pdi,
+        mdi,
         atr,
+        atrPrev,
         macd,
+        macdHist,
         macdHistPrev,
+        macdHistDelta,
         trend,
     };
 }
 
 export async function tradeWatchIndicators(bars) {
-
     const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
     const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
     const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);

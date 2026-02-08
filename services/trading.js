@@ -34,6 +34,10 @@ class TradingRouter {
         return this.getServiceForSymbol(position?.symbol).updateTrailingStopIfNeeded(position, indicators);
     }
 
+    async closePartialPosition(position, sizeToClose, label) {
+        return this.getServiceForSymbol(position?.symbol).closePartialPosition(position, sizeToClose, label);
+    }
+
     // Closing logic is shared; use one instance.
     async closePosition(dealId, label) {
         return forexTradingService.closePosition(dealId, label);

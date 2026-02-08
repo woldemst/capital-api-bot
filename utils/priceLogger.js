@@ -20,7 +20,28 @@ function sanitizeSymbol(symbol = "unknown") {
 
 function compactIndicators(snapshot) {
     if (!snapshot || typeof snapshot !== "object") return snapshot;
-    const indicatorKeys = ["close", "lastClose", "ema9", "ema20", "ema50", "price_vs_ema9", "bb", "rsi", "rsiPrev", "adx", "atr", "macd", "macdHistPrev", "trend"];
+    const indicatorKeys = [
+        "close",
+        "lastClose",
+        "ema9",
+        "ema20",
+        "ema50",
+        "price_vs_ema9",
+        "bb",
+        "rsi",
+        "rsiPrev",
+        "adx",
+        "adxValue",
+        "pdi",
+        "mdi",
+        "atr",
+        "atrPrev",
+        "macd",
+        "macdHist",
+        "macdHistPrev",
+        "macdHistDelta",
+        "trend",
+    ];
     const compact = {};
     for (const [timeframe, data] of Object.entries(snapshot)) {
         if (!data || typeof data !== "object") {

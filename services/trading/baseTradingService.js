@@ -1,7 +1,15 @@
-import { placePosition, updateTrailingStop, getDealConfirmation, closePosition as apiClosePosition, getOpenPositions, getHistorical } from "../../api.js";
+import {
+    placePosition,
+    updateTrailingStop,
+    getDealConfirmation,
+    closePosition as apiClosePosition,
+    closePositionPartially,
+    getOpenPositions,
+    getHistorical,
+} from "../../api.js";
 import { RISK } from "../../config.js";
 import logger from "../../utils/logger.js";
-import { logTradeClose, logTradeOpen, tradeTracker } from "../../utils/tradeLogger.js";
+import { logTradeClose, logTradeManagementEvent, logTradeOpen, tradeTracker } from "../../utils/tradeLogger.js";
 import Strategy from "../../strategies/strategies.js";
 
 const { MAX_POSITIONS } = RISK;
@@ -29,6 +37,13 @@ class BaseTradingService {
 
     normalizeDirection(direction) {
         return String(direction || "").toUpperCase();
+    }
+
+    oppositeDirection(direction) {
+        const dir = this.normalizeDirection(direction);
+        if (dir === "BUY") return "SELL";
+        if (dir === "SELL") return "BUY";
+        return null;
     }
 
     toNumber(value) {
@@ -203,7 +218,11 @@ class BaseTradingService {
             const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
             const { signal, reason = "", context = {} } = result;
             if (!signal) {
-                logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
+                const reasonCodes = Array.isArray(context?.reasonCodes) ? context.reasonCodes.filter(Boolean) : [];
+                const regime = context?.regime ? ` | regime=${context.regime}` : "";
+                const bias = context?.bias ? ` | bias=${context.bias}` : "";
+                const codes = reasonCodes.length ? ` | codes=${reasonCodes.join(",")}` : "";
+                logger.debug(`[Signal] ${symbol}: no signal (${reason})${regime}${bias}${codes}`);
                 return;
             }
 
@@ -216,10 +235,10 @@ class BaseTradingService {
 
     async updateTrailingStopIfNeeded(position, indicators) {
         const { dealId, direction, entryPrice, stopLoss, takeProfit, currentPrice, symbol } = position;
-        if (!dealId) return;
+        if (!dealId) return false;
 
         const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
-        if (tpProgress === null || tpProgress < 0.7) return;
+        if (tpProgress === null || tpProgress < 0.7) return false;
 
         const m5 = indicators.m5;
         const m15 = indicators.m15;
@@ -232,35 +251,36 @@ class BaseTradingService {
                 (direction === "SELL" && (m5Trend === "bullish" || m15Trend === "bullish"));
 
             if (broken) {
-                await this.softExitToBreakeven(position);
-                return;
+                return this.softExitToBreakeven(position);
             }
         }
 
         const entry = Number(entryPrice);
         const tp = Number(takeProfit);
         const price = Number(currentPrice);
-        if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(price)) return;
+        if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(price)) return false;
         const tpDist = Math.abs(tp - entry);
-        if (tpDist <= 0) return;
+        if (tpDist <= 0) return false;
 
         const dir = this.normalizeDirection(direction);
         const activation = dir === "BUY" ? entry + tpDist * 0.7 : entry - tpDist * 0.7;
         const activated = (dir === "BUY" && price >= activation) || (dir === "SELL" && price <= activation);
-        if (!activated) return;
+        if (!activated) return false;
 
         const trailDist = tpDist * 0.2;
         const newSL = dir === "BUY" ? price - trailDist : price + trailDist;
         const stop = Number(stopLoss);
         if (Number.isFinite(stop)) {
-            if ((dir === "BUY" && newSL <= stop) || (dir === "SELL" && newSL >= stop)) return;
+            if ((dir === "BUY" && newSL <= stop) || (dir === "SELL" && newSL >= stop)) return false;
         }
 
         try {
             await updateTrailingStop(dealId, price, entry, tp, dir, symbol);
             logger.info(`[Trail] Updated SL -> ${newSL} for ${dealId}`);
+            return true;
         } catch (error) {
             logger.error("[Trail] Error updating trailing stop:", error);
+            return false;
         }
     }
 
@@ -271,13 +291,55 @@ class BaseTradingService {
             const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
             if (tpProgress === null || tpProgress < 0.7) {
                 logger.info(`[SoftExit] Skipped breakeven: TP progress ${(tpProgress ?? 0).toFixed(2)} < 0.70 for ${dealId}`);
-                return;
+                return false;
             }
 
             await updateTrailingStop(dealId, currentPrice, entryPrice, takeProfit, direction, symbol);
             logger.info(`[SoftExit] ${symbol}: misalignment -> moved SL to breakeven for ${dealId}`);
+            return true;
         } catch (error) {
             logger.error("[SoftExit] Error updating SL to breakeven:", error);
+            return false;
+        }
+    }
+
+    async closePartialPosition(position, sizeToClose, label = "partial_close") {
+        const dealId = position?.dealId;
+        const symbol = position?.symbol;
+        const direction = this.normalizeDirection(position?.direction);
+        const opposite = this.oppositeDirection(direction);
+        const openSize = Number(position?.size);
+        const requestedSize = Number(sizeToClose);
+
+        if (!dealId || !opposite || !Number.isFinite(openSize) || !Number.isFinite(requestedSize) || requestedSize <= 0) {
+            logger.warn(`[PartialClose] Invalid partial close request for ${symbol || "unknown"} (${dealId || "no-dealId"}).`);
+            return false;
+        }
+
+        const closeSize = Math.min(requestedSize, openSize);
+        if (!Number.isFinite(closeSize) || closeSize <= 0) return false;
+
+        try {
+            const response = await closePositionPartially({
+                dealId,
+                direction: opposite,
+                size: closeSize,
+                orderType: "MARKET",
+            });
+
+            logTradeManagementEvent({
+                dealId,
+                symbol,
+                action: "PARTIAL_CLOSE",
+                reasonCodes: [label],
+                metrics: { closedSize: closeSize, openSize },
+            });
+
+            logger.info(`[PartialClose] ${symbol} ${dealId}: closed ${closeSize}/${openSize}`);
+            return Boolean(response);
+        } catch (error) {
+            logger.error(`[PartialClose] Failed for ${symbol} ${dealId}:`, error.response?.data || error.message);
+            return false;
         }
     }
 
@@ -312,7 +374,7 @@ class BaseTradingService {
             logger.info(`[ClosePos] Raw close payload for ${dealId}:`, closePayload);
         } catch (error) {
             logger.error(`[ClosePos] Error closing deal ${dealId}:`, error);
-            return;
+            return false;
         }
 
         try {
@@ -355,8 +417,10 @@ class BaseTradingService {
             });
 
             tradeTracker.markDealClosed(dealId);
+            return true;
         } catch (logError) {
             logger.error(`[ClosePos] Failed to log closure for ${dealId}:`, logError);
+            return true;
         }
     }
 }

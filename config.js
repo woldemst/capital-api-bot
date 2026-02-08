@@ -56,12 +56,12 @@ export const RISK = {
 };
 
 const TIMEFRAMES = {
-    D1: "DAY", // Daily trend direction
-    H4: "HOUR_4", // 4-hour trend direction
-    H1: "HOUR", // 1-hour entry timeframe
-    M15: "MINUTE_15", // 15-minute entry timeframe
-    M5: "MINUTE_5", // 5-minute entry timeframe
-    M1: "MINUTE", // 1-minute entry timeframe
+    D1: "D1",
+    H4: "H4",
+    H1: "H1",
+    M15: "M15",
+    M5: "M5",
+    M1: "M1",
 };
 
 const EMA = {
@@ -82,10 +82,67 @@ export const ANALYSIS = {
     EMA,
 };
 
+export const STRATEGY = {
+    REGIME: {
+        TREND_ADX: 25,
+        TRANSITION_ADX: 20,
+        ALLOW_TRANSITION_ENTRIES: true,
+    },
+    MID_TF: {
+        MIN_ATR_PCT: 0.00015,
+        MAX_CONTRADICTION_SCORE: 5,
+        MIN_H1_ADX: 18,
+        MIN_M15_ADX: 20,
+        REQUIRE_DI_ALIGNMENT: true,
+    },
+    ENTRY: {
+        M5_PULLBACK_ATR_MULT: 0.7,
+        M5_PULLBACK_BB_LOWER_MAX: 0.55,
+        M5_PULLBACK_BB_UPPER_MIN: 0.45,
+        M1_RSI_PIVOT: 50,
+        REQUIRE_PULLBACK: true,
+        REQUIRE_M5_MOMENTUM: true,
+        REQUIRE_M1_CONFIRMATION: true,
+        M1_RSI_LONG_MIN: 50,
+        M1_RSI_SHORT_MAX: 50,
+        M5_RSI_LONG_MIN: 48,
+        M5_RSI_SHORT_MAX: 52,
+        MIN_CONFIRMATIONS_TREND: 2,
+        MIN_CONFIRMATIONS_TRANSITION: 3,
+    },
+    BIAS_REVERSION: {
+        ENABLED: true,
+        REQUIRE_PHASE_C_MISALIGNMENT: true,
+        M5_BB_PB_SHORT_MIN: 0.7,
+        M5_BB_PB_LONG_MAX: 0.3,
+        M5_RSI_SHORT_MIN: 55,
+        M5_RSI_LONG_MAX: 45,
+        M1_RSI_SHORT_MIN: 55,
+        M1_RSI_LONG_MAX: 45,
+        REQUIRE_M1_PRICE_E9_CONFIRM: true,
+        REQUIRE_M5_MACD_DELTA_CONFIRM: true,
+    },
+};
+
+export const LIVE_MANAGEMENT = {
+    LOOP_MS: 20 * 1000,
+    PARTIAL_CLOSE_FRACTION: 0.4,
+    PARTIAL_MIN_R: 0.4,
+    PARTIAL_GIVEBACK_PCT: 0.35,
+    PARTIAL_DECAY_COUNT: 3,
+    FULL_CLOSE_AFTER_PARTIAL_DECAY: 4,
+    FULL_CLOSE_AFTER_PARTIAL_MIN_R: 0.1,
+    EARLY_FULL_CLOSE_MIN_R: -0.45,
+    EARLY_FULL_CLOSE_DECAY_COUNT: 2,
+    WEAKENING_ADX_FLOOR: 20,
+    TIGHTEN_SL_MIN_R: 0.5,
+    TIGHTEN_SL_DECAY_COUNT: 2,
+};
+
 // Development overrides for faster testing
 export const DEV = {
     INTERVAL: 15 * 1000, // 60 seconds between analyses
-    MODE: true,
+    MODE: false,
 };
 
 // 1 min

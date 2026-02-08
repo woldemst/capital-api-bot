@@ -86,7 +86,7 @@ class CryptoTradingService extends BaseTradingService {
         if (!Number.isFinite(rawSize) || rawSize <= 0) return 0;
 
         // Crypto margin uses 2:1 leverage.
-        const leverage = 20;
+        const leverage = 2;
         const availableMargin = Number.isFinite(this.availableMargin) && this.availableMargin > 0 ? this.availableMargin : balance;
         const maxMarginPerTrade = availableMargin / 5;
         const marginCappedSize = (maxMarginPerTrade * leverage) / entryPrice;
