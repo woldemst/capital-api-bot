@@ -342,7 +342,6 @@ class TradingBot {
         clearInterval(this.sessionRefreshInterval);
         clearInterval(this.dealIdMonitorInterval);
         clearInterval(this.priceMonitorInterval);
-        if (this.positionGuard?.stop) this.positionGuard.stop();
         webSocketService.disconnect();
     }
 
@@ -409,13 +408,6 @@ class TradingBot {
         }
     }
 
-    async closeAllPositions() {
-        if (!this.positionGuard?.closeAllPositions) {
-            logger.warn("[Bot] PositionGuard disabled; closeAllPositions skipped.");
-            return false;
-        }
-        return this.positionGuard.closeAllPositions();
-    }
 
     getInitialIntervalMs() {
         return DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;

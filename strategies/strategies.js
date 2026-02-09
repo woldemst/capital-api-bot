@@ -1,3 +1,7 @@
+const BIAS_ADX_MIN = 18;
+const RSI_OB = 70;
+const RSI_OS = 30;
+
 class Strategy {
     constructor() {}
 
@@ -130,6 +134,99 @@ class Strategy {
                 m15Adx,
                 buyScore,
                 sellScore,
+            },
+        };
+    }
+
+    // 3-stage multi-timeframe pipeline: bias trend filter, setup pullback filter, then entry trigger.
+    // Variants: H4_H1_M15 (default) and H1_M15_M5.
+    generateSignal3Stage({ indicators, bid, ask, variant }) {
+        if (!indicators) {
+            return { signal: null, reason: "no_indicators", context: {} };
+        }
+
+        const variants = {
+            H4_H1_M15: { biasTF: "h4", setupTF: "h1", entryTF: "m15" },
+            H1_M15_M5: { biasTF: "h1", setupTF: "m15", entryTF: "m5" },
+        };
+        const selectedVariant = variants[variant] ? variant : "H4_H1_M15";
+        const { biasTF, setupTF, entryTF } = variants[selectedVariant];
+
+        const biasIndicators = indicators?.[biasTF];
+        const setupIndicators = indicators?.[setupTF];
+        const entryIndicators = indicators?.[entryTF];
+
+        const biasTrend = this.pickTrend(biasIndicators);
+        const biasAdx = this.adx(biasIndicators);
+        const setupPullbackValue = this.priceVsEma9(setupIndicators);
+        const setupRsi = this.rsi(setupIndicators);
+        const entryMacdHist = this.macdHist(entryIndicators);
+        const entryPullbackValue = this.priceVsEma9(entryIndicators);
+
+        const direction = biasTrend === "bullish" ? "BUY" : biasTrend === "bearish" ? "SELL" : null;
+        const biasStrengthOk = !this.isNumber(biasAdx) || biasAdx >= BIAS_ADX_MIN;
+        const biasOk = direction !== null && biasStrengthOk;
+
+        const baseContext = {
+            variant: selectedVariant,
+            biasTF,
+            setupTF,
+            entryTF,
+            biasTrend,
+            biasAdx,
+            setupPullbackValue,
+            setupRsi,
+            entryMacdHist,
+            entryPullbackValue,
+            gateStates: { biasOk, setupOk: false, entryOk: false },
+        };
+
+        if (!biasOk) {
+            return { signal: null, reason: "bias_blocked", context: baseContext };
+        }
+
+        const isBuy = direction === "BUY";
+        const setupPullbackOk =
+            this.isNumber(setupPullbackValue) &&
+            (isBuy ? setupPullbackValue <= 0 : setupPullbackValue >= 0);
+        const setupRsiOk = this.isNumber(setupRsi) && (isBuy ? setupRsi < RSI_OB : setupRsi > RSI_OS);
+        const setupOk = setupPullbackOk && setupRsiOk;
+
+        if (!setupOk) {
+            return {
+                signal: null,
+                reason: "setup_blocked",
+                context: {
+                    ...baseContext,
+                    gateStates: { biasOk, setupOk, entryOk: false },
+                },
+            };
+        }
+
+        const entryMacdOk =
+            this.isNumber(entryMacdHist) && (isBuy ? entryMacdHist > 0 : entryMacdHist < 0);
+        const entryPriceReclaimOk =
+            this.isNumber(entryPullbackValue) &&
+            (isBuy ? entryPullbackValue >= 0 : entryPullbackValue <= 0);
+        const entryOk = entryMacdOk && entryPriceReclaimOk;
+
+        if (!entryOk) {
+            return {
+                signal: null,
+                reason: "entry_blocked",
+                context: {
+                    ...baseContext,
+                    gateStates: { biasOk, setupOk, entryOk },
+                },
+            };
+        }
+
+        return {
+            signal: direction,
+            reason: "three_stage_confirmed",
+            context: {
+                ...baseContext,
+                gateStates: { biasOk, setupOk, entryOk },
             },
         };
     }

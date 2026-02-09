@@ -88,7 +88,6 @@ export async function calcIndicators(bars) {
 }
 
 export async function tradeWatchIndicators(bars) {
-
     const closes = bars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
     const highs = bars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
     const lows = bars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);

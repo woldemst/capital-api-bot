@@ -200,7 +200,8 @@ class BaseTradingService {
                 return;
             }
 
-            const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
+            // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
+            const result = Strategy.generateSignal3Stage({ indicators, bid, ask, candles });
             const { signal, reason = "", context = {} } = result;
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
