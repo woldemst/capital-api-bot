@@ -190,6 +190,7 @@ class Strategy {
             this.isNumber(setupPullbackValue) &&
             (isBuy ? setupPullbackValue <= 0 : setupPullbackValue >= 0);
         const setupRsiOk = this.isNumber(setupRsi) && (isBuy ? setupRsi < RSI_OB : setupRsi > RSI_OS);
+        
         const setupOk = setupPullbackOk && setupRsiOk;
 
         if (!setupOk) {

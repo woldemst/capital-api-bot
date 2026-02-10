@@ -199,26 +199,31 @@ class BaseTradingService {
                 logger.debug(`[ProcessPrice] ${symbol} already in market.`);
                 return;
             }
-
             // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-            const result_1 = Strategy.generateSignal3Stage({ indicators, bid, ask, variant: "H4_H1_M15" });
-            const { signal: signal_1, reason: reason_1 = "", context: context_1 = {} } = result_1;
-            if (!signal_1) {
-                logger.debug(`[Signal] ${symbol}: no signal (${reason_1})`);
-                return;
-            } else {
-                logger.info(`[Signal] ${symbol}: ${signal_1}`);
-                await this.executeTrade(symbol, signal_1, bid, ask, indicators, reason_1, context_1, timeframes);
+            const primary = Strategy.generateSignal3Stage({ indicators, bid, ask, variant: "H4_H1_M15" });
+
+            let { signal, reason = "", context = {} } = primary;
+
+            // Fallback to secondary signal if primary is not generated
+            if (!signal) {
+                logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
+                const fallback = Strategy.generateSignal3Stage({ indicators, bid, ask, variant: "H1_M15_M5" });
+                signal = fallback.signal;
+                reason = fallback.reason || "";
+                context = fallback.context || {};
             }
-            const result_2 = Strategy.generateSignal3Stage({ indicators, bid, ask, variant: "H1_M15_M5" });
-            const { signal: signal_2, reason: reason_2 = "", context: context_2 = {} } = result_2;
-            if (!signal_2) {
-                logger.debug(`[Signal] ${symbol}: no signal (${reason_2})`);
+
+            if (!signal) {
+                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason})`);
                 return;
-            } else {
-                logger.info(`[Signal] ${symbol}: ${signal_2}`);
-                await this.executeTrade(symbol, signal_2, bid, ask, indicators, reason_2, context_2, timeframes);
             }
+            // Re-check just placing
+            if (this.openTrades.length >= MAX_POSITIONS) return;
+            if (this.isSymbolTraded(symbol)) return;
+
+            logger.info(`[Signal] ${symbol}: ${signal}`);
+
+            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes);
         } catch (error) {
             logger.error("[ProcessPrice] Error:", error);
         }
