@@ -50,7 +50,7 @@ export const SESSIONS = {
 };
 
 export const RISK = {
-    PER_TRADE: 0.02, // 2% risk per trade
+    PER_TRADE: 0.01, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     MAX_HOLD_TIME: 180, // Maximum hold time in minutes
 };

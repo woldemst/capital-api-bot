@@ -2,24 +2,20 @@ import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTok
 import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
-import { calcIndicators, tradeWatchIndicators } from "./indicators/indicators.js";
-import { priceLogger } from "./utils/priceLogger.js";
+import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
 import { isNewsTime } from "./utils/newsChecker.js";
-import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals } from "./bot/monitors.js";
+import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals, startPriceMonitor } from "./bot/monitors.js";
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
 const MONITOR_INTERVAL_MS = 60 * 1000;
-const PRICE_MONITOR_REPEAT_MS = 60 * 1000;
-const SYMBOL_ANALYSIS_DELAY_MS = 2000;
 const DEFAULT_TRADING_WINDOWS = [
     // London: 08:15–16:45
     { start: 8 * 60 + 15, end: 16 * 60 + 45 },
     // NY: 13:15–20:45
     { start: 13 * 60 + 15, end: 20 * 60 + 45 },
-    // Sydney: 22:15–6:45 (overnight, so split into two ranges)
-    { start: 22 * 60 + 15, end: 23 * 60 + 59 },
+    // Sydney: but from 00:00–6:45 (overnight, so split into two ranges)
     { start: 0, end: 6 * 60 + 45 },
     // Tokyo: 0:15–8:45
     { start: 0 * 60 + 15, end: 8 * 60 + 45 },
@@ -76,7 +72,7 @@ class TradingBot {
 
     async startLiveTrading(tokens) {
         try {
-            // this.setupWebSocket(tokens);
+            // this.startWebSocket(tokens);
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMonitorOpenTrades();
@@ -88,46 +84,7 @@ class TradingBot {
         }
     }
 
-    // WebSocket connection is just for  5, 1 minute candles
-    // setupWebSocket(tokens) {
-    //     try {
-    //         const activeSymbols = this.getActiveSymbols();
-    //         // Initialize price tracker for all active symbols
-    //         this.latestPrices = {};
-    //         activeSymbols.forEach((symbol) => {
-    //             this.latestPrices[symbol] = { analyzeSymbol: null, ask: null, ts: null };
-    //         });
 
-    //         webSocketService.connect(tokens, activeSymbols, (data) => {
-    //             const msg = JSON.parse(data.toString());
-    //             const { payload } = msg;
-    //             const epic = payload?.epic;
-    //             if (!epic) return;
-
-    //             this.latestCandles[epic] = { latest: payload };
-
-    //             // Update bid or ask based on priceType
-    //             if (!this.latestPrices[epic]) {
-    //                 this.latestPrices[epic] = { bid: null, ask: null, ts: null };
-    //             }
-
-    //             if (payload.priceType === "bid") {
-    //                 this.latestPrices[epic].bid = payload.c;
-    //             } else if (payload.priceType === "ask") {
-    //                 this.latestPrices[epic].ask = payload.c;
-    //             }
-
-    //             this.latestPrices[epic].ts = Date.now();
-
-    //             // Only log when we have both bid and ask
-    //             if (this.latestPrices[epic].bid !== null && this.latestPrices[epic].ask !== null) {
-    //                 logger.debug(`[WebSocket] ${epic} - bid: ${this.latestPrices[epic].bid}, ask: ${this.latestPrices[epic].ask}`);
-    //             }
-    //         });
-    //     } catch (error) {
-    //         logger.error("[bot.js] WebSocket message processing error:", error.message);
-    //     }
-    // }
 
     startSessionPing() {
         this.sessionPingInterval = setInterval(async () => {
@@ -252,13 +209,11 @@ class TradingBot {
         return tradableSymbols;
     }
 
-    // Analyzes all symbols in the trading universe.
-
     async analyzeAllSymbols() {
         this.activeSymbols = await this.getActiveSymbols();
         for (const symbol of this.activeSymbols) {
             await this.analyzeSymbol(symbol);
-            await this.delay(SYMBOL_ANALYSIS_DELAY_MS);
+            await this.delay(2000);
         }
     }
 
@@ -316,14 +271,6 @@ class TradingBot {
         // --- Fetch real-time bid/ask ---
         const { bid, ask } = await this.getBidAsk(symbol);
 
-        // console.log(marketDetails);
-
-        // Guard: skip analysis if we don't have valid prices yet
-        if (!this.isValidPricePair(bid, ask)) {
-            logger.warn(`[bot.js][analyzeSymbol] Skipping ${symbol}: invalid bid/ask (bid=${bid}, ask=${ask})`);
-            return;
-        }
-
         // Pass bid/ask to trading logic
         const symbolTradingService = tradingService.getServiceForSymbol(symbol);
         await symbolTradingService.processPrice({
@@ -346,27 +293,7 @@ class TradingBot {
     }
 
     startPriceMonitor() {
-        const interval = this.getPriceMonitorInitialIntervalMs();
-        logger.info(`[PriceMonitor] Starting (every 1 minute) after ${interval}ms at ${new Date().toISOString()}`);
-        if (this.priceMonitorInterval) clearInterval(this.priceMonitorInterval);
-
-        const run = async () => {
-            if (this.priceMonitorInProgress) {
-                logger.warn("[PriceMonitor] Previous tick still running; skipping.");
-                return;
-            }
-            this.priceMonitorInProgress = true;
-            try {
-                // await priceLogger.logSnapshotsForSymbols(this.activeSymbols);
-            } finally {
-                this.priceMonitorInProgress = false;
-            }
-        };
-
-        setTimeout(() => {
-            run();
-            this.priceMonitorInterval = setInterval(run, this.getPriceMonitorRepeatIntervalMs());
-        }, interval);
+        return startPriceMonitor(this);
     }
 
     async startMonitorOpenTrades() {
@@ -408,7 +335,6 @@ class TradingBot {
         }
     }
 
-
     getInitialIntervalMs() {
         return DEV.MODE ? DEV.INTERVAL : PROD.INTERVAL;
     }
@@ -417,25 +343,12 @@ class TradingBot {
         return DEV.MODE ? DEV.INTERVAL : ANALYSIS_REPEAT_MS;
     }
 
-    getPriceMonitorInitialIntervalMs() {
-        const now = new Date();
-        return (60 - now.getUTCSeconds()) * 1000 - now.getUTCMilliseconds() + 1000;
-    }
-
-    getPriceMonitorRepeatIntervalMs() {
-        return PRICE_MONITOR_REPEAT_MS;
-    }
-
     async getBidAsk(symbol) {
         const marketDetails = await getMarketDetails(symbol);
         return {
             bid: marketDetails?.snapshot?.bid,
             ask: marketDetails?.snapshot?.offer,
         };
-    }
-
-    isValidPricePair(bid, ask) {
-        return Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0;
     }
 
     storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data }) {
