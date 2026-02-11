@@ -33,7 +33,7 @@ class ForexTradingService extends BaseTradingService {
         return size;
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask) {
+    async calculateTradeParameters(signal, symbol, bid, ask, indicators) {
         const direction = this.normalizeDirection(signal);
         if (!["BUY", "SELL"].includes(direction)) {
             throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
@@ -45,7 +45,8 @@ class ForexTradingService extends BaseTradingService {
             throw new Error(`[Trade Params] Missing valid market price for ${symbol} (${direction})`);
         }
 
-        const atr = await this.calculateATR(symbol, ANALYSIS.TIMEFRAMES);
+        const atrFromSnapshot = this.toNumber(indicators?.m15?.atr);
+        const atr = atrFromSnapshot !== null && atrFromSnapshot > 0 ? atrFromSnapshot : await this.calculateATR(symbol, ANALYSIS.TIMEFRAMES);
         const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
         const stopLossDistance = Math.max(1.5 * atr, spread * 2);
         const stopLossPrice = isBuy ? price - stopLossDistance : price + stopLossDistance;
