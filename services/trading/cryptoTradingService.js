@@ -96,7 +96,7 @@ class CryptoTradingService extends BaseTradingService {
         return this.normalizeSizeToMarket(sizeBeforeRules, rules);
     }
 
-    async calculateTradeParameters(signal, symbol, bid, ask) {
+    async calculateTradeParameters(signal, symbol, bid, ask, indicators) {
         const direction = this.normalizeDirection(signal);
         if (!["BUY", "SELL"].includes(direction)) {
             throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
@@ -108,7 +108,8 @@ class CryptoTradingService extends BaseTradingService {
             throw new Error(`[Trade Params] Missing valid market price for ${symbol} (${direction})`);
         }
 
-        const atr = await this.calculateATR(symbol, ANALYSIS.TIMEFRAMES);
+        const atrFromSnapshot = this.toNumber(indicators?.m15?.atr);
+        const atr = atrFromSnapshot !== null && atrFromSnapshot > 0 ? atrFromSnapshot : await this.calculateATR(symbol, ANALYSIS.TIMEFRAMES);
         const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
 
         // Crypto: wider breathing room due to higher volatility.

@@ -134,7 +134,7 @@ class BaseTradingService {
 
     async executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes) {
         try {
-            const tradeParams = await this.calculateTradeParameters(signal, symbol, bid, ask, timeframes);
+            const tradeParams = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators, timeframes);
             if (!tradeParams) return;
 
             const { size, price, stopLossPrice, takeProfitPrice } = tradeParams;
@@ -200,14 +200,14 @@ class BaseTradingService {
                 return;
             }
             // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-            const primary = Strategy.generateSignal3Stage({ indicators, bid, ask, variant: "H4_H1_M15" });
+            const primary = Strategy.generateSignal3Stage({ indicators, variant: "H4_H1_M15" });
 
             let { signal, reason = "", context = {} } = primary;
 
             // Fallback to secondary signal if primary is not generated
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
-                const fallback = Strategy.generateSignal3Stage({ indicators, bid, ask, variant: "H1_M15_M5" });
+                const fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
                 signal = fallback.signal;
                 reason = fallback.reason || "";
                 context = fallback.context || {};

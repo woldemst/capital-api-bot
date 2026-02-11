@@ -84,8 +84,6 @@ class TradingBot {
         }
     }
 
-
-
     startSessionPing() {
         this.sessionPingInterval = setInterval(async () => {
             try {
@@ -257,7 +255,6 @@ class TradingBot {
         }
 
         const indicators = await this.buildIndicatorsSnapshot({
-            symbol,
             d1Candles,
             h4Candles,
             h1Candles,
@@ -374,14 +371,14 @@ class TradingBot {
         };
     }
 
-    async buildIndicatorsSnapshot({ symbol, d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles }) {
+    async buildIndicatorsSnapshot({ d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles }) {
         return {
-            d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
-            h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
-            h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
-            m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
-            m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
-            m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
+            d1: await calcIndicators(d1Candles),
+            h4: await calcIndicators(h4Candles),
+            h1: await calcIndicators(h1Candles),
+            m15: await calcIndicators(m15Candles),
+            m5: await calcIndicators(m5Candles),
+            m1: await calcIndicators(m1Candles),
         };
     }
 
