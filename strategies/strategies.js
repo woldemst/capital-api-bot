@@ -1,4 +1,5 @@
 const BIAS_ADX_MIN = 18;
+const SETUP_ADX_MIN = 18;
 const ENTRY_ADX_MIN = 18;
 const BUY_SETUP_RSI_MIN = 32;
 const BUY_SETUP_RSI_MAX = 60;
@@ -72,8 +73,9 @@ class Strategy {
         const setupRsiSlopeOk =
             !this.isNumber(setupRsiPrev) ||
             (isBuy ? setupRsi > setupRsiPrev : setupRsi < setupRsiPrev);
-        const setupOk = setupPullbackOk && setupRsiRangeOk && setupRsiSlopeOk;
-        const setupScore = [setupPullbackOk, setupRsiRangeOk, setupRsiSlopeOk].filter(Boolean).length;
+        const setupAdxOk = !this.isNumber(setupAdx) || setupAdx >= SETUP_ADX_MIN;
+        const setupOk = setupPullbackOk && setupRsiRangeOk && setupRsiSlopeOk && setupAdxOk;
+        const setupScore = [setupPullbackOk, setupRsiRangeOk, setupRsiSlopeOk, setupAdxOk].filter(Boolean).length;
 
         if (!setupOk) {
             return {

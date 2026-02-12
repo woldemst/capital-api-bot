@@ -5,7 +5,7 @@ import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
 import { isNewsTime } from "./utils/newsChecker.js";
-import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals, startPriceMonitor } from "./bot/monitors.js";
+import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals, startPriceMonitor, startWebSocket } from "./bot/monitors.js";
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
@@ -45,6 +45,8 @@ class TradingBot {
         this.activeSymbols = [];
 
         this.allowedTradingWindows = DEFAULT_TRADING_WINDOWS;
+
+        this.tokens = null;
     }
 
     async initialize() {
@@ -53,6 +55,7 @@ class TradingBot {
                 await startSession();
                 const tokens = getSessionTokens();
                 if (!tokens.cst || !tokens.xsecurity) throw new Error("Invalid session tokens");
+                this.tokens = tokens;
                 await this.startLiveTrading(tokens);
                 this.scheduleMidnightSessionRefresh();
                 return;
@@ -70,9 +73,9 @@ class TradingBot {
         }
     }
 
-    async startLiveTrading(tokens) {
+    async startLiveTrading() {
         try {
-            // this.startWebSocket(tokens);
+            // startWebSocket(this);
             this.startSessionPing();
             this.startAnalysisInterval();
             this.startMonitorOpenTrades();

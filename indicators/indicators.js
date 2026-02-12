@@ -21,9 +21,23 @@ export async function calcIndicators(bars) {
 
     // Use closed candles only to avoid indicator drift from a still-forming live bar.
     const stableBars = bars.length > 1 ? bars.slice(0, -1) : bars;
-    const closes = stableBars.map((b) => b.close || b.Close || b.closePrice?.bid || 0);
-    const highs = stableBars.map((b) => b.high || b.High || b.highPrice?.bid || 0);
-    const lows = stableBars.map((b) => b.low || b.Low || b.lowPrice?.bid || 0);
+    const toNum = (value) => {
+        const num = typeof value === "number" ? value : Number(value);
+        return Number.isFinite(num) ? num : null;
+    };
+    const normalizedBars = stableBars
+        .map((b) => ({
+            close: toNum(b?.close ?? b?.Close ?? b?.closePrice?.bid),
+            high: toNum(b?.high ?? b?.High ?? b?.highPrice?.bid),
+            low: toNum(b?.low ?? b?.Low ?? b?.lowPrice?.bid),
+        }))
+        .filter((b) => b.close !== null && b.high !== null && b.low !== null);
+
+    if (!normalizedBars.length) return null;
+
+    const closes = normalizedBars.map((b) => b.close);
+    const highs = normalizedBars.map((b) => b.high);
+    const lows = normalizedBars.map((b) => b.low);
 
     const last = (series) => (Array.isArray(series) && series.length ? series[series.length - 1] : undefined);
 
@@ -38,14 +52,16 @@ export async function calcIndicators(bars) {
 
     const bb = last(BollingerBands.calculate({ period: BB_PERIOD, stdDev: BB_STDDEV, values: closes }));
 
-    const adx = last(
-        ADX.calculate({
-            period: ADX_PERIOD,
-            close: closes,
-            high: highs,
-            low: lows,
-        }),
-    );
+    const adxSeries = ADX.calculate({
+        period: ADX_PERIOD,
+        close: closes,
+        high: highs,
+        low: lows,
+    });
+    const adx = last(adxSeries);
+    const adxPrev = adxSeries.length > 1 ? adxSeries[adxSeries.length - 2] : undefined;
+    const adxValue = Number.isFinite(adx?.adx) ? adx.adx : Number.isFinite(adx) ? adx : null;
+    const adxPrevValue = Number.isFinite(adxPrev?.adx) ? adxPrev.adx : Number.isFinite(adxPrev) ? adxPrev : null;
 
     const atr = last(
         ATR.calculate({
@@ -62,27 +78,41 @@ export async function calcIndicators(bars) {
     });
     const macd = last(macdSeries);
     const macdPrev = macdSeries.length > 1 ? macdSeries[macdSeries.length - 2] : undefined;
-    const macdHistPrev = macdPrev?.histogram;
+    const macdHist = Number.isFinite(macd?.histogram) ? macd.histogram : null;
+    const macdHistPrev = Number.isFinite(macdPrev?.histogram) ? macdPrev.histogram : null;
 
     const lastClose = closes[closes.length - 1];
     const price_vs_ema9 = Number.isFinite(lastClose) && Number.isFinite(ema9) && ema9 !== 0 ? (lastClose - ema9) / ema9 : null;
+    const atrPct = Number.isFinite(atr) && Number.isFinite(lastClose) && lastClose !== 0 ? atr / lastClose : null;
+    const bbWidth =
+        Number.isFinite(bb?.upper) && Number.isFinite(bb?.lower) && Number.isFinite(bb?.middle) && bb.middle !== 0
+            ? (bb.upper - bb.lower) / bb.middle
+            : null;
+    const ema20_50_spreadPct = Number.isFinite(ema20) && Number.isFinite(ema50) && ema50 !== 0 ? (ema20 - ema50) / ema50 : null;
+    const adxSlope = Number.isFinite(adxValue) && Number.isFinite(adxPrevValue) ? adxValue - adxPrevValue : null;
+    const macdHistSlope = Number.isFinite(macdHist) && Number.isFinite(macdHistPrev) ? macdHist - macdHistPrev : null;
 
-    const trend = ema20 > ema50 ? "bullish" : ema20 < ema50 ? "bearish" : "neutral";
+    const trend = Number.isFinite(ema20) && Number.isFinite(ema50) ? (ema20 > ema50 ? "bullish" : ema20 < ema50 ? "bearish" : "neutral") : "neutral";
 
     return {
-        ema9,
-        ema20,
-        ema50,
+        ema9: Number.isFinite(ema9) ? ema9 : null,
+        ema20: Number.isFinite(ema20) ? ema20 : null,
+        ema50: Number.isFinite(ema50) ? ema50 : null,
         price_vs_ema9,
-        bb,
-        lastClose,
-        close: lastClose,
-        rsi,
-        rsiPrev,
-        adx,
-        atr,
-        macd,
+        bb: bb ?? null,
+        lastClose: Number.isFinite(lastClose) ? lastClose : null,
+        close: Number.isFinite(lastClose) ? lastClose : null,
+        rsi: Number.isFinite(rsi) ? rsi : null,
+        rsiPrev: Number.isFinite(rsiPrev) ? rsiPrev : null,
+        adx: adx ?? null,
+        atr: Number.isFinite(atr) ? atr : null,
+        macd: macd ?? null,
         macdHistPrev,
+        atrPct,
+        bbWidth,
+        ema20_50_spreadPct,
+        adxSlope,
+        macdHistSlope,
         trend,
     };
 }

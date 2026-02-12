@@ -132,7 +132,7 @@ class BaseTradingService {
         throw new Error("calculateTradeParameters() must be implemented by subclass");
     }
 
-    async executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes) {
+    async executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes, candlesOnOpening = null) {
         try {
             const tradeParams = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators, timeframes);
             if (!tradeParams) return;
@@ -174,6 +174,7 @@ class BaseTradingService {
                     stopLoss: stopLossRounded,
                     takeProfit: takeProfitRounded,
                     indicatorsOnOpening: indicators,
+                    candlesOnOpening,
                     timestamp: new Date().toISOString(),
                 });
 
@@ -223,7 +224,33 @@ class BaseTradingService {
 
             logger.info(`[Signal] ${symbol}: ${signal}`);
 
-            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes);
+            const toIsoTimestamp = (value) => {
+                if (value === undefined || value === null || value === "") return null;
+                if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
+                const parsed = new Date(value);
+                return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+            };
+            const toLastClosedCandle = (series = []) => {
+                if (!Array.isArray(series) || series.length === 0) return null;
+                const candle = series.length > 1 ? series[series.length - 2] : series[series.length - 1];
+                return {
+                    t: toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC),
+                    o: this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask),
+                    h: this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask),
+                    l: this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask),
+                    c: this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask),
+                };
+            };
+            const candlesSnapshot = {
+                d1: toLastClosedCandle(candles?.d1Candles),
+                h4: toLastClosedCandle(candles?.h4Candles),
+                h1: toLastClosedCandle(candles?.h1Candles),
+                m15: toLastClosedCandle(candles?.m15Candles),
+                m5: toLastClosedCandle(candles?.m5Candles),
+                m1: toLastClosedCandle(candles?.m1Candles),
+            };
+
+            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes, candlesSnapshot);
         } catch (error) {
             logger.error("[ProcessPrice] Error:", error);
         }
@@ -300,7 +327,7 @@ class BaseTradingService {
         const requestedReason = label || "manual_close";
         let symbol;
         let priceHint;
-        let indicatorSnapshot = null;
+        let closeSnapshot = null;
         let closePayload;
         let confirmation;
 
@@ -316,7 +343,7 @@ class BaseTradingService {
 
         try {
             if (symbol) {
-                indicatorSnapshot = await tradeTracker.getCloseIndicators(symbol);
+                closeSnapshot = await tradeTracker.getCloseSnapshot(symbol);
             }
         } catch (snapshotError) {
             logger.warn(`[ClosePos] Could not capture close indicators for ${dealId}: ${snapshotError.message}`);
@@ -340,7 +367,7 @@ class BaseTradingService {
                 }
             }
 
-            const brokerPrice = this.firstNumber(
+            const brokerPriceRaw = this.firstNumber(
                 confirmation?.closeLevel,
                 confirmation?.level,
                 confirmation?.dealLevel,
@@ -350,6 +377,14 @@ class BaseTradingService {
                 closePayload?.price,
                 priceHint,
             );
+            const brokerPrice = this.toNumber(brokerPriceRaw);
+            const fallbackPrice = this.toNumber(priceHint);
+            const closePrice =
+                brokerPrice !== null && brokerPrice > 0
+                    ? brokerPrice
+                    : fallbackPrice !== null && fallbackPrice > 0
+                      ? fallbackPrice
+                      : null;
 
             const brokerReason =
                 confirmation?.reason ?? confirmation?.status ?? confirmation?.dealStatus ?? closePayload?.reason ?? closePayload?.status ?? null;
@@ -363,9 +398,10 @@ class BaseTradingService {
             logTradeClose({
                 dealId,
                 symbol,
-                closePrice: brokerPrice ?? priceHint ?? null,
+                closePrice,
                 closeReason: finalReason,
-                indicatorsOnClosing: indicatorSnapshot,
+                indicatorsOnClosing: closeSnapshot?.indicators ?? null,
+                candlesOnClosing: closeSnapshot?.candles ?? null,
                 timestamp: new Date().toISOString(),
             });
 

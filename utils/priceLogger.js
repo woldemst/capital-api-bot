@@ -20,22 +20,7 @@ function sanitizeSymbol(symbol = "unknown") {
 
 function compactIndicators(snapshot) {
     if (!snapshot || typeof snapshot !== "object") return snapshot;
-    const indicatorKeys = ["close", "lastClose", "ema9", "ema20", "ema50", "price_vs_ema9", "bb", "rsi", "rsiPrev", "adx", "atr", "macd", "macdHistPrev", "trend"];
-    const compact = {};
-    for (const [timeframe, data] of Object.entries(snapshot)) {
-        if (!data || typeof data !== "object") {
-            compact[timeframe] = data;
-            continue;
-        }
-        const reduced = {};
-        for (const key of indicatorKeys) {
-            if (Object.prototype.hasOwnProperty.call(data, key)) {
-                reduced[key] = data[key];
-            }
-        }
-        compact[timeframe] = reduced;
-    }
-    return compact;
+    return JSON.parse(JSON.stringify(snapshot));
 }
 
 export function getSymbolLogPath(symbol = "unknown") {

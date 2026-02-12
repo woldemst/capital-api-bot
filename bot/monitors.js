@@ -223,42 +223,41 @@ export function startPriceMonitor(bot) {
     }, interval);
 }
 
-// startWebSocket(tokens) {
-//     try {
-//         const activeSymbols = this.getActiveSymbols();
-//         // Initialize price tracker for all active symbols
-//         this.latestPrices = {};
-//         activeSymbols.forEach((symbol) => {
-//             this.latestPrices[symbol] = { analyzeSymbol: null, ask: null, ts: null };
-//         });
+export function startWebSocket(bot) {
+    try {
+        const activeSymbols = bot.getActiveSymbols();
+        // Initialize price tracker for all active symbols
+        bot.latestPrices = {};
+        activeSymbols.forEach((symbol) => {
+            bot.latestPrices[symbol] = { analyzeSymbol: null, ask: null, ts: null };
+        });
 
-//         webSocketService.connect(tokens, activeSymbols, (data) => {
-//             const msg = JSON.parse(data.toString());
-//             const { payload } = msg;
-//             const epic = payload?.epic;
-//             if (!epic) return;
+        webSocketService.connect(bot.tokens, activeSymbols, (data) => {
+            const msg = JSON.parse(data.toString());
+            const { payload } = msg;
+            const epic = payload?.epic;
+            if (!epic) return;
 
-//             this.latestCandles[epic] = { latest: payload };
+            bot.latestCandles[epic] = { latest: payload };
 
-//             // Update bid or ask based on priceType
-//             if (!this.latestPrices[epic]) {
-//                 this.latestPrices[epic] = { bid: null, ask: null, ts: null };
-//             }
+            // Update bid or ask based on priceType
+            if (!bot.latestPrices[epic]) {
+                bot.latestPrices[epic] = { bid: null, ask: null, ts: null };
+            }
 
-//             if (payload.priceType === "bid") {
-//                 this.latestPrices[epic].bid = payload.c;
-//             } else if (payload.priceType === "ask") {
-//                 this.latestPrices[epic].ask = payload.c;
-//             }
+            if (payload.priceType === "bid") {
+                bot.latestPrices[epic].bid = payload.c;
+            } else if (payload.priceType === "ask") {
+                bot.latestPrices[epic].ask = payload.c;
+            }
 
-//             this.latestPrices[epic].ts = Date.now();
-
-//             // Only log when we have both bid and ask
-//             if (this.latestPrices[epic].bid !== null && this.latestPrices[epic].ask !== null) {
-//                 logger.debug(`[WebSocket] ${epic} - bid: ${this.latestPrices[epic].bid}, ask: ${this.latestPrices[epic].ask}`);
-//             }
-//         });
-//     } catch (error) {
-//         logger.error("[bot.js] WebSocket message processing error:", error.message);
-//     }
-// }
+            bot.latestPrices[epic].ts = Date.now();
+            // Only log when we have both bid and ask
+            if (bot.latestPrices[epic].bid !== null && bot.latestPrices[epic].ask !== null) {
+                logger.debug(`[WebSocket] ${epic} - bid: ${bot.latestPrices[epic].bid}, ask: ${bot.latestPrices[epic].ask}`);
+            }
+        });
+    } catch (error) {
+        logger.error("[bot.js] WebSocket message processing error:", error.message);
+    }
+}
