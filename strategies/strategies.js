@@ -168,16 +168,6 @@ class Strategy {
 
         return "neutral";
     }
-
-    bbTouchLower(ind, bid) {
-        const lower = ind?.bb?.lower;
-        return this.isNumber(lower) && this.isNumber(bid) && bid <= lower;
-    }
-
-    bbTouchUpper(ind, ask) {
-        const upper = ind?.bb?.upper;
-        return this.isNumber(upper) && this.isNumber(ask) && ask >= upper;
-    }
 }
 
 export default new Strategy();

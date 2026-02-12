@@ -106,183 +106,9 @@ class TradingService {
     }
 
     // ============================================================
-    //               ATR-Based Trade Parameters
-    // ============================================================
-    async calculateATR(symbol) {
-        try {
-            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.M15, 15);
-            if (!data?.prices || data.prices.length < 14) {
-                throw new Error("Insufficient data for ATR calculation");
-            }
-            let tr = [];
-            const prices = data.prices;
-            for (let i = 1; i < prices.length; i++) {
-                const high = prices[i].highPrice?.ask || prices[i].high;
-                const low = prices[i].lowPrice?.bid || prices[i].low;
-                const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
-                const tr1 = high - low;
-                const tr2 = Math.abs(high - prevClose);
-                const tr3 = Math.abs(low - prevClose);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-            const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-            return atr;
-        } catch (error) {
-            console.error("[ATR] Error:", error);
-            return 0.001;
-        }
-    }
-
-    async calculateTradeParameters(signal, symbol, bid, ask) {
-        const direction = this.normalizeDirection(signal);
-        if (!["BUY", "SELL"].includes(direction)) {
-            throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
-        }
-
-        const isBuy = direction === "BUY";
-        const price = this.resolveMarketPrice(direction, bid, ask);
-        if (!Number.isFinite(price)) {
-            throw new Error(`[Trade Params] Missing valid market price for ${symbol} (${direction})`);
-        }
-
-        const atr = await this.calculateATR(symbol);
-        const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
-        const stopLossPips = Math.max(1.5 * atr, spread * 2);
-        const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
-        const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
-        const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
-        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
-        console.log(`[calculateTradeParameters] Size: ${size}`);
-
-        // Trailing stop parameters
-        const trailingStopParams = {
-            activationPrice: isBuy
-                ? price + stopLossPips // Activate at 1R profit
-                : price - stopLossPips,
-            trailingDistance: atr, // Trail by 1 ATR
-        };
-
-        return {
-            size,
-            stopLossPrice,
-            takeProfitPrice,
-            stopLossPips,
-            takeProfitPips,
-            trailingStopParams,
-            partialTakeProfit: isBuy
-                ? price + stopLossPips // Take partial at 1R
-                : price - stopLossPips,
-            price,
-        };
-    }
-
-    positionSize(balance, entryPrice, stopLossPrice, symbol) {
-        const riskAmount = balance * PER_TRADE;
-        const pipValue = this.getPipValue(symbol); // Dynamic pip value
-
-        if (!pipValue || pipValue <= 0) {
-            console.error("Invalid pip value calculation");
-            return 100; // Fallback with warning
-        }
-
-        const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
-        if (stopLossPips === 0) return 0;
-
-        let size = riskAmount / (stopLossPips * pipValue);
-        // Convert to units (assuming size is in lots, so multiply by 1000)
-        size = size * 1000;
-        // Floor to nearest 100
-        size = Math.floor(size / 100) * 100;
-        if (size < 100) size = 100;
-
-        // --- Margin check for 5 simultaneous trades ---
-        // Assume leverage is 30:1 for forex (can be adjusted)
-        const leverage = 30;
-        // JPY quotes are typically 100x larger; normalize to keep margin cap comparable.
-        const marginPrice = symbol.includes("JPY") ? entryPrice / 100 : entryPrice;
-        // Margin required = (size * entryPrice) / leverage
-        const marginRequired = (size * marginPrice) / leverage;
-        // Use available margin from account (set by updateAccountInfo)
-        const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
-        // Ensure margin for one trade is no more than 1/5 of available
-        const maxMarginPerTrade = availableMargin / 5;
-        if (marginRequired > maxMarginPerTrade) {
-            // Reduce size so marginRequired == maxMarginPerTrade
-            size = Math.floor((maxMarginPerTrade * leverage) / marginPrice / 100) * 100;
-            if (size < 100) size = 100;
-            console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
-        }
-        console.log(
-            `[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`,
-        );
-        return size;
-    }
-
-    // ============================================================
-    //                    Place the Trade
-    // ============================================================
-    async executeTrade(symbol, signal, bid, ask, indicators, reason, context) {
-        try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators);
-
-            const pos = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
-
-            if (!pos?.dealReference) {
-                logger.error(`[Order] Missing deal reference for ${symbol}`);
-                return;
-            }
-
-            const confirmation = await getDealConfirmation(pos.dealReference);
-            if (!["ACCEPTED", "OPEN"].includes(confirmation.dealStatus)) {
-                logger.error(`[Order] Not placed: ${confirmation.reason}`);
-                return;
-            }
-
-            logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
-
-            console.log("confirmation", confirmation);
-            const affectedDealId = confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId;
-            // or: const affectedDealId = confirmation?.affectedDeals?.[0]?.dealId;
-
-            try {
-                if (!affectedDealId) {
-                    logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log.`);
-                } else {
-                    // const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
-                    const entryPrice = confirmation?.level ?? price;
-                    const stopLossRounded = this.roundPrice(stopLossPrice, symbol);
-                    const takeProfitRounded = this.roundPrice(takeProfitPrice, symbol);
-                    const logTimestamp = new Date().toISOString();
-
-                    logTradeOpen({
-                        dealId: affectedDealId,
-                        symbol,
-                        signal,
-                        openReason: reason,
-                        entryPrice,
-                        stopLoss: stopLossRounded,
-                        takeProfit: takeProfitRounded,
-                        indicatorsOnOpening: indicators,
-                        timestamp: logTimestamp,
-                    });
-
-                    tradeTracker.registerOpenDeal(affectedDealId, symbol);
-                    // track open deal in memory
-                }
-            } catch (logError) {
-                logger.error(`[Order] Failed to log open trade for ${symbol}:`, logError);
-            }
-
-            this.openTrades.push(symbol);
-        } catch (error) {
-            logger.error(`[Order] Error placing order for ${symbol}:`, error);
-        }
-    }
-
-    // ============================================================
     //                   MAIN PRICE LOOP
     // ============================================================
-    async processPrice({ symbol, indicators, candles, bid, ask, timeframes }) {
+    async processPrice({ symbol, indicators, candles, bid, ask }) {
         try {
             await this.syncOpenTradesFromBroker();
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
@@ -304,9 +130,24 @@ class TradingService {
             if (!signal) {
                 logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
                 const fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
-                signal = fallback.signal;
-                reason = fallback.reason || "";
-                context = fallback.context || {};
+                const primaryBiasTrend = primary?.context?.biasTrend;
+                const primaryBiasDirection =
+                    primaryBiasTrend === "bullish" ? "BUY" : primaryBiasTrend === "bearish" ? "SELL" : null;
+                const fallbackAllowed =
+                    primary.reason === "setup_blocked" &&
+                    !!fallback.signal &&
+                    !!primaryBiasDirection &&
+                    fallback.signal === primaryBiasDirection;
+
+                if (fallbackAllowed) {
+                    signal = fallback.signal;
+                    reason = fallback.reason || "";
+                    context = fallback.context || {};
+                } else if (fallback.signal) {
+                    logger.debug(
+                        `[Signal] ${symbol}: fallback blocked (primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
+                    );
+                }
             }
 
             if (!signal) {
@@ -345,9 +186,181 @@ class TradingService {
                 m1: toLastClosedCandle(candles?.m1Candles),
             };
 
-            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, timeframes, candlesSnapshot);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, candlesSnapshot);
         } catch (error) {
             logger.error("[ProcessPrice] Error:", error);
+        }
+    }
+
+    // ============================================================
+    //               ATR-Based Trade Parameters
+    // ============================================================
+    async calculateATR(symbol) {
+        try {
+            const data = await getHistorical(symbol, ANALYSIS.TIMEFRAMES.M15, 15);
+            if (!data?.prices || data.prices.length < 14) {
+                throw new Error("Insufficient data for ATR calculation");
+            }
+            let tr = [];
+            const prices = data.prices;
+            for (let i = 1; i < prices.length; i++) {
+                const high = prices[i].highPrice?.ask || prices[i].high;
+                const low = prices[i].lowPrice?.bid || prices[i].low;
+                const prevClose = prices[i - 1].closePrice?.bid || prices[i - 1].close;
+                const tr1 = high - low;
+                const tr2 = Math.abs(high - prevClose);
+                const tr3 = Math.abs(low - prevClose);
+                tr.push(Math.max(tr1, tr2, tr3));
+            }
+            const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
+            return atr;
+        } catch (error) {
+            logger.error(`[ATR] Error calculating ATR for ${symbol}: ${error.message}`);
+            return 0.001;
+        }
+    }
+
+    async calculateTradeParameters(signal, symbol, bid, ask) {
+        const direction = this.normalizeDirection(signal);
+        if (!["BUY", "SELL"].includes(direction)) {
+            throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
+        }
+
+        const isBuy = direction === "BUY";
+        const price = this.resolveMarketPrice(direction, bid, ask);
+        if (!Number.isFinite(price)) {
+            throw new Error(`[Trade Params] Missing valid market price for ${symbol} (${direction})`);
+        }
+
+        const atr = await this.calculateATR(symbol);
+        const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
+        const stopLossPips = Math.max(1.5 * atr, spread * 2);
+        const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
+        const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
+        const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
+        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+
+        // Trailing stop parameters
+        const trailingStopParams = {
+            activationPrice: isBuy
+                ? price + stopLossPips // Activate at 1R profit
+                : price - stopLossPips,
+            trailingDistance: atr, // Trail by 1 ATR
+        };
+
+        return {
+            size,
+            stopLossPrice,
+            takeProfitPrice,
+            stopLossPips,
+            takeProfitPips,
+            trailingStopParams,
+            partialTakeProfit: isBuy
+                ? price + stopLossPips // Take partial at 1R
+                : price - stopLossPips,
+            price,
+        };
+    }
+
+    positionSize(balance, entryPrice, stopLossPrice, symbol) {
+        const riskAmount = balance * PER_TRADE;
+        const pipValue = this.getPipValue(symbol); // Dynamic pip value
+
+        if (!pipValue || pipValue <= 0) {
+            logger.error(`[PositionSize] Invalid pip value calculation for ${symbol}`);
+            return 100; // Fallback with warning
+        }
+
+        const stopLossPips = Math.abs(entryPrice - stopLossPrice) / pipValue;
+        if (stopLossPips === 0) return 0;
+
+        let size = riskAmount / (stopLossPips * pipValue);
+        // Convert to units (assuming size is in lots, so multiply by 1000)
+        size = size * 1000;
+        // Floor to nearest 100
+        size = Math.floor(size / 100) * 100;
+        if (size < 100) size = 100;
+
+        // --- Margin check for 5 simultaneous trades ---
+        // Assume leverage is 30:1 for forex (can be adjusted)
+        const leverage = 30;
+        // JPY quotes are typically 100x larger; normalize to keep margin cap comparable.
+        const marginPrice = symbol.includes("JPY") ? entryPrice / 100 : entryPrice;
+        // Margin required = (size * entryPrice) / leverage
+        const marginRequired = (size * marginPrice) / leverage;
+        // Use available margin from account (set by updateAccountInfo)
+        const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
+        // Ensure margin for one trade is no more than 1/5 of available
+        const maxMarginPerTrade = availableMargin / 5;
+        if (marginRequired > maxMarginPerTrade) {
+            // Reduce size so marginRequired == maxMarginPerTrade
+            size = Math.floor((maxMarginPerTrade * leverage) / marginPrice / 100) * 100;
+            if (size < 100) size = 100;
+            logger.debug(`[PositionSize] Adjusted for margin on ${symbol}: new size=${size}`);
+        }
+        logger.debug(
+            `[PositionSize] ${symbol}: raw=${riskAmount / (stopLossPips * pipValue)} final=${size} marginRequired=${marginRequired} maxPerTrade=${maxMarginPerTrade}`,
+        );
+        return size;
+    }
+
+    // ============================================================
+    //                    Place the Trade
+    // ============================================================
+    async executeTrade(symbol, signal, bid, ask, indicators, reason, context, candlesSnapshot) {
+        try {
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask);
+
+            const pos = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
+
+            if (!pos?.dealReference) {
+                logger.error(`[Order] Missing deal reference for ${symbol}`);
+                return;
+            }
+
+            const confirmation = await getDealConfirmation(pos.dealReference);
+            if (!["ACCEPTED", "OPEN"].includes(confirmation.dealStatus)) {
+                logger.error(`[Order] Not placed: ${confirmation.reason}`);
+                return;
+            }
+
+            logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
+
+            const affectedDealId = confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId;
+            // or: const affectedDealId = confirmation?.affectedDeals?.[0]?.dealId;
+
+            try {
+                if (!affectedDealId) {
+                    logger.warn(`[Order] Missing dealId for ${symbol}, skipping trade log.`);
+                } else {
+                    // const indicatorSnapshot = this.buildIndicatorSnapshot(indicators, price, symbol);
+                    const entryPrice = confirmation?.level ?? price;
+                    const stopLossRounded = this.roundPrice(stopLossPrice, symbol);
+                    const takeProfitRounded = this.roundPrice(takeProfitPrice, symbol);
+                    const logTimestamp = new Date().toISOString();
+
+                    logTradeOpen({
+                        dealId: affectedDealId,
+                        symbol,
+                        signal,
+                        openReason: reason,
+                        entryPrice,
+                        stopLoss: stopLossRounded,
+                        takeProfit: takeProfitRounded,
+                        indicatorsOnOpening: indicators,
+                        timestamp: logTimestamp,
+                    });
+
+                    tradeTracker.registerOpenDeal(affectedDealId, symbol);
+                    // track open deal in memory
+                }
+            } catch (logError) {
+                logger.error(`[Order] Failed to log open trade for ${symbol}:`, logError);
+            }
+
+            this.openTrades.push(symbol);
+        } catch (error) {
+            logger.error(`[Order] Error placing order for ${symbol}:`, error);
         }
     }
 

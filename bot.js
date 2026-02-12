@@ -160,7 +160,6 @@ class TradingBot {
         }
     }
 
-
     parseMinutes(hhmm) {
         if (typeof hhmm !== "string") return NaN;
         const [hh, mm] = hhmm.split(":").map((p) => Number(p));
@@ -231,7 +230,9 @@ class TradingBot {
                 getHistorical(symbol, timeframes.M5, historyLength),
                 getHistorical(symbol, timeframes.M1, historyLength),
             ]);
-            console.log(`Fetched candles: ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`);
+            logger.debug(
+                `[CandleFetch] ${symbol}: fetched ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`,
+            );
             return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
         } catch (error) {
             logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
@@ -281,7 +282,6 @@ class TradingBot {
             candles,
             bid,
             ask,
-            timeframes: TIMEFRAMES,
         });
     }
 
