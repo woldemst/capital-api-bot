@@ -223,9 +223,9 @@ export function startPriceMonitor(bot) {
     }, interval);
 }
 
-export function startWebSocket(bot) {
+export async function startWebSocket(bot) {
     try {
-        const activeSymbols = bot.getActiveSymbols();
+        const activeSymbols = await bot.getActiveSymbols();
         // Initialize price tracker for all active symbols
         bot.latestPrices = {};
         activeSymbols.forEach((symbol) => {

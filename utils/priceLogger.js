@@ -76,8 +76,7 @@ class PriceLogger {
         const currentMinutes = hour * 60 + minute;
 
         const sessions = [];
-        const entries = Object.entries(SESSIONS).filter(([key]) => key !== "CRYPTO");
-        for (const [name, win] of entries) {
+        for (const [name, win] of Object.entries(SESSIONS)) {
             if (!win?.START || !win?.END) continue;
             const [sh, sm] = win.START.split(":").map((v) => parseInt(v, 10));
             const [eh, em] = win.END.split(":").map((v) => parseInt(v, 10));

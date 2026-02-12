@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
@@ -25,7 +25,10 @@ class TradingBot {
     constructor() {
         this.isRunning = false;
         this.analysisInterval = null;
+        this.analysisStartTimeout = null;
+        this.analysisInProgress = false;
         this.sessionRefreshInterval = null;
+        this.sessionPingInterval = null;
         this.pingInterval = 9 * 60 * 1000;
         this.checkInterval = 15 * 1000;
         this.maxRetries = 3;
@@ -101,12 +104,19 @@ class TradingBot {
     // Starts the periodic analysis interval for scheduled trading logic.
     async startAnalysisInterval() {
         const runAnalysis = async () => {
+            if (this.analysisInProgress) {
+                logger.warn("[bot.js] Previous analysis still running; skipping this tick.");
+                return;
+            }
+
+            this.analysisInProgress = true;
             try {
                 await this.updateAccountInfo();
                 await this.analyzeAllSymbols();
-                await this.startMonitorOpenTrades();
             } catch (error) {
                 logger.error("[bot.js] Analysis interval error:", error);
+            } finally {
+                this.analysisInProgress = false;
             }
         };
 
@@ -114,10 +124,12 @@ class TradingBot {
         const interval = this.getInitialIntervalMs();
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
-        setTimeout(() => {
-            runAnalysis();
+        this.analysisStartTimeout = setTimeout(() => {
+            void runAnalysis();
             // After first run, repeat every 5 minutes
-            this.analysisInterval = setInterval(runAnalysis, this.getRepeatIntervalMs());
+            this.analysisInterval = setInterval(() => {
+                void runAnalysis();
+            }, this.getRepeatIntervalMs());
         }, interval);
     }
 
@@ -148,9 +160,6 @@ class TradingBot {
         }
     }
 
-    isCryptoSymbol(symbol) {
-        return CRYPTO_SYMBOLS.includes(symbol);
-    }
 
     parseMinutes(hhmm) {
         if (typeof hhmm !== "string") return NaN;
@@ -176,12 +185,6 @@ class TradingBot {
         const activeSessionNames = [];
 
         for (const [name, session] of Object.entries(SESSIONS)) {
-            if (name === "CRYPTO") {
-                activeSessions.push(session?.SYMBOLS || []);
-                activeSessionNames.push(name);
-                continue;
-            }
-
             const startMinutes = this.parseMinutes(session?.START);
             const endMinutes = this.parseMinutes(session?.END);
             if (!this.inSession(currentMinutes, startMinutes, endMinutes)) continue;
@@ -272,8 +275,7 @@ class TradingBot {
         const { bid, ask } = await this.getBidAsk(symbol);
 
         // Pass bid/ask to trading logic
-        const symbolTradingService = tradingService.getServiceForSymbol(symbol);
-        await symbolTradingService.processPrice({
+        await tradingService.processPrice({
             symbol,
             indicators,
             candles,
@@ -285,8 +287,11 @@ class TradingBot {
 
     async shutdown() {
         this.isRunning = false;
+        clearTimeout(this.analysisStartTimeout);
         clearInterval(this.analysisInterval);
         clearInterval(this.sessionRefreshInterval);
+        clearInterval(this.sessionPingInterval);
+        clearInterval(this.monitorInterval);
         clearInterval(this.dealIdMonitorInterval);
         clearInterval(this.priceMonitorInterval);
         webSocketService.disconnect();
@@ -388,12 +393,6 @@ class TradingBot {
     async isTradingAllowed(symbol, context = {}) {
         const now = context.now instanceof Date ? context.now : new Date();
         const currentMinutes = Number.isFinite(context.currentMinutes) ? context.currentMinutes : now.getUTCHours() * 60 + now.getUTCMinutes();
-        const isCrypto = this.isCryptoSymbol(symbol);
-
-        // Crypto symbols trade 24/7, so no weekday/session-window restrictions.
-        if (isCrypto) {
-            return true;
-        }
 
         const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
         if (day === 0 || day === 6) {

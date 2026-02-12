@@ -19,7 +19,7 @@ const SESSION_SYMBOLS = {
     TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
 };
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
+// export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
 
 export const SESSIONS = {
     LONDON: {
@@ -41,12 +41,7 @@ export const SESSIONS = {
         START: "00:00",
         END: "09:00",
         SYMBOLS: SESSION_SYMBOLS.TOKYO,
-    },
-    CRYPTO: {
-        START: "00:00",
-        END: "23:59",
-        SYMBOLS: CRYPTO_SYMBOLS,
-    },
+    }
 };
 
 export const RISK = {
@@ -84,8 +79,8 @@ export const ANALYSIS = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 60 seconds between analyses
-    MODE: false,
+    INTERVAL: 15 * 1000, // 15 seconds between analyses
+    MODE: true,
 };
 
 // 1 min
