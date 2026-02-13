@@ -37,10 +37,8 @@ class TradingBot {
         this.activeSymbols = [];
 
         this.allowedTradingWindows = [
-            // London: 08:15–16:45
-            { start: 8 * 60 + 15, end: 16 * 60 + 45 },
-            // NY: 13:15–20:45
-            { start: 13 * 60 + 15, end: 20 * 60 + 45 },
+            // Trade from London+NY overlap (13:00 UTC) through NY, Sydney, Tokyo until 07:00 UTC.
+            { start: 13 * 60, end: 7 * 60 },
         ];
         this.tokens = null;
     }
