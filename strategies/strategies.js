@@ -5,7 +5,8 @@ const SETUP_RSI_SLOPE_TOLERANCE = 0.5;
 const BUY_SETUP_RSI_MIN = 32;
 const BUY_SETUP_RSI_MAX = 60;
 const SELL_SETUP_RSI_MIN = 45;
-const SELL_SETUP_RSI_MAX = 65;
+const SELL_SETUP_RSI_MAX = 60;
+const BUY_ENTRY_RECLAIM_MAX = 0.0001;
 
 class Strategy {
     constructor() {}
@@ -103,7 +104,9 @@ class Strategy {
             this.isNumber(entryMacdHist) && (isBuy ? entryMacdHist > 0 : entryMacdHist < 0);
         const entryPriceReclaimOk =
             this.isNumber(entryPullbackValue) &&
-            (isBuy ? entryPullbackValue >= 0 : entryPullbackValue <= 0);
+            (isBuy
+                ? entryPullbackValue >= 0 && entryPullbackValue <= BUY_ENTRY_RECLAIM_MAX
+                : entryPullbackValue <= 0);
         const entryAdxOk = !this.isNumber(entryAdx) || entryAdx >= ENTRY_ADX_MIN;
         const entryChecks = {
             macdOk: entryMacdOk,

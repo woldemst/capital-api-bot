@@ -108,7 +108,7 @@ class TradingService {
     // ============================================================
     //                   MAIN PRICE LOOP
     // ============================================================
-    async processPrice({ symbol, indicators, candles, bid, ask }) {
+    async processPrice({ symbol, indicators, bid, ask }) {
         try {
             await this.syncOpenTradesFromBroker();
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
@@ -125,7 +125,7 @@ class TradingService {
             const primary = Strategy.generateSignal3Stage({ indicators, variant: "H4_H1_M15" });
             let fallback = null;
 
-            let { signal, reason = "", context = {} } = primary;
+            let { signal, reason = "" } = primary;
 
             // Fallback to secondary signal if primary is not generated
             if (!signal) {
@@ -142,7 +142,6 @@ class TradingService {
                 if (fallbackAllowed) {
                     signal = fallback.signal;
                     reason = fallback.reason || "";
-                    context = fallback.context || {};
                 } else if (fallback.signal) {
                     logger.debug(
                         `[Signal] ${symbol}: fallback blocked (primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
@@ -170,34 +169,7 @@ class TradingService {
             if (this.isSymbolTraded(symbol)) return;
 
             logger.info(`[Signal] ${symbol}: ${signal}`);
-
-            const toIsoTimestamp = (value) => {
-                if (value === undefined || value === null || value === "") return null;
-                if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
-                const parsed = new Date(value);
-                return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
-            };
-            const toLastClosedCandle = (series = []) => {
-                if (!Array.isArray(series) || series.length === 0) return null;
-                const candle = series.length > 1 ? series[series.length - 2] : series[series.length - 1];
-                return {
-                    t: toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC),
-                    o: this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask),
-                    h: this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask),
-                    l: this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask),
-                    c: this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask),
-                };
-            };
-            const candlesSnapshot = {
-                d1: toLastClosedCandle(candles?.d1Candles),
-                h4: toLastClosedCandle(candles?.h4Candles),
-                h1: toLastClosedCandle(candles?.h1Candles),
-                m15: toLastClosedCandle(candles?.m15Candles),
-                m5: toLastClosedCandle(candles?.m5Candles),
-                m1: toLastClosedCandle(candles?.m1Candles),
-            };
-
-            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, candlesSnapshot);
+            await this.executeTrade(symbol, signal, bid, ask, indicators, reason);
         } catch (error) {
             logger.error("[ProcessPrice] Error:", error);
         }
@@ -251,24 +223,12 @@ class TradingService {
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
 
-        // Trailing stop parameters
-        const trailingStopParams = {
-            activationPrice: isBuy
-                ? price + stopLossPips // Activate at 1R profit
-                : price - stopLossPips,
-            trailingDistance: atr, // Trail by 1 ATR
-        };
-
         return {
             size,
             stopLossPrice,
             takeProfitPrice,
             stopLossPips,
             takeProfitPips,
-            trailingStopParams,
-            partialTakeProfit: isBuy
-                ? price + stopLossPips // Take partial at 1R
-                : price - stopLossPips,
             price,
         };
     }
@@ -318,7 +278,7 @@ class TradingService {
     // ============================================================
     //                    Place the Trade
     // ============================================================
-    async executeTrade(symbol, signal, bid, ask, indicators, reason, context, candlesSnapshot) {
+    async executeTrade(symbol, signal, bid, ask, indicators, reason) {
         try {
             const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask);
 
@@ -441,7 +401,6 @@ class TradingService {
     async softExitToBreakeven(position) {
         const { dealId, entryPrice, takeProfit, currentPrice, direction, symbol } = position;
 
-        const newSL = entryPrice;
         try {
             const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
             if (tpProgress === null || tpProgress < 0.7) {
