@@ -14,7 +14,7 @@ export const API = {
 // Trading Sessions (UTC times)
 const SESSION_SYMBOLS = {
     LONDON: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-    NY: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+    NY: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "EURGBP"],
     SYDNEY: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
     TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
 };

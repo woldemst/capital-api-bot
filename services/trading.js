@@ -123,13 +123,13 @@ class TradingService {
             }
             // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
             const primary = Strategy.generateSignal3Stage({ indicators, variant: "H4_H1_M15" });
+            let fallback = null;
 
             let { signal, reason = "", context = {} } = primary;
 
             // Fallback to secondary signal if primary is not generated
             if (!signal) {
-                logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
-                const fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
+                fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
                 const primaryBiasTrend = primary?.context?.biasTrend;
                 const primaryBiasDirection =
                     primaryBiasTrend === "bullish" ? "BUY" : primaryBiasTrend === "bearish" ? "SELL" : null;
@@ -151,7 +151,18 @@ class TradingService {
             }
 
             if (!signal) {
-                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason})`);
+                const setupFails = Object.entries(primary?.context?.setupChecks || {})
+                    .filter(([, ok]) => !ok)
+                    .map(([name]) => name)
+                    .join(",");
+                const entryFails = Object.entries(primary?.context?.entryChecks || {})
+                    .filter(([, ok]) => !ok)
+                    .map(([name]) => name)
+                    .join(",");
+                const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
+                const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";
+                const fallbackText = fallback?.reason ? `, fallback=${fallback.reason}` : "";
+                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText}${fallbackText})`);
                 return;
             }
             // Re-check just placing

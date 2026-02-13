@@ -1,6 +1,7 @@
 const BIAS_ADX_MIN = 18;
 const SETUP_ADX_MIN = 18;
-const ENTRY_ADX_MIN = 18;
+const ENTRY_ADX_MIN = 16;
+const SETUP_RSI_SLOPE_TOLERANCE = 0.5;
 const BUY_SETUP_RSI_MIN = 32;
 const BUY_SETUP_RSI_MAX = 60;
 const SELL_SETUP_RSI_MIN = 45;
@@ -72,8 +73,16 @@ class Strategy {
                 : setupRsi >= SELL_SETUP_RSI_MIN && setupRsi <= SELL_SETUP_RSI_MAX);
         const setupRsiSlopeOk =
             !this.isNumber(setupRsiPrev) ||
-            (isBuy ? setupRsi > setupRsiPrev : setupRsi < setupRsiPrev);
+            (isBuy
+                ? setupRsi >= setupRsiPrev - SETUP_RSI_SLOPE_TOLERANCE
+                : setupRsi <= setupRsiPrev + SETUP_RSI_SLOPE_TOLERANCE);
         const setupAdxOk = !this.isNumber(setupAdx) || setupAdx >= SETUP_ADX_MIN;
+        const setupChecks = {
+            pullbackOk: setupPullbackOk,
+            rsiRangeOk: setupRsiRangeOk,
+            rsiSlopeOk: setupRsiSlopeOk,
+            adxOk: setupAdxOk,
+        };
         const setupOk = setupPullbackOk && setupRsiRangeOk && setupRsiSlopeOk && setupAdxOk;
         const setupScore = [setupPullbackOk, setupRsiRangeOk, setupRsiSlopeOk, setupAdxOk].filter(Boolean).length;
 
@@ -84,6 +93,7 @@ class Strategy {
                 context: {
                     ...baseContext,
                     setupScore,
+                    setupChecks,
                     gateStates: { biasOk, setupOk, entryOk: false },
                 },
             };
@@ -95,6 +105,11 @@ class Strategy {
             this.isNumber(entryPullbackValue) &&
             (isBuy ? entryPullbackValue >= 0 : entryPullbackValue <= 0);
         const entryAdxOk = !this.isNumber(entryAdx) || entryAdx >= ENTRY_ADX_MIN;
+        const entryChecks = {
+            macdOk: entryMacdOk,
+            reclaimOk: entryPriceReclaimOk,
+            adxOk: entryAdxOk,
+        };
         const entryOk = entryMacdOk && entryPriceReclaimOk && entryAdxOk;
         const entryScore = [entryMacdOk, entryPriceReclaimOk, entryAdxOk].filter(Boolean).length;
 
@@ -105,7 +120,9 @@ class Strategy {
                 context: {
                     ...baseContext,
                     setupScore,
+                    setupChecks,
                     entryScore,
+                    entryChecks,
                     gateStates: { biasOk, setupOk, entryOk },
                 },
             };
@@ -117,7 +134,9 @@ class Strategy {
             context: {
                 ...baseContext,
                 setupScore,
+                setupChecks,
                 entryScore,
+                entryChecks,
                 gateStates: { biasOk, setupOk, entryOk },
             },
         };
