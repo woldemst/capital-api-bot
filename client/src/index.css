@@ -1,0 +1,227 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Glassmorphism Trading Dashboard Design System
+   Blue/Cyan accents, dark mode default, frosted glass effects
+   All colors in HSL format */
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 220 30% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 10%;
+
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 30% 10%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 199 89% 48%;
+
+    --radius: 0.75rem;
+
+    /* Custom tokens for trading dashboard */
+    --profit: 142 76% 36%;
+    --profit-foreground: 0 0% 100%;
+    --loss: 0 84% 60%;
+    --loss-foreground: 0 0% 100%;
+    
+    --cyan: 187 92% 69%;
+    --cyan-foreground: 220 30% 10%;
+    
+    /* Glassmorphism */
+    --glass: 0 0% 100% / 0.7;
+    --glass-border: 0 0% 100% / 0.2;
+    --glass-shadow: 220 30% 10% / 0.1;
+
+    --sidebar-background: 220 20% 97%;
+    --sidebar-foreground: 220 30% 10%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 199 89% 95%;
+    --sidebar-accent-foreground: 199 89% 30%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 199 89% 48%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 187 92% 69%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 187 92% 69%;
+    --accent-foreground: 222 47% 6%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 187 92% 69%;
+
+    /* Custom tokens for trading dashboard */
+    --profit: 142 71% 45%;
+    --profit-foreground: 0 0% 100%;
+    --loss: 0 84% 60%;
+    --loss-foreground: 0 0% 100%;
+    
+    --cyan: 187 92% 69%;
+    --cyan-foreground: 222 47% 6%;
+    
+    /* Glassmorphism - dark mode */
+    --glass: 217 33% 17% / 0.6;
+    --glass-border: 210 40% 98% / 0.1;
+    --glass-shadow: 0 0% 0% / 0.3;
+
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 187 92% 69%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 217 33% 17%;
+    --sidebar-accent-foreground: 187 92% 69%;
+    --sidebar-border: 217 33% 17%;
+    --sidebar-ring: 187 92% 69%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer components {
+  /* Glassmorphism card styles */
+  .glass-card {
+    @apply relative overflow-hidden rounded-xl;
+    background: hsl(var(--glass));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--glass-border));
+    box-shadow: 0 8px 32px hsl(var(--glass-shadow));
+  }
+
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--primary) / 0.3),
+      transparent
+    );
+  }
+
+  /* KPI card with gradient accent */
+  .kpi-card {
+    @apply glass-card p-6 transition-all duration-300;
+  }
+
+  .kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px hsl(var(--glass-shadow));
+  }
+
+  /* Profit/Loss text colors */
+  .text-profit {
+    color: hsl(var(--profit));
+  }
+
+  .text-loss {
+    color: hsl(var(--loss));
+  }
+
+  .bg-profit {
+    background-color: hsl(var(--profit));
+  }
+
+  .bg-loss {
+    background-color: hsl(var(--loss));
+  }
+
+  /* Chart container */
+  .chart-container {
+    @apply glass-card p-4;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer utilities {
+  /* Gradient text for headings */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(
+      135deg,
+      hsl(var(--primary)),
+      hsl(var(--cyan))
+    );
+  }
+
+  /* Glow effect for important elements */
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
+  }
+
+  .glow-cyan {
+    box-shadow: 0 0 20px hsl(var(--cyan) / 0.3);
+  }
+}

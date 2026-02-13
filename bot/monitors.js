@@ -24,12 +24,50 @@ export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
         try {
             await trailingStopCheck(bot);
             await bot.delay(3000);
+            await rolloverCloseCheck(bot);
+            await bot.delay(3000);
             await maxHoldCheck(bot);
             await bot.delay(3000);
         } finally {
             bot.monitorInProgress = false;
         }
     }, intervalMs);
+}
+
+export async function rolloverCloseCheck(bot) {
+    const now = new Date();
+    const timeZone = bot.rolloverTimeZone || "America/New_York";
+    const rolloverMinutes = (bot.rolloverHour ?? 17) * 60 + (bot.rolloverMinute ?? 0);
+    const bufferMinutes = bot.rolloverBufferMinutes ?? 10;
+    const currentMinutes = getMinutesInTimeZone(timeZone, now);
+    const inBuffer = currentMinutes >= rolloverMinutes - bufferMinutes && currentMinutes < rolloverMinutes;
+
+    if (!inBuffer) return;
+
+    const dateKey = getDateKeyInTimeZone(timeZone, now);
+    if (bot.lastRolloverCloseKey === dateKey) return;
+    bot.lastRolloverCloseKey = dateKey;
+
+    try {
+        const positions = await getOpenPositions();
+        if (!positions?.positions?.length) {
+            logger.info("[Rollover] No open positions to close.");
+            return;
+        }
+
+        for (const pos of positions.positions) {
+            const dealId = pos?.position?.dealId ?? pos?.dealId;
+            const symbol = pos?.market?.epic ?? pos?.position?.epic ?? "unknown";
+            if (!dealId) {
+                logger.warn(`[Rollover] Missing dealId for ${symbol}, cannot close.`);
+                continue;
+            }
+            await tradingService.closePosition(dealId, "rollover");
+            logger.info(`[Rollover] Closed ${symbol} ahead of rollover (${timeZone}).`);
+        }
+    } catch (error) {
+        logger.error("[Rollover] Error during rollover close check:", error);
+    }
 }
 
 export async function trailingStopCheck(bot) {
@@ -197,6 +235,27 @@ function parseOpenTimeMs(openTime) {
     }
 
     return NaN;
+}
+
+function getMinutesInTimeZone(timeZone, date = new Date()) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(date);
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+    const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+    return hour * 60 + minute;
+}
+
+function getDateKeyInTimeZone(timeZone, date = new Date()) {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(date);
 }
 
 export function startPriceMonitor(bot) {

@@ -40,6 +40,11 @@ class TradingBot {
             // Trade from London+NY overlap (13:00 UTC) through NY, Sydney, Tokyo until 07:00 UTC.
             { start: 13 * 60, end: 7 * 60 },
         ];
+        this.rolloverTimeZone = "America/New_York";
+        this.rolloverHour = 17;
+        this.rolloverMinute = 0;
+        this.rolloverBufferMinutes = 10;
+        this.lastRolloverCloseKey = null;
         this.tokens = null;
     }
 
@@ -164,6 +169,18 @@ class TradingBot {
             return currentMinutes >= startMinutes && (inclusiveEnd ? currentMinutes <= endMinutes : currentMinutes < endMinutes);
         }
         return currentMinutes >= startMinutes || (inclusiveEnd ? currentMinutes <= endMinutes : currentMinutes < endMinutes); // Overnight session
+    }
+
+    getMinutesInTimeZone(timeZone, date = new Date()) {
+        const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone,
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        }).formatToParts(date);
+        const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+        const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+        return hour * 60 + minute;
     }
 
     async getActiveSymbols() {
@@ -396,6 +413,15 @@ class TradingBot {
         });
 
         if (!allowed) {
+            return false;
+        }
+
+        const rolloverMinutes = this.rolloverHour * 60 + this.rolloverMinute;
+        const nyMinutes = this.getMinutesInTimeZone(this.rolloverTimeZone, now);
+        const inRolloverBuffer = nyMinutes >= rolloverMinutes - this.rolloverBufferMinutes && nyMinutes < rolloverMinutes;
+
+        if (inRolloverBuffer) {
+            logger.info(`[Bot][Rollover] Entry blocked (${this.rolloverTimeZone} ${this.rolloverHour}:${String(this.rolloverMinute).padStart(2, "0")}, buffer ${this.rolloverBufferMinutes}m).`);
             return false;
         }
 
