@@ -4,23 +4,12 @@ import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
-import { isNewsTime } from "./utils/newsChecker.js";
+import { getNewsStatus } from "./utils/newsChecker.js";
 import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals, startPriceMonitor, startWebSocket } from "./bot/monitors.js";
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
 const MONITOR_INTERVAL_MS = 60 * 1000;
-const DEFAULT_TRADING_WINDOWS = [
-    // London: 08:15–16:45
-    { start: 8 * 60 + 15, end: 16 * 60 + 45 },
-    // NY: 13:15–20:45
-    { start: 13 * 60 + 15, end: 20 * 60 + 45 },
-    // Sydney: but from 00:00–6:45 (overnight, so split into two ranges)
-    { start: 0, end: 6 * 60 + 45 },
-    // Tokyo: 0:15–8:45
-    { start: 0 * 60 + 15, end: 8 * 60 + 45 },
-];
-
 class TradingBot {
     constructor() {
         this.isRunning = false;
@@ -47,8 +36,12 @@ class TradingBot {
         this.openedBrockerDealIds = [];
         this.activeSymbols = [];
 
-        this.allowedTradingWindows = DEFAULT_TRADING_WINDOWS;
-
+        this.allowedTradingWindows = [
+            // London: 08:15–16:45
+            { start: 8 * 60 + 15, end: 16 * 60 + 45 },
+            // NY: 13:15–20:45
+            { start: 13 * 60 + 15, end: 20 * 60 + 45 },
+        ];
         this.tokens = null;
     }
 
@@ -408,10 +401,21 @@ class TradingBot {
             return false;
         }
 
-        const newsBlocked = await isNewsTime(symbol);
-        if (newsBlocked) {
+        const news = await getNewsStatus(symbol, {
+            now,
+            includeImpacts: ["High", "Medium"],
+            windowsByImpact: {
+                High: { preMinutes: 30, postMinutes: 5 },
+                Medium: { preMinutes: 15, postMinutes: 2 },
+            },
+        });
+
+        if (news.blocked) {
+            const titles = news.blockingEvents.map((e) => `${e.impact}:${e.country}:${e.title}`);
+            logger.info(`[Bot][News] Trading blocked for ${symbol} until ${news.blockUntilUtc?.toISOString()}. Events: ${titles.join(" | ")}`);
             return false;
         }
+
         return true;
     }
 
@@ -422,7 +426,13 @@ class TradingBot {
 
 const bot = new TradingBot();
 
-bot.initialize().catch((error) => {
-    logger.error("[bot.js] Bot initialization failed:", error);
-    process.exit(1);
-});
+const now = new Date();
+const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
+if (day === 0 || day === 6) {
+    logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
+} else {
+    bot.initialize().catch((error) => {
+        logger.error("[bot.js] Bot initialization failed:", error);
+        process.exit(1);
+    });
+}

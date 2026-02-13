@@ -20,7 +20,6 @@ const SESSION_SYMBOLS = {
 };
 
 // export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
-
 export const SESSIONS = {
     LONDON: {
         START: "08:00",
