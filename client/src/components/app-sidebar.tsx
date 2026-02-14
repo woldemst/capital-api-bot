@@ -1,9 +1,7 @@
 import { useLocation } from "react-router-dom";
 import {
-  LayoutDashboard,
-  ListOrdered,
+  FlaskConical,
   TrendingUp,
-  LineChart,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
@@ -24,10 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { title: "Overview", url: "/", icon: LayoutDashboard },
-  { title: "Trades", url: "/trades", icon: ListOrdered },
-  { title: "Patterns", url: "/patterns", icon: TrendingUp },
-  { title: "Price Insights", url: "/prices", icon: LineChart },
+  { title: "Backtesting", url: "/", icon: FlaskConical },
 ];
 
 export function AppSidebar() {
@@ -51,7 +46,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div className="flex flex-col">
               <span className="text-sm font-semibold gradient-text">Trading Bot</span>
-              <span className="text-xs text-muted-foreground">Analytics</span>
+              <span className="text-xs text-muted-foreground">Backtest Hub</span>
             </div>
           )}
         </div>

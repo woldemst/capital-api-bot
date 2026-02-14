@@ -6,6 +6,7 @@ import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
 import { getNewsStatus } from "./utils/newsChecker.js";
 import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals, startPriceMonitor, startWebSocket } from "./bot/monitors.js";
+import { startHubServer } from "./services/hubServer.js";
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
@@ -448,15 +449,22 @@ class TradingBot {
     }
 }
 
-const bot = new TradingBot();
+startHubServer();
 
-const now = new Date();
-const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
-if (day === 0 || day === 6) {
-    logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
+const bot = new TradingBot();
+const hubOnlyMode = ["1", "true", "yes"].includes(String(process.env.HUB_ONLY || "").toLowerCase());
+
+if (hubOnlyMode) {
+    logger.info("[Bot] HUB_ONLY mode enabled. Trading logic is disabled.");
 } else {
-    bot.initialize().catch((error) => {
-        logger.error("[bot.js] Bot initialization failed:", error);
-        process.exit(1);
-    });
+    const now = new Date();
+    const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
+    if (day === 0 || day === 6) {
+        logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
+    } else {
+        bot.initialize().catch((error) => {
+            logger.error("[bot.js] Bot initialization failed:", error);
+            process.exit(1);
+        });
+    }
 }

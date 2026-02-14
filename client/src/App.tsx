@@ -6,10 +6,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import Overview from "./pages/Overview";
-import Trades from "./pages/Trades";
-import TradeDetail from "./pages/TradeDetail";
-import Patterns from "./pages/Patterns";
-import PriceInsights from "./pages/PriceInsights";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -31,10 +27,6 @@ const App = () => (
           <Routes>
             <Route element={<DashboardLayout />}>
               <Route path="/" element={<Overview />} />
-              <Route path="/trades" element={<Trades />} />
-              <Route path="/trades/:dealId" element={<TradeDetail />} />
-              <Route path="/patterns" element={<Patterns />} />
-              <Route path="/prices" element={<PriceInsights />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

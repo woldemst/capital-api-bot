@@ -203,6 +203,93 @@ export interface PriceFilters {
   cursor?: string;
 }
 
+// Backtesting
+export type BacktestStrategyId = "H4_H1_M15" | "H1_M15_M5" | "logged_live";
+
+export interface BacktestOptionStrategy {
+  id: BacktestStrategyId;
+  label: string;
+}
+
+export interface BacktestOptionsResponse {
+  symbols: string[];
+  sessions: string[];
+  strategies: BacktestOptionStrategy[];
+  defaults: {
+    maxHoldMinutes: number;
+    includeLogged: boolean;
+  };
+}
+
+export interface BacktestTradeSample {
+  dealId: string;
+  symbol: string;
+  signal: Direction;
+  openedAt: string;
+  closedAt: string;
+  closeReason: string;
+  entryPrice: number;
+  closePrice: number;
+  pnlPoints: number;
+}
+
+export interface BacktestSymbolBreakdown {
+  symbol: string;
+  trades: number;
+  wins: number;
+  winRate: number;
+  totalPoints: number;
+  avgPoints: number;
+}
+
+export interface BacktestStrategyResult {
+  strategyId: BacktestStrategyId;
+  source: "simulation" | "logs";
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  totalPoints: number;
+  expectancyPoints: number;
+  profitFactor: number;
+  maxDrawdownPoints: number;
+  avgHoldMinutes: number;
+  closeReasonCounts: {
+    hitTp: number;
+    hitSl: number;
+    timeout: number;
+    manualClose: number;
+    unknown: number;
+  };
+  bySymbol: BacktestSymbolBreakdown[];
+  equityPoints: EquityPoint[];
+  tradesSample: BacktestTradeSample[];
+}
+
+export interface BacktestCompareFilters {
+  from?: string;
+  to?: string;
+  symbols?: string[];
+  sessions?: string[];
+  strategies?: BacktestStrategyId[];
+  maxHoldMinutes?: number;
+  includeLogged?: boolean;
+  sampleLimit?: number;
+}
+
+export interface BacktestCompareResponse {
+  generatedAt: string;
+  filtersApplied: {
+    from: string | null;
+    to: string | null;
+    symbols: string[];
+    sessions: string[];
+    strategies: BacktestStrategyId[];
+    maxHoldMinutes: number;
+  };
+  strategyResults: BacktestStrategyResult[];
+}
+
 // Utility type for computed trade data
 export interface ComputedTrade extends Trade {
   pnl?: number;

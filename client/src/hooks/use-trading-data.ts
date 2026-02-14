@@ -10,8 +10,10 @@ import {
   getDailyPnL,
   getPatterns,
   getPriceSnapshots,
+  getBacktestOptions,
+  runBacktestCompare,
 } from "@/lib/api";
-import type { TradeFilters, MetricFilters, PriceFilters } from "@/types/trading";
+import type { TradeFilters, MetricFilters, PriceFilters, BacktestCompareFilters } from "@/types/trading";
 
 // Health check
 export function useHealth() {
@@ -99,5 +101,21 @@ export function usePriceSnapshots(filters: PriceFilters) {
     queryKey: ["prices", filters],
     queryFn: () => getPriceSnapshots(filters),
     enabled: !!filters.symbol,
+  });
+}
+
+export function useBacktestOptions() {
+  return useQuery({
+    queryKey: ["backtest", "options"],
+    queryFn: getBacktestOptions,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function useBacktestCompare(filters: BacktestCompareFilters, enabled = true) {
+  return useQuery({
+    queryKey: ["backtest", "compare", filters],
+    queryFn: () => runBacktestCompare(filters),
+    enabled,
   });
 }

@@ -5,6 +5,16 @@ import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
+const STRATEGY_VARIANTS = ["H4_H1_M15", "H1_M15_M5"];
+const DEFAULT_PRIMARY_VARIANT = "H1_M15_M5";
+const DEFAULT_FALLBACK_VARIANT = "H4_H1_M15";
+const PRIMARY_VARIANT = STRATEGY_VARIANTS.includes(process.env.PRIMARY_STRATEGY_VARIANT)
+    ? process.env.PRIMARY_STRATEGY_VARIANT
+    : DEFAULT_PRIMARY_VARIANT;
+const FALLBACK_VARIANT_RAW = STRATEGY_VARIANTS.includes(process.env.FALLBACK_STRATEGY_VARIANT)
+    ? process.env.FALLBACK_STRATEGY_VARIANT
+    : DEFAULT_FALLBACK_VARIANT;
+const FALLBACK_VARIANT = FALLBACK_VARIANT_RAW === PRIMARY_VARIANT ? null : FALLBACK_VARIANT_RAW;
 
 class TradingService {
     constructor() {
@@ -13,6 +23,7 @@ class TradingService {
         this.availableMargin = 0;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
+        logger.info(`[Strategy] Primary=${PRIMARY_VARIANT} Fallback=${FALLBACK_VARIANT || "disabled"}`);
     }
 
     setAccountBalance(balance) {
@@ -122,14 +133,14 @@ class TradingService {
                 return;
             }
             // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-            const primary = Strategy.generateSignal3Stage({ indicators, variant: "H4_H1_M15" });
+            const primary = Strategy.generateSignal3Stage({ indicators, variant: PRIMARY_VARIANT });
             let fallback = null;
 
             let { signal, reason = "" } = primary;
 
             // Fallback to secondary signal if primary is not generated
-            if (!signal) {
-                fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
+            if (!signal && FALLBACK_VARIANT) {
+                fallback = Strategy.generateSignal3Stage({ indicators, variant: FALLBACK_VARIANT });
                 const primaryBiasTrend = primary?.context?.biasTrend;
                 const primaryBiasDirection =
                     primaryBiasTrend === "bullish" ? "BUY" : primaryBiasTrend === "bearish" ? "SELL" : null;
@@ -144,7 +155,7 @@ class TradingService {
                     reason = fallback.reason || "";
                 } else if (fallback.signal) {
                     logger.debug(
-                        `[Signal] ${symbol}: fallback blocked (primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
+                        `[Signal] ${symbol}: fallback blocked (primary=${PRIMARY_VARIANT}, fallbackVariant=${FALLBACK_VARIANT}, primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
                     );
                 }
             }
