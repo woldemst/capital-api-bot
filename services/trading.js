@@ -1,7 +1,7 @@
 import { placePosition, updateTrailingStop, getDealConfirmation, closePosition as apiClosePosition, getOpenPositions, getHistorical } from "../api.js";
 import { RISK, ANALYSIS, CRYPTO_SYMBOLS } from "../config.js";
 import logger from "../utils/logger.js";
-import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.js";
+import { logTradeClose, logTradeOpen, logTradeTrailingStop, tradeTracker } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
@@ -459,6 +459,17 @@ class TradingService {
         try {
             await updateTrailingStop(dealId, price, entry, tp, dir, symbol);
             logger.info(`[Trail] Updated SL → ${newSL} for ${dealId}`);
+            const updatedTrailLog = logTradeTrailingStop({
+                dealId,
+                symbol,
+                price: newSL,
+                distance: trailDist,
+                reason: "trail",
+                timestamp: new Date().toISOString(),
+            });
+            if (!updatedTrailLog) {
+                logger.debug(`[Trail] Could not append trailing stop update to log for ${dealId}`);
+            }
         } catch (error) {
             logger.error(`[Trail] Error updating trailing stop:`, error);
         }
@@ -480,6 +491,17 @@ class TradingService {
             await updateTrailingStop(dealId, currentPrice, entryPrice, takeProfit, direction, symbol);
 
             logger.info(`[SoftExit] ${symbol}: misalignment → moved SL to breakeven for ${dealId}`);
+            const updatedTrailLog = logTradeTrailingStop({
+                dealId,
+                symbol,
+                price: entryPrice,
+                distance: Math.abs(Number(currentPrice) - Number(entryPrice)),
+                reason: "breakeven",
+                timestamp: new Date().toISOString(),
+            });
+            if (!updatedTrailLog) {
+                logger.debug(`[SoftExit] Could not append trailing stop update to log for ${dealId}`);
+            }
         } catch (e) {
             logger.error(`[SoftExit] Error updating SL to breakeven:`, e);
         }

@@ -297,9 +297,48 @@ export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPri
         closePrice: null,
         closedAt: null,
         tradeStats: null,
+        trailingStops: {
+            updates: [],
+        },
     };
 
     appendLine(logPath, payload);
+}
+
+export function logTradeTrailingStop({ dealId, symbol, price, distance, reason, timestamp }) {
+    const trailPrice = toNumber(price);
+    if (!dealId || trailPrice === null) return false;
+    const trailDistance = toNumber(distance);
+    const trailReason = reason === undefined || reason === null ? "" : String(reason);
+
+    const update = {
+        timestamp: toIsoTimestamp(timestamp) ?? new Date().toISOString(),
+        price: trailPrice,
+        distance: trailDistance,
+        reason: trailReason,
+    };
+
+    const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
+    const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
+
+    for (const logPath of candidates) {
+        const updated = updateEntry(logPath, dealId, (entry) => {
+            const trailingStops = entry?.trailingStops && typeof entry.trailingStops === "object" ? entry.trailingStops : { updates: [] };
+            const updates = Array.isArray(trailingStops.updates) ? [...trailingStops.updates, update] : [update];
+
+            return {
+                ...entry,
+                trailingStops: {
+                    ...trailingStops,
+                    updates,
+                },
+            };
+        });
+
+        if (updated) return true;
+    }
+
+    return false;
 }
 
 export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicatorsOnClosing, candlesOnClosing, timestamp }) {
