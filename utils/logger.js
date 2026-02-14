@@ -15,7 +15,7 @@ const LOG_LEVELS = {
     debug: 3,
 };
 
-const activeLogLevel = String(process.env.LOG_LEVEL || "info").toLowerCase();
+const activeLogLevel = String(process.env.LOG_LEVEL || "debug").toLowerCase();
 const activeLevelValue = LOG_LEVELS[activeLogLevel] ?? LOG_LEVELS.info;
 const shouldLog = (level) => LOG_LEVELS[level] <= activeLevelValue;
 
