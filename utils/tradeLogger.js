@@ -369,12 +369,12 @@ class TradeTracker {
     registerOpenDeal(dealId, symbol) {
         if (!dealId) return;
         const id = String(dealId);
-        console.log("registered opened deal id", id, "for: ", symbol);
+        logger.debug(`[tradeLogger] Registered opened deal id=${id} symbol=${symbol || "unknown"}`);
 
         if (!this.openDealIds.includes(id)) {
             this.openDealIds.push(id);
         }
-        console.log("[tradeLogger] openDealIds", this.openDealIds);
+        logger.debug(`[tradeLogger] openDealIds=${this.openDealIds.join(",")}`);
 
         if (symbol) this.dealIdToSymbol.set(id, symbol);
     }
@@ -406,7 +406,9 @@ class TradeTracker {
                 getHistorical(symbol, timeframes.M5, historyLength),
                 getHistorical(symbol, timeframes.M1, historyLength),
             ]);
-            console.log(`Fetched candles: ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`);
+            logger.debug(
+                `[tradeLogger][CandleFetch] ${symbol}: fetched ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`,
+            );
             return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
         } catch (error) {
             logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
@@ -473,7 +475,7 @@ class TradeTracker {
             // Prefer known symbol mappings; broker mapping is what your DealID monitor populates
             let symbol = this.dealIdToSymbol.get(id) || this.dealIdToSymbolBrocker.get(id) || null;
             try {
-                console.log("its", id, symbol);
+                logger.debug(`[tradeLogger][Reconcile] dealId=${id} symbol=${symbol || "unknown"}`);
 
                 const { entry } = getTradeEntry(id, symbol);
 

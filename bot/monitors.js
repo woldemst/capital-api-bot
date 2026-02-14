@@ -76,9 +76,12 @@ export async function rolloverCloseCheck(bot) {
 
 export async function trailingStopCheck(bot) {
     try {
-        logger.info(`[Monitoring] Trailing stop check at ${new Date().toISOString()}`);
         const positions = await getOpenPositions();
-        if (!positions?.positions?.length) return;
+        if (!positions?.positions?.length) {
+            logger.debug("[Monitoring] Trailing stop check: no open positions.");
+            return;
+        }
+        logger.info(`[Monitoring] Trailing stop check for ${positions.positions.length} open position(s).`);
         for (const pos of positions.positions) {
             const symbol = pos.market ? pos.market.epic : pos.position.epic;
 
@@ -167,11 +170,10 @@ export function logDeals(bot) {
 
     const run = async () => {
         if (bot.dealIdMonitorInProgress) {
-            logger.warn("[DealID Monitor] Previous tick still running; skipping.");
+            logger.debug("[DealID Monitor] Previous tick still running; skipping.");
             return;
         }
         bot.dealIdMonitorInProgress = true;
-        logger.info(`[DealID Monitor] tick ${new Date().toISOString()}`);
 
         try {
             const res = await getOpenPositions();
@@ -185,21 +187,37 @@ export function logDeals(bot) {
                 .filter(Boolean);
 
             const brokerDealIds = brokerDeals.map((d) => d.dealId);
+            const newlyOpened = [];
 
             for (const { dealId, symbol } of brokerDeals) {
                 if (!bot.openedBrockerDealIds.includes(dealId)) {
                     bot.openedBrockerDealIds.push(dealId);
                     tradeTracker.registerOpenBrockerDeal(dealId, symbol);
+                    newlyOpened.push(`${symbol || "unknown"}:${dealId}`);
                 }
             }
-            console.log("openedBrockerDealIds:", bot.openedBrockerDealIds);
 
             const closedDealIds = bot.openedBrockerDealIds.filter((id) => !brokerDealIds.includes(id));
 
             bot.openedBrockerDealIds = bot.openedBrockerDealIds.filter((id) => brokerDealIds.includes(id));
 
+            const now = Date.now();
+            const openCount = bot.openedBrockerDealIds.length;
+
+            if (newlyOpened.length || closedDealIds.length) {
+                const openedText = newlyOpened.length ? `opened=${newlyOpened.join(", ")}` : "opened=none";
+                const closedText = closedDealIds.length ? `closed=${closedDealIds.join(", ")}` : "closed=none";
+                logger.info(`[DealID Monitor] ${openedText} | ${closedText} | openNow=${openCount}`);
+                bot.lastDealIdMonitorSummaryAt = now;
+            } else {
+                const heartbeatMs = 5 * 60 * 1000;
+                if (!bot.lastDealIdMonitorSummaryAt || now - bot.lastDealIdMonitorSummaryAt >= heartbeatMs) {
+                    logger.info(`[DealID Monitor] heartbeat: openNow=${openCount}`);
+                    bot.lastDealIdMonitorSummaryAt = now;
+                }
+            }
+
             if (closedDealIds.length) {
-                console.log("closedDealIds", closedDealIds);
                 await tradeTracker.reconcileClosedDeals(closedDealIds);
                 closedDealIds.length = 0;
             }

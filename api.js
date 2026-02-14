@@ -28,7 +28,6 @@ export const startSession = async () => {
             }
         );
 
-        console.log("");
         logger.info("Session started");
         cst = response.headers["cst"];
         xsecurity = response.headers["x-security-token"];
@@ -37,8 +36,6 @@ export const startSession = async () => {
             logger.warn("Session tokens not received in response headers");
             logger.info("Response headers:", response.headers);
         }
-
-        // console.log(`\n\ncst: ${cst} \nxsecurity: ${xsecurity} \n`);
 
         return response.data;
     } catch (error) {
@@ -54,9 +51,8 @@ export const startSession = async () => {
 export const pingSession = async () => {
     try {
         const response = await axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() });
-        logger.info(`[API] Ping response: ${JSON.stringify(response.data)}`);
-        logger.info(`[API] securityToken: ${xsecurity}`);
-        logger.info(`[API] CST: ${cst}`);
+        const status = response?.data?.status || "OK";
+        logger.info(`[API] Ping OK (${status})`);
     } catch (error) {
         logger.error(`[api.js][API] Error pinging session: ${error.message}`);
         throw error;

@@ -131,7 +131,7 @@ class TradingService {
     async processPrice({ symbol, indicators, bid, ask }) {
         try {
             await this.syncOpenTradesFromBroker();
-            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+            logger.debug(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
 
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);

@@ -7,8 +7,21 @@ if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
+const LOG_LEVELS = {
+    error: 0,
+    warn: 1,
+    info: 2,
+    trade: 2,
+    debug: 3,
+};
+
+const activeLogLevel = String(process.env.LOG_LEVEL || "info").toLowerCase();
+const activeLevelValue = LOG_LEVELS[activeLogLevel] ?? LOG_LEVELS.info;
+const shouldLog = (level) => LOG_LEVELS[level] <= activeLevelValue;
+
 const logger = {
     info: (message) => {
+        if (!shouldLog("info")) return;
         const timestamp = new Date().toISOString();
         if (typeof message === "object") {
             console.log(`[INFO] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`);
@@ -18,6 +31,7 @@ const logger = {
     },
 
     error: (message, error) => {
+        if (!shouldLog("error")) return;
         const timestamp = new Date().toISOString();
         if (typeof message === "object") {
             console.error(`[ERROR] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`, error || "");
@@ -27,6 +41,7 @@ const logger = {
     },
 
     warn: (message, error) => {
+        if (!shouldLog("warn")) return;
         const timestamp = new Date().toISOString();
         if (typeof message === "object") {
             console.warn(`[WARN] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`, error || "");
@@ -36,6 +51,7 @@ const logger = {
     },
 
     trade: (action, symbol, details) => {
+        if (!shouldLog("trade")) return;
         const timestamp = new Date().toISOString();
         if (typeof details === "object") {
             console.log(`[TRADE] ${timestamp} | ${action} ${symbol}:\n${JSON.stringify(details, null, 2)}\n`);
@@ -45,6 +61,7 @@ const logger = {
     },
 
     debug: (message) => {
+        if (!shouldLog("debug")) return;
         const timestamp = new Date().toISOString();
         if (typeof message === "object") {
             console.debug(`[DEBUG] ${timestamp} |\n${JSON.stringify(message, null, 2)}\n`);

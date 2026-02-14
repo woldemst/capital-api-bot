@@ -91,7 +91,7 @@ class TradingBot {
         this.sessionPingInterval = setInterval(async () => {
             try {
                 await pingSession();
-                logger.info("Session pinged successfully");
+                logger.debug("[Bot] Session pinged successfully");
             } catch (error) {
                 logger.error("[bot.js] Session ping failed:", error.message);
             }
@@ -261,7 +261,7 @@ class TradingBot {
 
     // Analyzes a single symbol: fetches data, calculates indicators, and triggers trading logic.
     async analyzeSymbol(symbol) {
-        logger.info(`\n\n=== Processing ${symbol} ===`);
+        logger.debug(`[Analyze] Processing ${symbol}`);
 
         const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.maxCandleHistory);
 
