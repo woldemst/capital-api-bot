@@ -19,7 +19,7 @@ const SESSION_SYMBOLS = {
     TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
 };
 
-// export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
+export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
 export const SESSIONS = {
     LONDON: {
         START: "08:00",
@@ -40,13 +40,19 @@ export const SESSIONS = {
         START: "00:00",
         END: "09:00",
         SYMBOLS: SESSION_SYMBOLS.TOKYO,
+    },
+    CRYPTO: {
+        START: "00:00",
+        END: "23:59",
+        SYMBOLS: CRYPTO_SYMBOLS,
     }
 };
 
 export const RISK = {
     PER_TRADE: 0.01, // 2% risk per trade
+    CRYPTO_PER_TRADE: 0.008,
     MAX_POSITIONS: 5, // Maximum simultaneous positions
-    MAX_HOLD_TIME: 180, // Maximum hold time in minutes
+    MAX_HOLD_TIME: 300, // Maximum hold time in minutes
 };
 
 const TIMEFRAMES = {

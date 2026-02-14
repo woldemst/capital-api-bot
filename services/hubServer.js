@@ -3,15 +3,21 @@ import fs from "fs";
 import path from "path";
 import logger from "../utils/logger.js";
 import Strategy from "../strategies/strategies.js";
-import { SESSIONS } from "../config.js";
+import { SESSIONS, CRYPTO_SYMBOLS, RISK } from "../config.js";
 
 const HUB_PORT = Number(process.env.HUB_PORT || process.env.DASHBOARD_PORT || 3001);
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
 const PRICE_LOG_DIR = path.join(process.cwd(), "backtest", "prices");
 const CLIENT_DIST_DIR = path.join(process.cwd(), "client", "dist");
 const API_PREFIX = "/api";
-const BACKTEST_VARIANTS = ["H4_H1_M15", "H1_M15_M5"];
+const BACKTEST_STRATEGIES = {
+    FOREX_H1_M15_M5: { variant: "H1_M15_M5", assetClass: "forex" },
+    CRYPTO_H1_M15_M5: { variant: "H1_M15_M5", assetClass: "crypto" },
+};
+const BACKTEST_STRATEGY_IDS = Object.keys(BACKTEST_STRATEGIES);
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
+const CRYPTO_SYMBOL_SET = new Set((CRYPTO_SYMBOLS || []).map((symbol) => String(symbol).toUpperCase()));
+const DEFAULT_MAX_HOLD_MINUTES = Number.isFinite(Number(RISK.MAX_HOLD_TIME)) ? Number(RISK.MAX_HOLD_TIME) : 300;
 
 const CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -439,6 +445,10 @@ function getPipSize(symbol) {
     return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
 }
 
+function isCryptoSymbol(symbol) {
+    return CRYPTO_SYMBOL_SET.has(String(symbol || "").toUpperCase());
+}
+
 function getEntryPrice(direction, snapshot) {
     if (direction === "buy") return toNumber(snapshot?.ask) ?? toNumber(snapshot?.mid) ?? toNumber(snapshot?.price);
     return toNumber(snapshot?.bid) ?? toNumber(snapshot?.mid) ?? toNumber(snapshot?.price);
@@ -580,22 +590,26 @@ function buildBacktestOptions() {
         symbols: listAvailableSymbols(),
         sessions: BACKTEST_SESSIONS,
         strategies: [
-            { id: "H4_H1_M15", label: "H4 / H1 / M15" },
-            { id: "H1_M15_M5", label: "H1 / M15 / M5" },
+            { id: "FOREX_H1_M15_M5", label: "Forex H1 / M15 / M5" },
+            { id: "CRYPTO_H1_M15_M5", label: "Crypto H1 / M15 / M5" },
             { id: "logged_live", label: "Logged Live Strategy" },
         ],
         defaults: {
-            maxHoldMinutes: 180,
+            maxHoldMinutes: DEFAULT_MAX_HOLD_MINUTES,
             includeLogged: true,
         },
     };
 }
 
-function runSimulationForVariant({ strategyId, symbols, fromMs, toMs, selectedSessionsSet, maxHoldMinutes }) {
+function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fromMs, toMs, selectedSessionsSet, maxHoldMinutes }) {
     const allTrades = [];
-    const maxHold = Number.isFinite(maxHoldMinutes) && maxHoldMinutes > 0 ? maxHoldMinutes : 180;
+    const maxHold = Number.isFinite(maxHoldMinutes) && maxHoldMinutes > 0 ? maxHoldMinutes : DEFAULT_MAX_HOLD_MINUTES;
 
     for (const symbol of symbols) {
+        const symbolIsCrypto = isCryptoSymbol(symbol);
+        if (assetClass === "crypto" && !symbolIsCrypto) continue;
+        if (assetClass === "forex" && symbolIsCrypto) continue;
+
         const rows = loadPriceSnapshots(symbol).sort((a, b) => (parseTimestampMs(a.timestamp) ?? 0) - (parseTimestampMs(b.timestamp) ?? 0));
         if (!rows.length) continue;
 
@@ -653,7 +667,10 @@ function runSimulationForVariant({ strategyId, symbols, fromMs, toMs, selectedSe
             if (row.newsBlocked) continue;
             if (!matchesSessionFilter(row.timestamp, row.sessions, selectedSessionsSet)) continue;
 
-            const signalResult = Strategy.generateSignal3Stage({ indicators: row.indicators, variant: strategyId });
+            const signalResult =
+                assetClass === "crypto"
+                    ? Strategy.generateSignal3StageCrypto({ indicators: row.indicators, variant })
+                    : Strategy.generateSignal3StageForex({ indicators: row.indicators, variant });
             const signal = String(signalResult?.signal || "").toUpperCase();
             if (signal !== "BUY" && signal !== "SELL") continue;
 
@@ -663,13 +680,26 @@ function runSimulationForVariant({ strategyId, symbols, fromMs, toMs, selectedSe
 
             const spread = toNumber(row.spread) ?? Math.abs((toNumber(row.ask) ?? entryPrice) - (toNumber(row.bid) ?? entryPrice));
             const atr = toNumber(row?.indicators?.m15?.atr);
-            const fallbackStop = 8 * getPipSize(symbol);
-            const stopDistance = Math.max(
-                Number.isFinite(atr) ? 1.5 * atr : 0,
-                Number.isFinite(spread) ? spread * 2 : 0,
-                fallbackStop,
-            );
-            const takeProfitDistance = stopDistance * 2;
+            let stopDistance;
+            let takeProfitDistance;
+
+            if (assetClass === "crypto") {
+                const fallbackDistance = Math.max(entryPrice * 0.0045, (Number.isFinite(spread) ? spread : 0) * 3);
+                stopDistance = Math.max(
+                    Number.isFinite(atr) ? 2.2 * atr : 0,
+                    Number.isFinite(spread) ? spread * 3 : 0,
+                    fallbackDistance,
+                );
+                takeProfitDistance = stopDistance * 1.8;
+            } else {
+                const fallbackStop = 8 * getPipSize(symbol);
+                stopDistance = Math.max(
+                    Number.isFinite(atr) ? 1.5 * atr : 0,
+                    Number.isFinite(spread) ? spread * 2 : 0,
+                    fallbackStop,
+                );
+                takeProfitDistance = stopDistance * 2;
+            }
 
             const stopLoss = direction === "buy" ? entryPrice - stopDistance : entryPrice + stopDistance;
             const takeProfit = direction === "buy" ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
@@ -830,11 +860,11 @@ export function startHubServer() {
                 const selectedSessionsSet = new Set(selectedSessions);
 
                 const requestedStrategies = parseCsvParam(url.searchParams.get("strategies")).map((strategy) => String(strategy));
-                const selectedVariants = (requestedStrategies.length ? requestedStrategies : BACKTEST_VARIANTS).filter((strategy) =>
-                    BACKTEST_VARIANTS.includes(strategy),
+                const selectedStrategyIds = (requestedStrategies.length ? requestedStrategies : BACKTEST_STRATEGY_IDS).filter((strategyId) =>
+                    BACKTEST_STRATEGY_IDS.includes(strategyId),
                 );
                 const includeLogged = parseBoolean(url.searchParams.get("includeLogged"), true) || requestedStrategies.includes("logged_live");
-                const maxHoldMinutes = toNumber(url.searchParams.get("maxHoldMinutes")) ?? 180;
+                const maxHoldMinutes = toNumber(url.searchParams.get("maxHoldMinutes")) ?? DEFAULT_MAX_HOLD_MINUTES;
                 const sampleLimit = toNumber(url.searchParams.get("sampleLimit")) ?? 200;
                 const from = url.searchParams.get("from");
                 const to = url.searchParams.get("to");
@@ -843,9 +873,13 @@ export function startHubServer() {
 
                 const strategyResults = [];
 
-                for (const strategyId of selectedVariants) {
+                for (const strategyId of selectedStrategyIds) {
+                    const strategyConfig = BACKTEST_STRATEGIES[strategyId];
+                    if (!strategyConfig) continue;
                     const simulationTrades = runSimulationForVariant({
                         strategyId,
+                        variant: strategyConfig.variant,
+                        assetClass: strategyConfig.assetClass,
                         symbols,
                         fromMs,
                         toMs,

@@ -1,20 +1,20 @@
 import { placePosition, updateTrailingStop, getDealConfirmation, closePosition as apiClosePosition, getOpenPositions, getHistorical } from "../api.js";
-import { RISK, ANALYSIS } from "../config.js";
+import { RISK, ANALYSIS, CRYPTO_SYMBOLS } from "../config.js";
 import logger from "../utils/logger.js";
 import { logTradeClose, logTradeOpen, tradeTracker } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
-const STRATEGY_VARIANTS = ["H4_H1_M15", "H1_M15_M5"];
+const STRATEGY_VARIANTS = ["H1_M15_M5"];
 const DEFAULT_PRIMARY_VARIANT = "H1_M15_M5";
-const DEFAULT_FALLBACK_VARIANT = "H4_H1_M15";
+const DEFAULT_CRYPTO_VARIANT = "H1_M15_M5";
 const PRIMARY_VARIANT = STRATEGY_VARIANTS.includes(process.env.PRIMARY_STRATEGY_VARIANT)
     ? process.env.PRIMARY_STRATEGY_VARIANT
     : DEFAULT_PRIMARY_VARIANT;
-const FALLBACK_VARIANT_RAW = STRATEGY_VARIANTS.includes(process.env.FALLBACK_STRATEGY_VARIANT)
-    ? process.env.FALLBACK_STRATEGY_VARIANT
-    : DEFAULT_FALLBACK_VARIANT;
-const FALLBACK_VARIANT = FALLBACK_VARIANT_RAW === PRIMARY_VARIANT ? null : FALLBACK_VARIANT_RAW;
+const CRYPTO_VARIANT = STRATEGY_VARIANTS.includes(process.env.CRYPTO_STRATEGY_VARIANT)
+    ? process.env.CRYPTO_STRATEGY_VARIANT
+    : DEFAULT_CRYPTO_VARIANT;
+const CRYPTO_PER_TRADE = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : PER_TRADE;
 
 class TradingService {
     constructor() {
@@ -23,7 +23,7 @@ class TradingService {
         this.availableMargin = 0;
         this.dailyLoss = 0;
         this.dailyLossLimitPct = 0.05;
-        logger.info(`[Strategy] Primary=${PRIMARY_VARIANT} Fallback=${FALLBACK_VARIANT || "disabled"}`);
+        logger.info(`[Strategy] ForexPrimary=${PRIMARY_VARIANT} CryptoPrimary=${CRYPTO_VARIANT}`);
     }
 
     setAccountBalance(balance) {
@@ -66,11 +66,20 @@ class TradingService {
         return symbol.includes("JPY") ? 0.01 : 0.0001;
     }
 
+    isCryptoSymbol(symbol) {
+        return CRYPTO_SYMBOLS.includes(symbol);
+    }
+
     isSymbolTraded(symbol) {
         return this.openTrades.includes(symbol);
     }
 
     roundPrice(price, symbol) {
+        if (this.isCryptoSymbol(symbol)) {
+            if (price >= 1000) return Number(price).toFixed(2) * 1;
+            if (price >= 100) return Number(price).toFixed(3) * 1;
+            return Number(price).toFixed(4) * 1;
+        }
         const decimals = symbol.includes("JPY") ? 3 : 5;
         return Number(price).toFixed(decimals) * 1;
     }
@@ -132,32 +141,19 @@ class TradingService {
                 logger.debug(`[ProcessPrice] ${symbol} already in market.`);
                 return;
             }
-            // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-            const primary = Strategy.generateSignal3Stage({ indicators, variant: PRIMARY_VARIANT });
-            let fallback = null;
+            const isCrypto = this.isCryptoSymbol(symbol);
+            let primary;
+            let signal;
+            let reason = "";
 
-            let { signal, reason = "" } = primary;
-
-            // Fallback to secondary signal if primary is not generated
-            if (!signal && FALLBACK_VARIANT) {
-                fallback = Strategy.generateSignal3Stage({ indicators, variant: FALLBACK_VARIANT });
-                const primaryBiasTrend = primary?.context?.biasTrend;
-                const primaryBiasDirection =
-                    primaryBiasTrend === "bullish" ? "BUY" : primaryBiasTrend === "bearish" ? "SELL" : null;
-                const fallbackAllowed =
-                    primary.reason === "setup_blocked" &&
-                    !!fallback.signal &&
-                    !!primaryBiasDirection &&
-                    fallback.signal === primaryBiasDirection;
-
-                if (fallbackAllowed) {
-                    signal = fallback.signal;
-                    reason = fallback.reason || "";
-                } else if (fallback.signal) {
-                    logger.debug(
-                        `[Signal] ${symbol}: fallback blocked (primary=${PRIMARY_VARIANT}, fallbackVariant=${FALLBACK_VARIANT}, primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
-                    );
-                }
+            if (isCrypto) {
+                primary = Strategy.generateSignal3StageCrypto({ indicators, variant: CRYPTO_VARIANT });
+                signal = primary?.signal;
+                reason = primary?.reason || "";
+            } else {
+                primary = Strategy.generateSignal3StageForex({ indicators, variant: PRIMARY_VARIANT });
+                signal = primary?.signal;
+                reason = primary?.reason || "";
             }
 
             if (!signal) {
@@ -171,8 +167,7 @@ class TradingService {
                     .join(",");
                 const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
                 const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";
-                const fallbackText = fallback?.reason ? `, fallback=${fallback.reason}` : "";
-                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText}${fallbackText})`);
+                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText})`);
                 return;
             }
             // Re-check just placing
@@ -215,6 +210,13 @@ class TradingService {
     }
 
     async calculateTradeParameters(signal, symbol, bid, ask) {
+        if (this.isCryptoSymbol(symbol)) {
+            return this.calculateTradeParametersCrypto(signal, symbol, bid, ask);
+        }
+        return this.calculateTradeParametersForex(signal, symbol, bid, ask);
+    }
+
+    async calculateTradeParametersForex(signal, symbol, bid, ask) {
         const direction = this.normalizeDirection(signal);
         if (!["BUY", "SELL"].includes(direction)) {
             throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
@@ -232,7 +234,7 @@ class TradingService {
         const stopLossPrice = isBuy ? price - stopLossPips : price + stopLossPips;
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
-        const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
+        const size = this.positionSizeForex(this.accountBalance, price, stopLossPrice, symbol);
 
         return {
             size,
@@ -244,7 +246,38 @@ class TradingService {
         };
     }
 
-    positionSize(balance, entryPrice, stopLossPrice, symbol) {
+    async calculateTradeParametersCrypto(signal, symbol, bid, ask) {
+        const direction = this.normalizeDirection(signal);
+        if (!["BUY", "SELL"].includes(direction)) {
+            throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
+        }
+
+        const isBuy = direction === "BUY";
+        const price = this.resolveMarketPrice(direction, bid, ask);
+        if (!Number.isFinite(price)) {
+            throw new Error(`[Trade Params] Missing valid market price for ${symbol} (${direction})`);
+        }
+
+        const atr = await this.calculateATR(symbol);
+        const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
+        const fallbackDistance = Math.max(price * 0.0045, spread * 3);
+        const stopLossDistance = Math.max(2.2 * atr, spread * 3, fallbackDistance);
+        const takeProfitDistance = stopLossDistance * 1.8;
+        const stopLossPrice = isBuy ? price - stopLossDistance : price + stopLossDistance;
+        const takeProfitPrice = isBuy ? price + takeProfitDistance : price - takeProfitDistance;
+        const size = this.positionSizeCrypto(this.accountBalance, price, stopLossPrice, symbol);
+
+        return {
+            size,
+            stopLossPrice,
+            takeProfitPrice,
+            stopLossPips: stopLossDistance,
+            takeProfitPips: takeProfitDistance,
+            price,
+        };
+    }
+
+    positionSizeForex(balance, entryPrice, stopLossPrice, symbol) {
         const riskAmount = balance * PER_TRADE;
         const pipValue = this.getPipValue(symbol); // Dynamic pip value
 
@@ -283,6 +316,31 @@ class TradingService {
         logger.debug(
             `[PositionSize] ${symbol}: raw=${riskAmount / (stopLossPips * pipValue)} final=${size} marginRequired=${marginRequired} maxPerTrade=${maxMarginPerTrade}`,
         );
+        return size;
+    }
+
+    positionSizeCrypto(balance, entryPrice, stopLossPrice, symbol) {
+        const riskAmount = balance * CRYPTO_PER_TRADE;
+        const stopDistance = Math.abs(entryPrice - stopLossPrice);
+        if (!Number.isFinite(stopDistance) || stopDistance <= 0) return 0.1;
+
+        let size = riskAmount / stopDistance;
+        if (!Number.isFinite(size) || size <= 0) return 0.1;
+
+        // Crypto CFDs usually allow fractional size.
+        size = Math.floor(size * 1000) / 1000;
+        if (size < 0.1) size = 0.1;
+
+        const leverage = 2;
+        const marginRequired = (size * entryPrice) / leverage;
+        const availableMargin = this.accountBalance;
+        const maxMarginPerTrade = availableMargin / 5;
+        if (marginRequired > maxMarginPerTrade && entryPrice > 0) {
+            size = Math.floor(((maxMarginPerTrade * leverage) / entryPrice) * 1000) / 1000;
+            if (size < 0.1) size = 0.1;
+        }
+
+        logger.debug(`[PositionSize][CRYPTO] ${symbol}: final=${size}`);
         return size;
     }
 

@@ -1,28 +1,46 @@
-const BIAS_ADX_MIN = 18;
-const SETUP_ADX_MIN = 18;
-const ENTRY_ADX_MIN = 16;
-const SETUP_RSI_SLOPE_TOLERANCE = 0.5;
-const BUY_SETUP_RSI_MIN = 32;
-const BUY_SETUP_RSI_MAX = 60;
-const SELL_SETUP_RSI_MIN = 45;
-const SELL_SETUP_RSI_MAX = 60;
-const BUY_ENTRY_RECLAIM_MAX = 0.0001;
+const STAGE_RULES = {
+    forex: {
+        biasAdxMin: 18,
+        setupAdxMin: 18,
+        entryAdxMin: 16,
+        setupRsiSlopeTolerance: 0.5,
+        buySetupRsiMin: 32,
+        buySetupRsiMax: 60,
+        sellSetupRsiMin: 45,
+        sellSetupRsiMax: 60,
+        buyEntryReclaimMax: 0.0001,
+        sellEntryReclaimMin: null,
+    },
+    crypto: {
+        biasAdxMin: 22,
+        setupAdxMin: 20,
+        entryAdxMin: 18,
+        setupRsiSlopeTolerance: 1.2,
+        buySetupRsiMin: 40,
+        buySetupRsiMax: 62,
+        sellSetupRsiMin: 38,
+        sellSetupRsiMax: 60,
+        buyEntryReclaimMax: 0.0015,
+        sellEntryReclaimMin: -0.0015,
+    },
+};
 
 class Strategy {
     constructor() {}
 
-    // Variants: H4_H1_M15 (default) and H1_M15_M5.
-    generateSignal3Stage({ indicators, variant }) {
+    // Only supported variant: H1_M15_M5.
+    generateSignal3Stage({ indicators, variant, assetClass = "forex" }) {
         if (!indicators) {
             return { signal: null, reason: "no_indicators", context: {} };
         }
 
-        const variants = {
-            H4_H1_M15: { biasTF: "h4", setupTF: "h1", entryTF: "m15" },
-            H1_M15_M5: { biasTF: "h1", setupTF: "m15", entryTF: "m5" },
-        };
-        const selectedVariant = variants[variant] ? variant : "H4_H1_M15";
-        const { biasTF, setupTF, entryTF } = variants[selectedVariant];
+        const selectedAssetClass = assetClass === "crypto" ? "crypto" : "forex";
+        const rules = STAGE_RULES[selectedAssetClass];
+
+        const selectedVariant = variant === "H1_M15_M5" ? variant : "H1_M15_M5";
+        const biasTF = "h1";
+        const setupTF = "m15";
+        const entryTF = "m5";
 
         const biasIndicators = indicators?.[biasTF];
         const setupIndicators = indicators?.[setupTF];
@@ -39,10 +57,11 @@ class Strategy {
         const entryAdx = this.adx(entryIndicators);
 
         const direction = biasTrend === "bullish" ? "BUY" : biasTrend === "bearish" ? "SELL" : null;
-        const biasStrengthOk = !this.isNumber(biasAdx) || biasAdx >= BIAS_ADX_MIN;
+        const biasStrengthOk = !this.isNumber(biasAdx) || biasAdx >= rules.biasAdxMin;
         const biasOk = direction !== null && biasStrengthOk;
 
         const baseContext = {
+            assetClass: selectedAssetClass,
             variant: selectedVariant,
             biasTF,
             setupTF,
@@ -70,14 +89,14 @@ class Strategy {
         const setupRsiRangeOk =
             this.isNumber(setupRsi) &&
             (isBuy
-                ? setupRsi >= BUY_SETUP_RSI_MIN && setupRsi <= BUY_SETUP_RSI_MAX
-                : setupRsi >= SELL_SETUP_RSI_MIN && setupRsi <= SELL_SETUP_RSI_MAX);
+                ? setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax
+                : setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax);
         const setupRsiSlopeOk =
             !this.isNumber(setupRsiPrev) ||
             (isBuy
-                ? setupRsi >= setupRsiPrev - SETUP_RSI_SLOPE_TOLERANCE
-                : setupRsi <= setupRsiPrev + SETUP_RSI_SLOPE_TOLERANCE);
-        const setupAdxOk = !this.isNumber(setupAdx) || setupAdx >= SETUP_ADX_MIN;
+                ? setupRsi >= setupRsiPrev - rules.setupRsiSlopeTolerance
+                : setupRsi <= setupRsiPrev + rules.setupRsiSlopeTolerance);
+        const setupAdxOk = !this.isNumber(setupAdx) || setupAdx >= rules.setupAdxMin;
         const setupChecks = {
             pullbackOk: setupPullbackOk,
             rsiRangeOk: setupRsiRangeOk,
@@ -105,9 +124,9 @@ class Strategy {
         const entryPriceReclaimOk =
             this.isNumber(entryPullbackValue) &&
             (isBuy
-                ? entryPullbackValue >= 0 && entryPullbackValue <= BUY_ENTRY_RECLAIM_MAX
-                : entryPullbackValue <= 0);
-        const entryAdxOk = !this.isNumber(entryAdx) || entryAdx >= ENTRY_ADX_MIN;
+                ? entryPullbackValue >= 0 && entryPullbackValue <= rules.buyEntryReclaimMax
+                : entryPullbackValue <= 0 && (!this.isNumber(rules.sellEntryReclaimMin) || entryPullbackValue >= rules.sellEntryReclaimMin));
+        const entryAdxOk = !this.isNumber(entryAdx) || entryAdx >= rules.entryAdxMin;
         const entryChecks = {
             macdOk: entryMacdOk,
             reclaimOk: entryPriceReclaimOk,
@@ -143,6 +162,14 @@ class Strategy {
                 gateStates: { biasOk, setupOk, entryOk },
             },
         };
+    }
+
+    generateSignal3StageForex({ indicators, variant }) {
+        return this.generateSignal3Stage({ indicators, variant, assetClass: "forex" });
+    }
+
+    generateSignal3StageCrypto({ indicators, variant = "H1_M15_M5" }) {
+        return this.generateSignal3Stage({ indicators, variant, assetClass: "crypto" });
     }
 
     isNumber(value) {

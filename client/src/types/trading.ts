@@ -204,7 +204,7 @@ export interface PriceFilters {
 }
 
 // Backtesting
-export type BacktestStrategyId = "H4_H1_M15" | "H1_M15_M5" | "logged_live";
+export type BacktestStrategyId = "FOREX_H1_M15_M5" | "CRYPTO_H1_M15_M5" | "logged_live";
 
 export interface BacktestOptionStrategy {
   id: BacktestStrategyId;

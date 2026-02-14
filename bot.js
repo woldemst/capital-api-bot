@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
@@ -184,6 +184,10 @@ class TradingBot {
         return hour * 60 + minute;
     }
 
+    isCryptoSymbol(symbol) {
+        return CRYPTO_SYMBOLS.includes(symbol);
+    }
+
     async getActiveSymbols() {
         // SESSIONS in config.js are defined in UTC (see config.js), so we must evaluate in UTC as well.
         const now = new Date();
@@ -193,6 +197,12 @@ class TradingBot {
         const activeSessionNames = [];
 
         for (const [name, session] of Object.entries(SESSIONS)) {
+            if (name === "CRYPTO") {
+                activeSessions.push(session?.SYMBOLS || []);
+                activeSessionNames.push(name);
+                continue;
+            }
+
             const startMinutes = this.parseMinutes(session?.START);
             const endMinutes = this.parseMinutes(session?.END);
             if (!this.inSession(currentMinutes, startMinutes, endMinutes)) continue;
@@ -400,6 +410,10 @@ class TradingBot {
     }
 
     async isTradingAllowed(symbol, context = {}) {
+        if (this.isCryptoSymbol(symbol)) {
+            return true;
+        }
+
         const now = context.now instanceof Date ? context.now : new Date();
         const currentMinutes = Number.isFinite(context.currentMinutes) ? context.currentMinutes : now.getUTCHours() * 60 + now.getUTCMinutes();
 
@@ -453,15 +467,19 @@ startHubServer();
 
 const bot = new TradingBot();
 const hubOnlyMode = ["1", "true", "yes"].includes(String(process.env.HUB_ONLY || "").toLowerCase());
+const hasAlwaysOnCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.length > 0;
 
 if (hubOnlyMode) {
     logger.info("[Bot] HUB_ONLY mode enabled. Trading logic is disabled.");
 } else {
     const now = new Date();
     const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
-    if (day === 0 || day === 6) {
+    if ((day === 0 || day === 6) && !hasAlwaysOnCrypto) {
         logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
     } else {
+        if ((day === 0 || day === 6) && hasAlwaysOnCrypto) {
+            logger.info("[Bot] Weekend detected, but CRYPTO symbols are configured. Starting bot.");
+        }
         bot.initialize().catch((error) => {
             logger.error("[bot.js] Bot initialization failed:", error);
             process.exit(1);

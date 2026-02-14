@@ -1,5 +1,5 @@
 import { getOpenPositions, getHistorical } from "../api.js";
-import { RISK } from "../config.js";
+import { RISK, CRYPTO_SYMBOLS } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import tradingService from "../services/trading.js";
 import webSocketService from "../services/websocket.js";
@@ -58,6 +58,10 @@ export async function rolloverCloseCheck(bot) {
         for (const pos of positions.positions) {
             const dealId = pos?.position?.dealId ?? pos?.dealId;
             const symbol = pos?.market?.epic ?? pos?.position?.epic ?? "unknown";
+            if (CRYPTO_SYMBOLS.includes(symbol)) {
+                logger.info(`[Rollover] Skip close for crypto ${symbol}.`);
+                continue;
+            }
             if (!dealId) {
                 logger.warn(`[Rollover] Missing dealId for ${symbol}, cannot close.`);
                 continue;

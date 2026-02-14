@@ -17,8 +17,8 @@ function formatPoints(value: number, digits = 5) {
 }
 
 function strategyLabel(id: BacktestStrategyId) {
-  if (id === "H4_H1_M15") return "H4 / H1 / M15";
-  if (id === "H1_M15_M5") return "H1 / M15 / M5";
+  if (id === "FOREX_H1_M15_M5") return "Forex H1 / M15 / M5";
+  if (id === "CRYPTO_H1_M15_M5") return "Crypto H1 / M15 / M5";
   return "Logged Live";
 }
 
@@ -27,10 +27,10 @@ export default function Overview() {
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
-  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["H4_H1_M15", "H1_M15_M5", "logged_live"]);
-  const [maxHoldMinutes, setMaxHoldMinutes] = useState<number>(180);
+  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5", "logged_live"]);
+  const [maxHoldMinutes, setMaxHoldMinutes] = useState<number>(300);
   const [runFilters, setRunFilters] = useState<BacktestCompareFilters | null>(null);
-  const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("H4_H1_M15");
+  const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5");
 
   const optionsQuery = useBacktestOptions();
   const compareQuery = useBacktestCompare(runFilters || {}, !!runFilters);
@@ -41,12 +41,9 @@ export default function Overview() {
       setSelectedSymbols(optionsQuery.data.symbols.slice(0, 6));
     }
     if (!selectedSessions.length) {
-      setSelectedSessions(["LONDON", "NY"]);
+      setSelectedSessions(optionsQuery.data.sessions);
     }
-    if (!maxHoldMinutes) {
-      setMaxHoldMinutes(optionsQuery.data.defaults.maxHoldMinutes || 180);
-    }
-  }, [optionsQuery.data, selectedSymbols.length, selectedSessions.length, maxHoldMinutes]);
+  }, [optionsQuery.data, selectedSymbols.length, selectedSessions.length]);
 
   useEffect(() => {
     const best = compareQuery.data?.strategyResults?.[0];
@@ -87,7 +84,7 @@ export default function Overview() {
       to: dateTo?.toISOString(),
       symbols: selectedSymbols,
       sessions: selectedSessions,
-      strategies: selectedStrategies.filter((id) => id !== "logged_live"),
+      strategies: selectedStrategies,
       includeLogged: selectedStrategies.includes("logged_live"),
       maxHoldMinutes,
       sampleLimit: 200,
@@ -122,7 +119,7 @@ export default function Overview() {
               min={30}
               max={720}
               value={maxHoldMinutes}
-              onChange={(event) => setMaxHoldMinutes(Number(event.target.value || 180))}
+              onChange={(event) => setMaxHoldMinutes(Number(event.target.value || 300))}
             />
           </div>
           <Button onClick={runBacktest} disabled={compareQuery.isFetching || !selectedSymbols.length || !selectedStrategies.length}>
