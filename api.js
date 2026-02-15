@@ -216,35 +216,82 @@ export async function updateTrailingStop(positionId, currentPrice, entryPrice, t
     }
 }
 
+function inferPriceDecimals(value, fallback = 5) {
+    const str = String(value ?? "");
+    if (!str.includes(".")) return fallback;
+    const part = str.split(".")[1] || "";
+    const cleaned = part.replace(/0+$/, "");
+    if (!cleaned.length) return fallback;
+    return Math.min(Math.max(cleaned.length, 0), 10);
+}
+
+function toRoundedNumber(value, decimals = 5) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return Number(num.toFixed(decimals));
+}
+
 export async function placePosition(symbol, direction, size, price, SL, TP) {
-    try {
-        const range = await getAllowedTPRange(symbol);
-        const decimals = range.decimals || (symbol.includes("JPY") ? 3 : 5);
+    return await withSessionRetry(async () => {
+        try {
+            const range = await getAllowedTPRange(symbol);
+            const decimals = Number.isInteger(range.decimals) ? range.decimals : symbol.includes("JPY") ? 3 : 5;
+            const stopLevel = toRoundedNumber(SL, decimals);
+            const profitLevel = toRoundedNumber(TP, decimals);
 
-        logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${SL}, TP: ${TP}`);
-        const position = {
-            epic: symbol,
-            direction: direction.toUpperCase(),
-            size: Number(size),
-            orderType: "MARKET",
-            guaranteedStop: false,
-            stopLevel: Number(SL).toFixed(decimals),
-            profitLevel: Number(TP).toFixed(decimals),
-        };
-        logger.info("[API] Sending position request:", position);
+            if (!Number.isFinite(stopLevel) || !Number.isFinite(profitLevel)) {
+                throw new Error(`Invalid stop/profit levels for ${symbol}. stop=${SL} profit=${TP}`);
+            }
 
-        const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
+            logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${stopLevel}, TP: ${profitLevel}`);
+            const position = {
+                epic: symbol,
+                direction: direction.toUpperCase(),
+                size: Number(size),
+                orderType: "MARKET",
+                guaranteedStop: false,
+                stopLevel,
+                profitLevel,
+            };
+            logger.info(`[API] Sending position request: ${JSON.stringify(position)}`);
 
-        logger.info("[API] Position created successfully:", response.data);
-        return response.data;
-    } catch (error) {
-        logger.error(`[API] Error placing position for ${symbol}:`, error.response ? JSON.stringify(error.response.data) : error.message);
-        if (error.response) {
-            logger.error(`[API] Response status:`, error.response.status);
-            logger.error(`[API] Response headers:`, JSON.stringify(error.response.headers));
+            const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
+
+            logger.info(`[API] Position created successfully: ${JSON.stringify(response.data)}`);
+            return response.data;
+        } catch (error) {
+            logger.error(`[API] Error placing position for ${symbol}:`, error.response ? JSON.stringify(error.response.data) : error.message);
+            if (error.response) {
+                logger.error(`[API] Response status:`, error.response.status);
+                logger.error(`[API] Response headers:`, JSON.stringify(error.response.headers));
+            }
+            throw error;
         }
-        throw error;
-    }
+    });
+}
+
+export async function updatePositionProtection(dealId, stopLevelInput, profitLevelInput, symbol = "") {
+    return await withSessionRetry(async () => {
+        const range = symbol ? await getAllowedTPRange(symbol) : { decimals: 5 };
+        const decimals = Number.isInteger(range.decimals) ? range.decimals : 5;
+        const stopLevel = toRoundedNumber(stopLevelInput, decimals);
+        const profitLevel = toRoundedNumber(profitLevelInput, decimals);
+        const payload = {};
+
+        if (Number.isFinite(stopLevel)) payload.stopLevel = stopLevel;
+        if (Number.isFinite(profitLevel)) payload.profitLevel = profitLevel;
+
+        if (!Object.keys(payload).length) {
+            throw new Error(`No valid SL/TP values provided for ${dealId}`);
+        }
+
+        logger.info(`[API] Updating position protection for ${dealId}: ${JSON.stringify(payload)}`);
+        const response = await axios.put(`${API.BASE_URL}/positions/${dealId}`, payload, {
+            headers: getHeaders(true),
+        });
+        logger.info(`[API] Position protection updated for ${dealId}: ${JSON.stringify(response.data)}`);
+        return response.data;
+    });
 }
 
 export async function gevtDealConfirmation(dealReference) {
@@ -291,8 +338,20 @@ export function getSessionTokens() {
 export async function getAllowedTPRange(symbol) {
     try {
         const details = await getMarketDetails(symbol);
-        const instr = details.instrument;
-        const decimals = instr.scalingFactor || instr.lotSizeScale || 5;
+        const instr = details?.instrument || {};
+        const snapshot = details?.snapshot || {};
+        const defaultDecimals = symbol.includes("JPY") ? 3 : 5;
+        const decimalsCandidate = Math.max(
+            inferPriceDecimals(snapshot?.bid, defaultDecimals),
+            inferPriceDecimals(snapshot?.offer, defaultDecimals),
+            inferPriceDecimals(snapshot?.high, defaultDecimals),
+            inferPriceDecimals(snapshot?.low, defaultDecimals),
+        );
+        const decimals = Number.isInteger(instr.decimalPlacesFactor)
+            ? instr.decimalPlacesFactor
+            : Number.isInteger(instr?.lotSizeScale)
+              ? instr.lotSizeScale
+              : decimalsCandidate;
         const minSLDistance = instr.limits?.stopDistance?.min || instr.limits?.stopLevel?.min || 0;
         const minTPDistance = instr.limits?.limitDistance?.min || instr.limits?.limitLevel?.min || 0;
 

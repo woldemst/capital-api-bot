@@ -1,4 +1,12 @@
-import { placePosition, updateTrailingStop, getDealConfirmation, closePosition as apiClosePosition, getOpenPositions, getHistorical } from "../api.js";
+import {
+    placePosition,
+    updateTrailingStop,
+    getDealConfirmation,
+    closePosition as apiClosePosition,
+    getOpenPositions,
+    getHistorical,
+    updatePositionProtection,
+} from "../api.js";
 import { RISK, ANALYSIS, CRYPTO_SYMBOLS } from "../config.js";
 import logger from "../utils/logger.js";
 import { logTradeClose, logTradeOpen, logTradeTrailingStop, tradeTracker } from "../utils/tradeLogger.js";
@@ -366,8 +374,20 @@ class TradingService {
 
             logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
 
-            const affectedDealId = confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId;
+            const affectedDealId =
+                confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId || confirmation?.affectedDeals?.[0]?.dealId || confirmation?.dealId;
             // or: const affectedDealId = confirmation?.affectedDeals?.[0]?.dealId;
+
+            if (affectedDealId) {
+                await this.ensurePositionProtection({
+                    dealId: affectedDealId,
+                    symbol,
+                    stopLossPrice,
+                    takeProfitPrice,
+                });
+            } else {
+                logger.warn(`[Order] Could not verify broker SL/TP for ${symbol}. Missing dealId in confirmation.`);
+            }
 
             try {
                 if (!affectedDealId) {
@@ -402,6 +422,48 @@ class TradingService {
         } catch (error) {
             logger.error(`[Order] Error placing order for ${symbol}:`, error);
         }
+    }
+
+    async ensurePositionProtection({ dealId, symbol, stopLossPrice, takeProfitPrice }) {
+        const wantedStop = Number(stopLossPrice);
+        const wantedProfit = Number(takeProfitPrice);
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const positionsResponse = await getOpenPositions();
+                const positions = Array.isArray(positionsResponse?.positions) ? positionsResponse.positions : [];
+                const match = positions.find((p) => (p?.position?.dealId ?? p?.dealId) === dealId);
+
+                if (!match) {
+                    await new Promise((resolve) => setTimeout(resolve, 600));
+                    continue;
+                }
+
+                const brokerStop = this.firstNumber(match?.position?.stopLevel, match?.position?.stopLoss);
+                const brokerProfit = this.firstNumber(match?.position?.profitLevel, match?.position?.limitLevel, match?.position?.takeProfit);
+
+                const hasStop = brokerStop !== null && brokerStop > 0;
+                const hasProfit = brokerProfit !== null && brokerProfit > 0;
+
+                if (hasStop && hasProfit) {
+                    logger.info(`[Order] Broker protection confirmed for ${symbol} (${dealId}): SL=${brokerStop} TP=${brokerProfit}`);
+                    return true;
+                }
+
+                logger.warn(
+                    `[Order] Missing broker SL/TP for ${symbol} (${dealId}) attempt ${attempt}/3. Current SL=${brokerStop ?? "none"} TP=${
+                        brokerProfit ?? "none"
+                    }. Applying SL=${wantedStop} TP=${wantedProfit}.`,
+                );
+                await updatePositionProtection(dealId, wantedStop, wantedProfit, symbol);
+                await new Promise((resolve) => setTimeout(resolve, 700));
+            } catch (error) {
+                logger.warn(`[Order] Failed protection check for ${symbol} (${dealId}) attempt ${attempt}/3: ${error.message}`);
+            }
+        }
+
+        logger.error(`[Order] Could not enforce broker SL/TP for ${symbol} (${dealId}) after retries.`);
+        return false;
     }
 
     // ============================================================
