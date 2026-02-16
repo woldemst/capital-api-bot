@@ -136,7 +136,7 @@ class TradingService {
     // ============================================================
     //                   MAIN PRICE LOOP
     // ============================================================
-    async processPrice({ symbol, indicators, bid, ask }) {
+    async processPrice({ symbol, indicators, bid, ask, timestamp, sessions = [] }) {
         try {
             await this.syncOpenTradesFromBroker();
             logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
@@ -153,13 +153,32 @@ class TradingService {
             let primary;
             let signal;
             let reason = "";
+            const signalTimestamp = timestamp || new Date().toISOString();
+            const marketContext = {
+                bid,
+                ask,
+                spread: Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : null,
+                price: this.resolveMarketPrice("BUY", bid, ask),
+            };
 
             if (isCrypto) {
-                primary = Strategy.generateSignal3StageCrypto({ indicators, variant: CRYPTO_VARIANT });
+                primary = Strategy.generateSignal3StageCrypto({
+                    indicators,
+                    variant: CRYPTO_VARIANT,
+                    market: marketContext,
+                    timestamp: signalTimestamp,
+                    sessions,
+                });
                 signal = primary?.signal;
                 reason = primary?.reason || "";
             } else {
-                primary = Strategy.generateSignal3StageForex({ indicators, variant: PRIMARY_VARIANT });
+                primary = Strategy.generateSignal3StageForex({
+                    indicators,
+                    variant: PRIMARY_VARIANT,
+                    market: marketContext,
+                    timestamp: signalTimestamp,
+                    sessions,
+                });
                 signal = primary?.signal;
                 reason = primary?.reason || "";
             }
@@ -173,9 +192,14 @@ class TradingService {
                     .filter(([, ok]) => !ok)
                     .map(([name]) => name)
                     .join(",");
+                const patternFails = Object.entries(primary?.context?.patternChecks || {})
+                    .filter(([, ok]) => !ok)
+                    .map(([name]) => name)
+                    .join(",");
                 const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
                 const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";
-                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText})`);
+                const patternFailText = patternFails ? `, patternFails=${patternFails}` : "";
+                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText}${patternFailText})`);
                 return;
             }
             // Re-check just placing

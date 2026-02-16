@@ -1,35 +1,37 @@
 const STAGE_RULES = {
     forex: {
-        biasAdxMin: 18,
+        biasAdxMin: 25,
         setupAdxMin: 18,
-        entryAdxMin: 16,
+        entryAdxMin: 18,
         setupRsiSlopeTolerance: 0.5,
-        buySetupRsiMin: 32,
-        buySetupRsiMax: 60,
+        buySetupRsiMin: 35,
+        buySetupRsiMax: 55,
         sellSetupRsiMin: 45,
-        sellSetupRsiMax: 60,
+        sellSetupRsiMax: 65,
         buyEntryReclaimMax: 0.0001,
         sellEntryReclaimMin: null,
     },
     crypto: {
-        biasAdxMin: 22,
+        biasAdxMin: 20,
         setupAdxMin: 20,
         entryAdxMin: 18,
         setupRsiSlopeTolerance: 1.2,
         buySetupRsiMin: 40,
         buySetupRsiMax: 62,
-        sellSetupRsiMin: 38,
-        sellSetupRsiMax: 60,
+        sellSetupRsiMin: 40,
+        sellSetupRsiMax: 70,
         buyEntryReclaimMax: 0.0015,
         sellEntryReclaimMin: -0.0015,
     },
 };
 
+const FOREX_SELL_SPREAD_PCT_MAX = 0.00014372884899331597;
+
 class Strategy {
     constructor() {}
 
     // Only supported variant: H1_M15_M5.
-    generateSignal3Stage({ indicators, variant, assetClass = "forex" }) {
+    generateSignal3Stage({ indicators, variant, assetClass = "forex", market = {}, timestamp = null, sessions = [] }) {
         if (!indicators) {
             return { signal: null, reason: "no_indicators", context: {} };
         }
@@ -39,13 +41,41 @@ class Strategy {
 
         const selectedVariant = variant === "H1_M15_M5" ? variant : "H1_M15_M5";
         const biasTF = "h1";
+        const trendTF = "h4";
         const setupTF = "m15";
         const entryTF = "m5";
 
         const biasIndicators = indicators?.[biasTF];
+        const d1Indicators = indicators?.d1;
+        const trendIndicators = indicators?.[trendTF];
         const setupIndicators = indicators?.[setupTF];
         const entryIndicators = indicators?.[entryTF];
 
+        const tsMs = Date.parse(String(timestamp || ""));
+        const hourUtc = Number.isFinite(tsMs) ? new Date(tsMs).getUTCHours() : null;
+        const normalizedSessions = Array.isArray(sessions) ? sessions.map((session) => String(session).toUpperCase()) : [];
+        const spreadValue =
+            this.isNumber(market?.spread)
+                ? market.spread
+                : this.isNumber(market?.ask) && this.isNumber(market?.bid)
+                  ? Math.abs(market.ask - market.bid)
+                  : null;
+        const marketPrice =
+            this.isNumber(market?.price)
+                ? market.price
+                : this.isNumber(market?.mid)
+                  ? market.mid
+                  : this.isNumber(market?.ask) && this.isNumber(market?.bid)
+                    ? (market.ask + market.bid) / 2
+                    : this.isNumber(market?.ask)
+                      ? market.ask
+                      : this.isNumber(market?.bid)
+                        ? market.bid
+                        : null;
+        const spreadPct = this.isNumber(spreadValue) && this.isNumber(marketPrice) && marketPrice !== 0 ? spreadValue / marketPrice : null;
+
+        const d1Trend = this.pickTrend(d1Indicators);
+        const h4Trend = this.pickTrend(trendIndicators);
         const biasTrend = this.pickTrend(biasIndicators);
         const biasAdx = this.adx(biasIndicators);
         const setupPullbackValue = this.priceVsEma9(setupIndicators);
@@ -56,14 +86,14 @@ class Strategy {
         const entryPullbackValue = this.priceVsEma9(entryIndicators);
         const entryAdx = this.adx(entryIndicators);
 
-        const direction = biasTrend === "bullish" ? "BUY" : biasTrend === "bearish" ? "SELL" : null;
-        const biasStrengthOk = !this.isNumber(biasAdx) || biasAdx >= rules.biasAdxMin;
-        const biasOk = direction !== null && biasStrengthOk;
+        const biasOk = this.isNumber(biasAdx);
 
         const baseContext = {
             assetClass: selectedAssetClass,
             variant: selectedVariant,
             biasTF,
+            d1Trend,
+            h4Trend,
             setupTF,
             entryTF,
             biasTrend,
@@ -75,101 +105,84 @@ class Strategy {
             entryMacdHist,
             entryPullbackValue,
             entryAdx,
+            hourUtc,
+            sessions: normalizedSessions,
+            spreadPct,
             gateStates: { biasOk, setupOk: false, entryOk: false },
         };
 
-        if (!biasOk) {
-            return { signal: null, reason: "bias_blocked", context: baseContext };
+        const forexSellChecks = {
+            trendAligned: d1Trend === "bearish" && h4Trend === "bearish" && biasTrend === "bearish",
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= 25,
+            spreadOk: this.isNumber(spreadPct) && spreadPct <= FOREX_SELL_SPREAD_PCT_MAX,
+            rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
+        };
+
+        const forexBuyChecks = {
+            hourOk: this.isNumber(hourUtc) && hourUtc >= 7 && hourUtc <= 15,
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= 30,
+            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue <= 0,
+            rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax,
+            macdOk: this.isNumber(entryMacdHist) && entryMacdHist > 0,
+        };
+
+        const cryptoSellChecks = {
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.biasAdxMin,
+            m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.setupAdxMin,
+            m15RsiOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
+            hourOk: this.isNumber(hourUtc) && hourUtc >= 7 && hourUtc <= 15,
+            sessionOk: normalizedSessions.includes("LONDON") || normalizedSessions.includes("NY"),
+        };
+
+        const forexSellOk = Object.values(forexSellChecks).every(Boolean);
+        const forexBuyOk = Object.values(forexBuyChecks).every(Boolean);
+        const cryptoSellOk = Object.values(cryptoSellChecks).every(Boolean);
+
+        let signal = null;
+        let patternChecks = {};
+
+        if (selectedAssetClass === "crypto") {
+            signal = cryptoSellOk ? "SELL" : null;
+            patternChecks = cryptoSellChecks;
+        } else if (forexSellOk) {
+            signal = "SELL";
+            patternChecks = forexSellChecks;
+        } else if (forexBuyOk) {
+            signal = "BUY";
+            patternChecks = forexBuyChecks;
+        } else {
+            patternChecks = { sell: forexSellChecks, buy: forexBuyChecks };
         }
 
-        const isBuy = direction === "BUY";
-        const setupPullbackOk =
-            this.isNumber(setupPullbackValue) &&
-            (isBuy ? setupPullbackValue <= 0 : setupPullbackValue >= 0);
-        const setupRsiRangeOk =
-            this.isNumber(setupRsi) &&
-            (isBuy
-                ? setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax
-                : setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax);
-        const setupRsiSlopeOk =
-            !this.isNumber(setupRsiPrev) ||
-            (isBuy
-                ? setupRsi >= setupRsiPrev - rules.setupRsiSlopeTolerance
-                : setupRsi <= setupRsiPrev + rules.setupRsiSlopeTolerance);
-        const setupAdxOk = !this.isNumber(setupAdx) || setupAdx >= rules.setupAdxMin;
-        const setupChecks = {
-            pullbackOk: setupPullbackOk,
-            rsiRangeOk: setupRsiRangeOk,
-            rsiSlopeOk: setupRsiSlopeOk,
-            adxOk: setupAdxOk,
-        };
-        const setupOk = setupPullbackOk && setupRsiRangeOk && setupRsiSlopeOk && setupAdxOk;
-        const setupScore = [setupPullbackOk, setupRsiRangeOk, setupRsiSlopeOk, setupAdxOk].filter(Boolean).length;
-
-        if (!setupOk) {
+        if (!signal) {
             return {
                 signal: null,
-                reason: "setup_blocked",
+                reason: "pattern_blocked",
                 context: {
                     ...baseContext,
-                    setupScore,
-                    setupChecks,
-                    gateStates: { biasOk, setupOk, entryOk: false },
-                },
-            };
-        }
-
-        const entryMacdOk =
-            this.isNumber(entryMacdHist) && (isBuy ? entryMacdHist > 0 : entryMacdHist < 0);
-        const entryPriceReclaimOk =
-            this.isNumber(entryPullbackValue) &&
-            (isBuy
-                ? entryPullbackValue >= 0 && entryPullbackValue <= rules.buyEntryReclaimMax
-                : entryPullbackValue <= 0 && (!this.isNumber(rules.sellEntryReclaimMin) || entryPullbackValue >= rules.sellEntryReclaimMin));
-        const entryAdxOk = !this.isNumber(entryAdx) || entryAdx >= rules.entryAdxMin;
-        const entryChecks = {
-            macdOk: entryMacdOk,
-            reclaimOk: entryPriceReclaimOk,
-            adxOk: entryAdxOk,
-        };
-        const entryOk = entryMacdOk && entryPriceReclaimOk && entryAdxOk;
-        const entryScore = [entryMacdOk, entryPriceReclaimOk, entryAdxOk].filter(Boolean).length;
-
-        if (!entryOk) {
-            return {
-                signal: null,
-                reason: "entry_blocked",
-                context: {
-                    ...baseContext,
-                    setupScore,
-                    setupChecks,
-                    entryScore,
-                    entryChecks,
-                    gateStates: { biasOk, setupOk, entryOk },
+                    patternChecks,
+                    gateStates: { biasOk, setupOk: false, entryOk: false },
                 },
             };
         }
 
         return {
-            signal: direction,
-            reason: "three_stage_confirmed",
+            signal,
+            reason: "pattern_confirmed",
             context: {
                 ...baseContext,
-                setupScore,
-                setupChecks,
-                entryScore,
-                entryChecks,
-                gateStates: { biasOk, setupOk, entryOk },
+                patternChecks,
+                gateStates: { biasOk, setupOk: true, entryOk: true },
             },
         };
     }
 
-    generateSignal3StageForex({ indicators, variant }) {
-        return this.generateSignal3Stage({ indicators, variant, assetClass: "forex" });
+    generateSignal3StageForex({ indicators, variant, market, timestamp, sessions }) {
+        return this.generateSignal3Stage({ indicators, variant, assetClass: "forex", market, timestamp, sessions });
     }
 
-    generateSignal3StageCrypto({ indicators, variant = "H1_M15_M5" }) {
-        return this.generateSignal3Stage({ indicators, variant, assetClass: "crypto" });
+    generateSignal3StageCrypto({ indicators, variant = "H1_M15_M5", market, timestamp, sessions }) {
+        return this.generateSignal3Stage({ indicators, variant, assetClass: "crypto", market, timestamp, sessions });
     }
 
     isNumber(value) {

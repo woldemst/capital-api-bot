@@ -41,6 +41,10 @@ class TradingBot {
             // Trade from London+NY overlap (13:00 UTC) through NY, Sydney, Tokyo until 07:00 UTC.
             { start: 13 * 60, end: 7 * 60 },
         ];
+        this.cryptoTradingWindows = [
+            // Crypto entries are restricted to the early UTC block where recent logs performed best.
+            { start: 0, end: 7 * 60 },
+        ];
         this.rolloverTimeZone = "America/New_York";
         this.rolloverHour = 17;
         this.rolloverMinute = 0;
@@ -188,27 +192,39 @@ class TradingBot {
         return CRYPTO_SYMBOLS.includes(symbol);
     }
 
-    async getActiveSymbols() {
-        // SESSIONS in config.js are defined in UTC (see config.js), so we must evaluate in UTC as well.
-        const now = new Date();
+    getActiveSessionNames(now = new Date()) {
         const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-
-        const activeSessions = [];
         const activeSessionNames = [];
 
         for (const [name, session] of Object.entries(SESSIONS)) {
             if (name === "CRYPTO") {
-                activeSessions.push(session?.SYMBOLS || []);
                 activeSessionNames.push(name);
                 continue;
             }
 
             const startMinutes = this.parseMinutes(session?.START);
             const endMinutes = this.parseMinutes(session?.END);
-            if (!this.inSession(currentMinutes, startMinutes, endMinutes)) continue;
+            if (this.inSession(currentMinutes, startMinutes, endMinutes)) {
+                activeSessionNames.push(name);
+            }
+        }
 
-            activeSessions.push(session.SYMBOLS);
-            activeSessionNames.push(name);
+        return activeSessionNames;
+    }
+
+    async getActiveSymbols() {
+        // SESSIONS in config.js are defined in UTC (see config.js), so we must evaluate in UTC as well.
+        const now = new Date();
+        const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+        const activeSessions = [];
+        const activeSessionNames = this.getActiveSessionNames(now);
+
+        for (const name of activeSessionNames) {
+            const session = SESSIONS?.[name];
+            if (session?.SYMBOLS) {
+                activeSessions.push(session.SYMBOLS);
+            }
         }
 
         // Combine symbols from all active sessions, remove duplicates
@@ -293,6 +309,12 @@ class TradingBot {
 
         // --- Fetch real-time bid/ask ---
         const { bid, ask } = await this.getBidAsk(symbol);
+        const timestamp = new Date().toISOString();
+        const activeSessions = this.getActiveSessionNames(new Date()).filter((sessionName) => {
+            if (sessionName === "CRYPTO") return this.isCryptoSymbol(symbol);
+            const sessionSymbols = SESSIONS?.[sessionName]?.SYMBOLS || [];
+            return sessionSymbols.includes(symbol);
+        });
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
@@ -301,6 +323,8 @@ class TradingBot {
             candles,
             bid,
             ask,
+            timestamp,
+            sessions: activeSessions,
         });
     }
 
@@ -410,12 +434,18 @@ class TradingBot {
     }
 
     async isTradingAllowed(symbol, context = {}) {
-        if (this.isCryptoSymbol(symbol)) {
-            return true;
-        }
-
         const now = context.now instanceof Date ? context.now : new Date();
         const currentMinutes = Number.isFinite(context.currentMinutes) ? context.currentMinutes : now.getUTCHours() * 60 + now.getUTCMinutes();
+
+        if (this.isCryptoSymbol(symbol)) {
+            const cryptoAllowed = this.cryptoTradingWindows.some((win) => {
+                return this.inSession(currentMinutes, win.start, win.end, { inclusiveEnd: true });
+            });
+            if (!cryptoAllowed) {
+                return false;
+            }
+            return true;
+        }
 
         const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
         if (day === 0 || day === 6) {

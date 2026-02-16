@@ -669,8 +669,30 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
 
             const signalResult =
                 assetClass === "crypto"
-                    ? Strategy.generateSignal3StageCrypto({ indicators: row.indicators, variant })
-                    : Strategy.generateSignal3StageForex({ indicators: row.indicators, variant });
+                    ? Strategy.generateSignal3StageCrypto({
+                          indicators: row.indicators,
+                          variant,
+                          market: {
+                              bid: row.bid ?? null,
+                              ask: row.ask ?? null,
+                              spread: row.spread ?? null,
+                              price: row.price ?? row.mid ?? null,
+                          },
+                          timestamp: row.timestamp,
+                          sessions: row.sessions ?? [],
+                      })
+                    : Strategy.generateSignal3StageForex({
+                          indicators: row.indicators,
+                          variant,
+                          market: {
+                              bid: row.bid ?? null,
+                              ask: row.ask ?? null,
+                              spread: row.spread ?? null,
+                              price: row.price ?? row.mid ?? null,
+                          },
+                          timestamp: row.timestamp,
+                          sessions: row.sessions ?? [],
+                      });
             const signal = String(signalResult?.signal || "").toUpperCase();
             if (signal !== "BUY" && signal !== "SELL") continue;
 
