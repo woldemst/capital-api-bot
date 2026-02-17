@@ -193,8 +193,14 @@ class TradingService {
                     .map(([name]) => name)
                     .join(",");
                 const patternFails = Object.entries(primary?.context?.patternChecks || {})
-                    .filter(([, ok]) => !ok)
-                    .map(([name]) => name)
+                    .flatMap(([name, ok]) => {
+                        if (ok && typeof ok === "object") {
+                            return Object.entries(ok)
+                                .filter(([, nestedOk]) => !nestedOk)
+                                .map(([nestedName]) => `${name}.${nestedName}`);
+                        }
+                        return ok ? [] : [name];
+                    })
                     .join(",");
                 const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
                 const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";

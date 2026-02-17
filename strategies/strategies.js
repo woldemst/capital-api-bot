@@ -1,31 +1,31 @@
 const STAGE_RULES = {
     forex: {
-        biasAdxMin: 25,
-        setupAdxMin: 18,
-        entryAdxMin: 18,
-        setupRsiSlopeTolerance: 0.5,
-        buySetupRsiMin: 35,
+        buyH1AdxMin: 20,
+        buyM15AdxMin: 25,
+        buySetupRsiMin: 40,
         buySetupRsiMax: 55,
+        buyPullbackMax: 0.002,
+        buyMacdHistMin: 0,
+        sellH1AdxMin: 15,
+        sellM15AdxMin: 10,
         sellSetupRsiMin: 45,
-        sellSetupRsiMax: 65,
-        buyEntryReclaimMax: 0.0001,
-        sellEntryReclaimMin: null,
+        sellSetupRsiMax: 55,
+        sellPullbackMin: -0.002,
+        sellMacdHistMax: -0.002,
+        spreadPctMax: 0.00025,
     },
     crypto: {
-        biasAdxMin: 20,
-        setupAdxMin: 20,
-        entryAdxMin: 18,
-        setupRsiSlopeTolerance: 1.2,
-        buySetupRsiMin: 40,
-        buySetupRsiMax: 62,
-        sellSetupRsiMin: 40,
-        sellSetupRsiMax: 70,
-        buyEntryReclaimMax: 0.0015,
-        sellEntryReclaimMin: -0.0015,
+        enabled: false,
+        sellH1AdxMin: 20,
+        sellM15AdxMin: 15,
+        sellSetupRsiMin: 30,
+        sellSetupRsiMax: 65,
+        sellHourStartUtc: 0,
+        sellHourEndUtc: 19,
+        sellMacdHistMax: -0.003,
+        spreadPctMax: 0.003,
     },
 };
-
-const FOREX_SELL_SPREAD_PCT_MAX = 0.00014372884899331597;
 
 class Strategy {
     constructor() {}
@@ -111,27 +111,47 @@ class Strategy {
             gateStates: { biasOk, setupOk: false, entryOk: false },
         };
 
+        if (selectedAssetClass === "crypto" && !rules.enabled) {
+            return {
+                signal: null,
+                reason: "crypto_disabled",
+                context: {
+                    ...baseContext,
+                    patternChecks: { cryptoEnabled: false },
+                    gateStates: { biasOk, setupOk: false, entryOk: false },
+                },
+            };
+        }
+
         const forexSellChecks = {
-            trendAligned: d1Trend === "bearish" && h4Trend === "bearish" && biasTrend === "bearish",
-            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= 25,
-            spreadOk: this.isNumber(spreadPct) && spreadPct <= FOREX_SELL_SPREAD_PCT_MAX,
+            trendAligned: true,
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.sellH1AdxMin,
+            m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.sellM15AdxMin,
+            spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
             rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
+            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue >= rules.sellPullbackMin,
+            macdOk: this.isNumber(entryMacdHist) && entryMacdHist <= rules.sellMacdHistMax,
         };
 
         const forexBuyChecks = {
-            hourOk: this.isNumber(hourUtc) && hourUtc >= 7 && hourUtc <= 15,
-            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= 30,
-            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue <= 0,
+            trendAligned: true,
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.buyH1AdxMin,
+            m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.buyM15AdxMin,
+            spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
+            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue <= rules.buyPullbackMax,
             rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax,
-            macdOk: this.isNumber(entryMacdHist) && entryMacdHist > 0,
+            macdOk: this.isNumber(entryMacdHist) && entryMacdHist >= rules.buyMacdHistMin,
         };
 
         const cryptoSellChecks = {
-            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.biasAdxMin,
-            m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.setupAdxMin,
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.sellH1AdxMin,
+            m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.sellM15AdxMin,
             m15RsiOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
-            hourOk: this.isNumber(hourUtc) && hourUtc >= 7 && hourUtc <= 15,
-            sessionOk: normalizedSessions.includes("LONDON") || normalizedSessions.includes("NY"),
+            m5MacdOk: this.isNumber(entryMacdHist) && entryMacdHist <= rules.sellMacdHistMax,
+            spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
+            hourOk: this.isNumber(hourUtc) && hourUtc >= rules.sellHourStartUtc && hourUtc <= rules.sellHourEndUtc,
+            sessionOk:
+                normalizedSessions.includes("TOKYO") || normalizedSessions.includes("SYDNEY") || normalizedSessions.includes("CRYPTO"),
         };
 
         const forexSellOk = Object.values(forexSellChecks).every(Boolean);

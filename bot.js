@@ -38,12 +38,15 @@ class TradingBot {
         this.activeSymbols = [];
 
         this.allowedTradingWindows = [
-            // Trade from London+NY overlap (13:00 UTC) through NY, Sydney, Tokyo until 07:00 UTC.
-            { start: 13 * 60, end: 7 * 60 },
+            // 00:00-13:59 UTC
+            { start: 0 * 60, end: 13 * 60 + 59 },
+            // 15:00-21:59 UTC (skip 14:00 hour, which was worst)
+            { start: 15 * 60, end: 21 * 60 + 59 },
         ];
+
         this.cryptoTradingWindows = [
-            // Crypto entries are restricted to the early UTC block where recent logs performed best.
-            { start: 0, end: 7 * 60 },
+            // Crypto is tradable all day (UTC).
+            { start: 0, end: 24 * 60 },
         ];
         this.rolloverTimeZone = "America/New_York";
         this.rolloverHour = 17;
@@ -466,7 +469,9 @@ class TradingBot {
         const inRolloverBuffer = nyMinutes >= rolloverMinutes - this.rolloverBufferMinutes && nyMinutes < rolloverMinutes;
 
         if (inRolloverBuffer) {
-            logger.info(`[Bot][Rollover] Entry blocked (${this.rolloverTimeZone} ${this.rolloverHour}:${String(this.rolloverMinute).padStart(2, "0")}, buffer ${this.rolloverBufferMinutes}m).`);
+            logger.info(
+                `[Bot][Rollover] Entry blocked (${this.rolloverTimeZone} ${this.rolloverHour}:${String(this.rolloverMinute).padStart(2, "0")}, buffer ${this.rolloverBufferMinutes}m).`,
+            );
             return false;
         }
 
