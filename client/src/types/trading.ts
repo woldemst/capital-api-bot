@@ -204,7 +204,7 @@ export interface PriceFilters {
 }
 
 // Backtesting
-export type BacktestStrategyId = "FOREX_H1_M15_M5" | "CRYPTO_H1_M15_M5" | "logged_live";
+export type BacktestStrategyId = "FOREX_H1_M15_M5" | "CRYPTO_H1_M15_M5";
 
 export interface BacktestOptionStrategy {
   id: BacktestStrategyId;
@@ -215,10 +215,6 @@ export interface BacktestOptionsResponse {
   symbols: string[];
   sessions: string[];
   strategies: BacktestOptionStrategy[];
-  defaults: {
-    maxHoldMinutes: number;
-    includeLogged: boolean;
-  };
 }
 
 export interface BacktestTradeSample {
@@ -272,8 +268,6 @@ export interface BacktestCompareFilters {
   symbols?: string[];
   sessions?: string[];
   strategies?: BacktestStrategyId[];
-  maxHoldMinutes?: number;
-  includeLogged?: boolean;
   sampleLimit?: number;
 }
 
@@ -285,7 +279,6 @@ export interface BacktestCompareResponse {
     symbols: string[];
     sessions: string[];
     strategies: BacktestStrategyId[];
-    maxHoldMinutes: number;
   };
   strategyResults: BacktestStrategyResult[];
   portfolioSummary?: {

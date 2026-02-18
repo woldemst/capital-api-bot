@@ -52,7 +52,6 @@ export const RISK = {
     PER_TRADE: 0.01, // 1% risk per trade
     CRYPTO_PER_TRADE: 0.008,
     MAX_POSITIONS: 5, // Maximum simultaneous positions
-    MAX_HOLD_TIME: 300, // Maximum hold time in minutes
 };
 
 const TIMEFRAMES = {

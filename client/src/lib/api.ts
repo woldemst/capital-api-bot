@@ -102,8 +102,6 @@ export async function runBacktestCompare(filters: BacktestCompareFilters): Promi
     symbols: filters.symbols?.length ? filters.symbols.join(",") : undefined,
     sessions: filters.sessions?.length ? filters.sessions.join(",") : undefined,
     strategies: filters.strategies?.length ? filters.strategies.join(",") : undefined,
-    maxHoldMinutes: filters.maxHoldMinutes,
-    includeLogged: filters.includeLogged === undefined ? undefined : (filters.includeLogged ? "1" : "0"),
     sampleLimit: filters.sampleLimit,
   };
   return fetchApi<BacktestCompareResponse>("/backtest/compare", params);

@@ -6,7 +6,6 @@ import { ErrorState } from "@/components/dashboard/error-state";
 import { KPICard } from "@/components/dashboard/kpi-card";
 import { EquityChart } from "@/components/charts/equity-charts";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BacktestCompareFilters, BacktestStrategyId } from "@/types/trading";
@@ -24,7 +23,7 @@ function formatMoney(value: number, digits = 2) {
 function strategyLabel(id: BacktestStrategyId) {
   if (id === "FOREX_H1_M15_M5") return "Forex H1 / M15 / M5";
   if (id === "CRYPTO_H1_M15_M5") return "Crypto H1 / M15 / M5";
-  return "Logged Live";
+  return id;
 }
 
 export default function Overview() {
@@ -33,7 +32,6 @@ export default function Overview() {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
-  const [maxHoldMinutes, setMaxHoldMinutes] = useState<number>(0);
   const [runFilters, setRunFilters] = useState<BacktestCompareFilters | null>(null);
   const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5");
 
@@ -99,15 +97,12 @@ export default function Overview() {
       symbols: selectedSymbols,
       sessions: selectedSessions,
       strategies: selectedStrategies,
-      includeLogged: selectedStrategies.includes("logged_live"),
-      maxHoldMinutes,
       sampleLimit: 200,
     });
   };
 
   const applyCombinedPreset = () => {
     setSelectedStrategies(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
-    setMaxHoldMinutes(0);
   };
 
   if (optionsQuery.isError) {
@@ -130,20 +125,8 @@ export default function Overview() {
       <div className="glass-card space-y-4 p-4">
         <div className="flex flex-wrap items-center gap-4">
           <DateRangePicker from={dateFrom} to={dateTo} onRangeChange={(from, to) => { setDateFrom(from); setDateTo(to); }} />
-          <div className="w-40">
-            <Label htmlFor="max-hold">Max Hold (min)</Label>
-            <Input
-              id="max-hold"
-              type="number"
-              min={0}
-              max={720}
-              value={maxHoldMinutes}
-              onChange={(event) => setMaxHoldMinutes(Number(event.target.value || 0))}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">Use 0 to disable timeout closing.</p>
-          </div>
           <Button variant="outline" onClick={applyCombinedPreset}>
-            Use Combined No-Hold Preset
+            Use Combined Preset
           </Button>
           <Button onClick={runBacktest} disabled={compareQuery.isFetching || !selectedSymbols.length || !selectedStrategies.length}>
             {compareQuery.isFetching ? "Running..." : "Run Backtest"}

@@ -17,7 +17,6 @@ const BACKTEST_STRATEGIES = {
 const BACKTEST_STRATEGY_IDS = Object.keys(BACKTEST_STRATEGIES);
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
 const CRYPTO_SYMBOL_SET = new Set((CRYPTO_SYMBOLS || []).map((symbol) => String(symbol).toUpperCase()));
-const DEFAULT_MAX_HOLD_MINUTES = Number.isFinite(Number(RISK.MAX_HOLD_TIME)) ? Number(RISK.MAX_HOLD_TIME) : 300;
 const DEFAULT_BACKTEST_START_BALANCE = 500;
 const DEFAULT_FOREX_RISK_PCT = Number.isFinite(Number(RISK.PER_TRADE)) ? Number(RISK.PER_TRADE) : 0.01;
 const DEFAULT_CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : DEFAULT_FOREX_RISK_PCT;
@@ -393,14 +392,6 @@ function parseCsvParam(value) {
         .filter(Boolean);
 }
 
-function parseBoolean(value, defaultValue = false) {
-    if (value === undefined || value === null || value === "") return defaultValue;
-    const normalized = String(value).trim().toLowerCase();
-    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
-    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
-    return defaultValue;
-}
-
 function parseTimestampMs(value) {
     if (!value) return null;
     const ts = Date.parse(String(value));
@@ -713,21 +704,12 @@ function buildBacktestOptions() {
         strategies: [
             { id: "FOREX_H1_M15_M5", label: "Forex H1 / M15 / M5" },
             { id: "CRYPTO_H1_M15_M5", label: "Crypto H1 / M15 / M5" },
-            { id: "logged_live", label: "Logged Live Strategy" },
         ],
-        defaults: {
-            maxHoldMinutes: 0,
-            includeLogged: false,
-        },
     };
 }
 
-function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fromMs, toMs, selectedSessionsSet, maxHoldMinutes }) {
+function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fromMs, toMs, selectedSessionsSet }) {
     const allTrades = [];
-    let maxHold = DEFAULT_MAX_HOLD_MINUTES;
-    if (Number.isFinite(maxHoldMinutes)) {
-        maxHold = maxHoldMinutes > 0 ? maxHoldMinutes : null;
-    }
 
     for (const symbol of symbols) {
         const symbolIsCrypto = isCryptoSymbol(symbol);
@@ -748,7 +730,6 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
 
             if (openTrade) {
                 const currentExitPrice = getExitPrice(openTrade.signal, row);
-                const minutesHeld = (tsMs - openTrade.openedAtMs) / 60000;
                 if (Number.isFinite(currentExitPrice)) {
                     let closePrice = null;
                     let closeReason = null;
@@ -767,11 +748,6 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
                     } else if (currentExitPrice >= openTrade.stopLoss) {
                         closePrice = openTrade.stopLoss;
                         closeReason = "hit_sl";
-                    }
-
-                    if (!closeReason && Number.isFinite(maxHold) && minutesHeld >= maxHold) {
-                        closePrice = currentExitPrice;
-                        closeReason = "timeout";
                     }
 
                     if (closeReason) {
@@ -895,23 +871,6 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
     return allTrades;
 }
 
-function buildLoggedStrategyTrades({ symbols, fromMs, toMs, selectedSessionsSet }) {
-    const symbolSet = new Set((symbols || []).map((symbol) => String(symbol).toUpperCase()));
-    const trades = loadTrades().filter((trade) => {
-        if (!trade.openedAt) return false;
-        if (symbolSet.size && !symbolSet.has(String(trade.symbol || "").toUpperCase())) return false;
-        const openedAtMs = parseTimestampMs(trade.openedAt);
-        if (!Number.isFinite(openedAtMs)) return false;
-        if (Number.isFinite(fromMs) && openedAtMs < fromMs) return false;
-        if (Number.isFinite(toMs) && openedAtMs > toMs) return false;
-        if (!matchesSessionFilter(trade.openedAt, null, selectedSessionsSet)) return false;
-        if (trade.status !== "closed") return false;
-        if (!Number.isFinite(trade.entryPrice) || !Number.isFinite(trade.closePrice)) return false;
-        return true;
-    });
-    return trades;
-}
-
 function sendJson(res, code, payload) {
     res.writeHead(code, { "Content-Type": "application/json" });
     res.end(JSON.stringify(payload));
@@ -1010,12 +969,8 @@ export function startHubServer() {
                 const selectedSessionsSet = new Set(selectedSessions);
 
                 const requestedStrategies = parseCsvParam(url.searchParams.get("strategies")).map((strategy) => String(strategy));
-                const selectedStrategyIds = (requestedStrategies.length ? requestedStrategies : BACKTEST_STRATEGY_IDS).filter((strategyId) =>
-                    BACKTEST_STRATEGY_IDS.includes(strategyId),
-                );
-                const includeLogged = parseBoolean(url.searchParams.get("includeLogged"), true) || requestedStrategies.includes("logged_live");
-                const maxHoldParam = toNumber(url.searchParams.get("maxHoldMinutes"));
-                const maxHoldMinutes = maxHoldParam === null ? 0 : maxHoldParam;
+                const validRequestedStrategyIds = requestedStrategies.filter((strategyId) => BACKTEST_STRATEGY_IDS.includes(strategyId));
+                const selectedStrategyIds = validRequestedStrategyIds.length ? validRequestedStrategyIds : BACKTEST_STRATEGY_IDS;
                 const sampleLimit = toNumber(url.searchParams.get("sampleLimit")) ?? 200;
                 const from = url.searchParams.get("from");
                 const to = url.searchParams.get("to");
@@ -1036,20 +991,9 @@ export function startHubServer() {
                         fromMs,
                         toMs,
                         selectedSessionsSet,
-                        maxHoldMinutes,
                     });
                     combinedSimulationTrades.push(...simulationTrades);
                     strategyResults.push(summarizeTrades(strategyId, "simulation", simulationTrades, sampleLimit));
-                }
-
-                if (includeLogged) {
-                    const loggedTrades = buildLoggedStrategyTrades({
-                        symbols,
-                        fromMs,
-                        toMs,
-                        selectedSessionsSet,
-                    });
-                    strategyResults.push(summarizeTrades("logged_live", "logs", loggedTrades, sampleLimit));
                 }
 
                 if (!strategyResults.length) {
@@ -1072,7 +1016,6 @@ export function startHubServer() {
                         symbols,
                         sessions: selectedSessions,
                         strategies: strategyResults.map((result) => result.strategyId),
-                        maxHoldMinutes,
                     },
                     strategyResults,
                     portfolioSummary,

@@ -5,7 +5,7 @@ import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
 import logger from "./utils/logger.js";
 import { getNewsStatus } from "./utils/newsChecker.js";
-import { startMonitorOpenTrades, trailingStopCheck, maxHoldCheck, logDeals, startPriceMonitor, startWebSocket } from "./bot/monitors.js";
+import { startMonitorOpenTrades, trailingStopCheck, logDeals, startPriceMonitor, startWebSocket } from "./bot/monitors.js";
 import { startHubServer } from "./services/hubServer.js";
 
 const { TIMEFRAMES } = ANALYSIS;
@@ -353,10 +353,6 @@ class TradingBot {
 
     async trailingStopCheck() {
         return trailingStopCheck(this);
-    }
-
-    async maxHoldCheck() {
-        return maxHoldCheck(this);
     }
 
     logDeals() {
