@@ -49,8 +49,8 @@ export const SESSIONS = {
 };
 
 export const RISK = {
-    PER_TRADE: 0.01, // 1% risk per trade
-    CRYPTO_PER_TRADE: 0.008,
+    PER_TRADE: 0.03, // 3% risk per trade
+    CRYPTO_PER_TRADE: 0.015,
     MAX_POSITIONS: 5, // Maximum simultaneous positions
 };
 
