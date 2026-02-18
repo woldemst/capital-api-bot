@@ -163,6 +163,7 @@ class TradingService {
 
             if (isCrypto) {
                 primary = Strategy.generateSignal3StageCrypto({
+                    symbol,
                     indicators,
                     variant: CRYPTO_VARIANT,
                     market: marketContext,
@@ -173,6 +174,7 @@ class TradingService {
                 reason = primary?.reason || "";
             } else {
                 primary = Strategy.generateSignal3StageForex({
+                    symbol,
                     indicators,
                     variant: PRIMARY_VARIANT,
                     market: marketContext,

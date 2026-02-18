@@ -1,13 +1,15 @@
 const STAGE_RULES = {
     forex: {
-        buyH1AdxMin: 20,
+        blockedSymbols: ["GBPUSD", "NZDUSD"],
+        blockedHoursUtc: [14],
+        buyH1AdxMin: 25,
         buyM15AdxMin: 25,
         buySetupRsiMin: 40,
         buySetupRsiMax: 55,
-        buyPullbackMax: 0.002,
+        buyPullbackMax: 0.001,
         buyMacdHistMin: 0,
-        sellH1AdxMin: 15,
-        sellM15AdxMin: 10,
+        sellH1AdxMin: 25,
+        sellM15AdxMin: 15,
         sellSetupRsiMin: 45,
         sellSetupRsiMax: 55,
         sellPullbackMin: -0.002,
@@ -31,7 +33,7 @@ class Strategy {
     constructor() {}
 
     // Only supported variant: H1_M15_M5.
-    generateSignal3Stage({ indicators, variant, assetClass = "forex", market = {}, timestamp = null, sessions = [] }) {
+    generateSignal3Stage({ symbol = "", indicators, variant, assetClass = "forex", market = {}, timestamp = null, sessions = [] }) {
         if (!indicators) {
             return { signal: null, reason: "no_indicators", context: {} };
         }
@@ -90,6 +92,7 @@ class Strategy {
 
         const baseContext = {
             assetClass: selectedAssetClass,
+            symbol: String(symbol || "").toUpperCase(),
             variant: selectedVariant,
             biasTF,
             d1Trend,
@@ -110,6 +113,34 @@ class Strategy {
             spreadPct,
             gateStates: { biasOk, setupOk: false, entryOk: false },
         };
+
+        if (selectedAssetClass === "forex") {
+            const normalizedSymbol = String(symbol || "").toUpperCase();
+            const blockedSymbols = Array.isArray(rules.blockedSymbols) ? rules.blockedSymbols : [];
+            const blockedHoursUtc = Array.isArray(rules.blockedHoursUtc) ? rules.blockedHoursUtc : [];
+            if (blockedSymbols.includes(normalizedSymbol)) {
+                return {
+                    signal: null,
+                    reason: "symbol_blocked",
+                    context: {
+                        ...baseContext,
+                        patternChecks: { symbolAllowed: false },
+                        gateStates: { biasOk, setupOk: false, entryOk: false },
+                    },
+                };
+            }
+            if (this.isNumber(hourUtc) && blockedHoursUtc.includes(hourUtc)) {
+                return {
+                    signal: null,
+                    reason: "hour_blocked",
+                    context: {
+                        ...baseContext,
+                        patternChecks: { hourAllowed: false },
+                        gateStates: { biasOk, setupOk: false, entryOk: false },
+                    },
+                };
+            }
+        }
 
         if (selectedAssetClass === "crypto" && !rules.enabled) {
             return {
@@ -197,12 +228,12 @@ class Strategy {
         };
     }
 
-    generateSignal3StageForex({ indicators, variant, market, timestamp, sessions }) {
-        return this.generateSignal3Stage({ indicators, variant, assetClass: "forex", market, timestamp, sessions });
+    generateSignal3StageForex({ symbol, indicators, variant, market, timestamp, sessions }) {
+        return this.generateSignal3Stage({ symbol, indicators, variant, assetClass: "forex", market, timestamp, sessions });
     }
 
-    generateSignal3StageCrypto({ indicators, variant = "H1_M15_M5", market, timestamp, sessions }) {
-        return this.generateSignal3Stage({ indicators, variant, assetClass: "crypto", market, timestamp, sessions });
+    generateSignal3StageCrypto({ symbol, indicators, variant = "H1_M15_M5", market, timestamp, sessions }) {
+        return this.generateSignal3Stage({ symbol, indicators, variant, assetClass: "crypto", market, timestamp, sessions });
     }
 
     isNumber(value) {

@@ -670,6 +670,7 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
             const signalResult =
                 assetClass === "crypto"
                     ? Strategy.generateSignal3StageCrypto({
+                          symbol,
                           indicators: row.indicators,
                           variant,
                           market: {
@@ -682,6 +683,7 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
                           sessions: row.sessions ?? [],
                       })
                     : Strategy.generateSignal3StageForex({
+                          symbol,
                           indicators: row.indicators,
                           variant,
                           market: {
