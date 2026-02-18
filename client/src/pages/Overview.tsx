@@ -16,6 +16,11 @@ function formatPoints(value: number, digits = 5) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
 }
 
+function formatMoney(value: number, digits = 2) {
+  if (!Number.isFinite(value)) return "0";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
 function strategyLabel(id: BacktestStrategyId) {
   if (id === "FOREX_H1_M15_M5") return "Forex H1 / M15 / M5";
   if (id === "CRYPTO_H1_M15_M5") return "Crypto H1 / M15 / M5";
@@ -27,13 +32,21 @@ export default function Overview() {
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
-  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5", "logged_live"]);
-  const [maxHoldMinutes, setMaxHoldMinutes] = useState<number>(300);
+  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
+  const [maxHoldMinutes, setMaxHoldMinutes] = useState<number>(0);
   const [runFilters, setRunFilters] = useState<BacktestCompareFilters | null>(null);
   const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5");
 
   const optionsQuery = useBacktestOptions();
   const compareQuery = useBacktestCompare(runFilters || {}, !!runFilters);
+
+  useEffect(() => {
+    if (dateFrom || dateTo) return;
+    const now = new Date();
+    const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    setDateFrom(from);
+    setDateTo(now);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     if (!optionsQuery.data) return;
@@ -53,6 +66,7 @@ export default function Overview() {
   }, [compareQuery.data]);
 
   const strategyResults = compareQuery.data?.strategyResults || [];
+  const portfolioSummary = compareQuery.data?.portfolioSummary || null;
   const bestStrategy = strategyResults[0] || null;
   const selectedStrategy = strategyResults.find((result) => result.strategyId === equityStrategyId) || strategyResults[0] || null;
 
@@ -91,6 +105,11 @@ export default function Overview() {
     });
   };
 
+  const applyCombinedPreset = () => {
+    setSelectedStrategies(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
+    setMaxHoldMinutes(0);
+  };
+
   if (optionsQuery.isError) {
     return (
       <ErrorState
@@ -116,12 +135,16 @@ export default function Overview() {
             <Input
               id="max-hold"
               type="number"
-              min={30}
+              min={0}
               max={720}
               value={maxHoldMinutes}
-              onChange={(event) => setMaxHoldMinutes(Number(event.target.value || 300))}
+              onChange={(event) => setMaxHoldMinutes(Number(event.target.value || 0))}
             />
+            <p className="mt-1 text-xs text-muted-foreground">Use 0 to disable timeout closing.</p>
           </div>
+          <Button variant="outline" onClick={applyCombinedPreset}>
+            Use Combined No-Hold Preset
+          </Button>
           <Button onClick={runBacktest} disabled={compareQuery.isFetching || !selectedSymbols.length || !selectedStrategies.length}>
             {compareQuery.isFetching ? "Running..." : "Run Backtest"}
           </Button>
@@ -186,6 +209,74 @@ export default function Overview() {
 
       {strategyResults.length && bestStrategy && selectedStrategy ? (
         <>
+          {portfolioSummary ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <KPICard
+                title="Combined End Balance"
+                value={formatMoney(portfolioSummary.endBalance)}
+                subtitle={`Start ${formatMoney(portfolioSummary.startBalance)}`}
+                trend={portfolioSummary.endBalance >= portfolioSummary.startBalance ? "up" : "down"}
+              />
+              <KPICard
+                title="Combined Return"
+                value={formatPercentage(portfolioSummary.returnPct)}
+                trend={portfolioSummary.returnPct >= 0 ? "up" : "down"}
+              />
+              <KPICard title="Combined Trades" value={portfolioSummary.totalTrades} />
+              <KPICard
+                title="Combined Win Rate"
+                value={formatPercentage(portfolioSummary.winRate)}
+                trend={portfolioSummary.winRate >= 0.5 ? "up" : "down"}
+              />
+              <KPICard
+                title="Combined Max DD"
+                value={formatPercentage(portfolioSummary.maxDrawdownPct)}
+                trend={portfolioSummary.maxDrawdownPct >= -0.03 ? "up" : "down"}
+              />
+            </div>
+          ) : null}
+
+          {portfolioSummary ? (
+            <div className="glass-card p-4">
+              <h3 className="mb-3 text-sm font-medium text-muted-foreground">Combined Portfolio Breakdown (Simulation Only)</h3>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Asset</TableHead>
+                    <TableHead>Trades</TableHead>
+                    <TableHead>Win Rate</TableHead>
+                    <TableHead>Total R</TableHead>
+                    <TableHead>PnL (Balance)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>Forex</TableCell>
+                    <TableCell>{portfolioSummary.byAsset.forex.trades}</TableCell>
+                    <TableCell>{formatPercentage(portfolioSummary.byAsset.forex.winRate)}</TableCell>
+                    <TableCell className={portfolioSummary.byAsset.forex.totalR >= 0 ? "text-profit" : "text-loss"}>
+                      {formatPoints(portfolioSummary.byAsset.forex.totalR, 3)}
+                    </TableCell>
+                    <TableCell className={portfolioSummary.byAsset.forex.pnlMoney >= 0 ? "text-profit" : "text-loss"}>
+                      {formatMoney(portfolioSummary.byAsset.forex.pnlMoney)}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Crypto</TableCell>
+                    <TableCell>{portfolioSummary.byAsset.crypto.trades}</TableCell>
+                    <TableCell>{formatPercentage(portfolioSummary.byAsset.crypto.winRate)}</TableCell>
+                    <TableCell className={portfolioSummary.byAsset.crypto.totalR >= 0 ? "text-profit" : "text-loss"}>
+                      {formatPoints(portfolioSummary.byAsset.crypto.totalR, 3)}
+                    </TableCell>
+                    <TableCell className={portfolioSummary.byAsset.crypto.pnlMoney >= 0 ? "text-profit" : "text-loss"}>
+                      {formatMoney(portfolioSummary.byAsset.crypto.pnlMoney)}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KPICard title="Best Strategy" value={strategyLabel(bestStrategy.strategyId)} />
             <KPICard title="Best Total Points" value={formatPoints(bestStrategy.totalPoints)} trend={bestStrategy.totalPoints >= 0 ? "up" : "down"} />

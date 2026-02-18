@@ -18,6 +18,9 @@ const BACKTEST_STRATEGY_IDS = Object.keys(BACKTEST_STRATEGIES);
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
 const CRYPTO_SYMBOL_SET = new Set((CRYPTO_SYMBOLS || []).map((symbol) => String(symbol).toUpperCase()));
 const DEFAULT_MAX_HOLD_MINUTES = Number.isFinite(Number(RISK.MAX_HOLD_TIME)) ? Number(RISK.MAX_HOLD_TIME) : 300;
+const DEFAULT_BACKTEST_START_BALANCE = 500;
+const DEFAULT_FOREX_RISK_PCT = Number.isFinite(Number(RISK.PER_TRADE)) ? Number(RISK.PER_TRADE) : 0.01;
+const DEFAULT_CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : DEFAULT_FOREX_RISK_PCT;
 
 const CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -576,6 +579,124 @@ function summarizeTrades(strategyId, source, trades, sampleLimit = 200) {
     };
 }
 
+function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALANCE, forexRiskPct = DEFAULT_FOREX_RISK_PCT, cryptoRiskPct = DEFAULT_CRYPTO_RISK_PCT } = {}) {
+    const prepared = trades
+        .filter((trade) => trade.status === "closed" && Number.isFinite(trade.entryPrice) && Number.isFinite(trade.closePrice))
+        .map((trade, index) => {
+            const openedAtMs = parseTimestampMs(trade.openedAt);
+            const closedAtMs = parseTimestampMs(trade.closedAt);
+            const riskPoints = Math.abs(Number(trade.entryPrice) - Number(trade.stopLoss));
+            const pnlPoints = computePnL(trade);
+            const rMultiple = riskPoints > 0 ? pnlPoints / riskPoints : 0;
+            const assetClass = trade.assetClass === "crypto" || isCryptoSymbol(trade.symbol) ? "crypto" : "forex";
+            const riskPct = assetClass === "crypto" ? cryptoRiskPct : forexRiskPct;
+            return {
+                key: trade.dealId ? String(trade.dealId) : `portfolio_${index}`,
+                assetClass,
+                openedAtMs,
+                closedAtMs,
+                rMultiple,
+                riskPct,
+            };
+        })
+        .filter((trade) => Number.isFinite(trade.openedAtMs) && Number.isFinite(trade.closedAtMs));
+
+    const byAsset = {
+        forex: { trades: 0, wins: 0, totalR: 0, pnlMoney: 0, winRate: 0 },
+        crypto: { trades: 0, wins: 0, totalR: 0, pnlMoney: 0, winRate: 0 },
+    };
+
+    if (!prepared.length) {
+        return {
+            startBalance,
+            endBalance: startBalance,
+            returnPct: 0,
+            maxDrawdownPct: 0,
+            totalTrades: 0,
+            wins: 0,
+            losses: 0,
+            winRate: 0,
+            totalR: 0,
+            expectancyR: 0,
+            profitFactorR: 0,
+            byAsset,
+        };
+    }
+
+    const events = [];
+    for (const trade of prepared) {
+        events.push({ tsMs: trade.openedAtMs, type: "open", trade });
+        events.push({ tsMs: trade.closedAtMs, type: "close", trade });
+    }
+    events.sort((a, b) => {
+        if (a.tsMs !== b.tsMs) return a.tsMs - b.tsMs;
+        if (a.type === b.type) return 0;
+        return a.type === "close" ? -1 : 1;
+    });
+
+    const riskByKey = new Map();
+    let balance = startBalance;
+    let peak = startBalance;
+    let maxDrawdownPct = 0;
+    let wins = 0;
+    let losses = 0;
+    let totalR = 0;
+    let grossWinR = 0;
+    let grossLossR = 0;
+    let totalTrades = 0;
+
+    for (const event of events) {
+        const trade = event.trade;
+        if (event.type === "open") {
+            riskByKey.set(trade.key, balance * trade.riskPct);
+            continue;
+        }
+
+        const riskAmount = riskByKey.has(trade.key) ? riskByKey.get(trade.key) : balance * trade.riskPct;
+        riskByKey.delete(trade.key);
+
+        const pnlMoney = riskAmount * trade.rMultiple;
+        balance += pnlMoney;
+        peak = Math.max(peak, balance);
+        const dd = peak > 0 ? (balance - peak) / peak : 0;
+        maxDrawdownPct = Math.min(maxDrawdownPct, dd);
+
+        totalTrades += 1;
+        totalR += trade.rMultiple;
+        if (trade.rMultiple > 0) {
+            wins += 1;
+            grossWinR += trade.rMultiple;
+        } else if (trade.rMultiple < 0) {
+            losses += 1;
+            grossLossR += trade.rMultiple;
+        }
+
+        const bucket = byAsset[trade.assetClass];
+        bucket.trades += 1;
+        bucket.totalR += trade.rMultiple;
+        bucket.pnlMoney += pnlMoney;
+        if (trade.rMultiple > 0) bucket.wins += 1;
+    }
+
+    byAsset.forex.winRate = byAsset.forex.trades ? byAsset.forex.wins / byAsset.forex.trades : 0;
+    byAsset.crypto.winRate = byAsset.crypto.trades ? byAsset.crypto.wins / byAsset.crypto.trades : 0;
+
+    return {
+        startBalance,
+        endBalance: balance,
+        returnPct: startBalance > 0 ? (balance - startBalance) / startBalance : 0,
+        maxDrawdownPct,
+        totalTrades,
+        wins,
+        losses,
+        winRate: totalTrades ? wins / totalTrades : 0,
+        totalR,
+        expectancyR: totalTrades ? totalR / totalTrades : 0,
+        profitFactorR: grossLossR < 0 ? grossWinR / Math.abs(grossLossR) : grossWinR > 0 ? 999 : 0,
+        byAsset,
+    };
+}
+
 function listAvailableSymbols() {
     if (!fs.existsSync(PRICE_LOG_DIR)) return [];
     return fs
@@ -595,15 +716,18 @@ function buildBacktestOptions() {
             { id: "logged_live", label: "Logged Live Strategy" },
         ],
         defaults: {
-            maxHoldMinutes: DEFAULT_MAX_HOLD_MINUTES,
-            includeLogged: true,
+            maxHoldMinutes: 0,
+            includeLogged: false,
         },
     };
 }
 
 function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fromMs, toMs, selectedSessionsSet, maxHoldMinutes }) {
     const allTrades = [];
-    const maxHold = Number.isFinite(maxHoldMinutes) && maxHoldMinutes > 0 ? maxHoldMinutes : DEFAULT_MAX_HOLD_MINUTES;
+    let maxHold = DEFAULT_MAX_HOLD_MINUTES;
+    if (Number.isFinite(maxHoldMinutes)) {
+        maxHold = maxHoldMinutes > 0 ? maxHoldMinutes : null;
+    }
 
     for (const symbol of symbols) {
         const symbolIsCrypto = isCryptoSymbol(symbol);
@@ -645,7 +769,7 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
                         closeReason = "hit_sl";
                     }
 
-                    if (!closeReason && minutesHeld >= maxHold) {
+                    if (!closeReason && Number.isFinite(maxHold) && minutesHeld >= maxHold) {
                         closePrice = currentExitPrice;
                         closeReason = "timeout";
                     }
@@ -731,6 +855,8 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
             tradeIndex += 1;
             openTrade = {
                 dealId: `sim_${strategyId}_${symbol}_${tsMs}_${tradeIndex}`,
+                strategyId,
+                assetClass,
                 symbol,
                 signal: direction,
                 entryPrice,
@@ -888,7 +1014,8 @@ export function startHubServer() {
                     BACKTEST_STRATEGY_IDS.includes(strategyId),
                 );
                 const includeLogged = parseBoolean(url.searchParams.get("includeLogged"), true) || requestedStrategies.includes("logged_live");
-                const maxHoldMinutes = toNumber(url.searchParams.get("maxHoldMinutes")) ?? DEFAULT_MAX_HOLD_MINUTES;
+                const maxHoldParam = toNumber(url.searchParams.get("maxHoldMinutes"));
+                const maxHoldMinutes = maxHoldParam === null ? 0 : maxHoldParam;
                 const sampleLimit = toNumber(url.searchParams.get("sampleLimit")) ?? 200;
                 const from = url.searchParams.get("from");
                 const to = url.searchParams.get("to");
@@ -896,6 +1023,7 @@ export function startHubServer() {
                 const toMs = parseTimestampMs(to);
 
                 const strategyResults = [];
+                const combinedSimulationTrades = [];
 
                 for (const strategyId of selectedStrategyIds) {
                     const strategyConfig = BACKTEST_STRATEGIES[strategyId];
@@ -910,6 +1038,7 @@ export function startHubServer() {
                         selectedSessionsSet,
                         maxHoldMinutes,
                     });
+                    combinedSimulationTrades.push(...simulationTrades);
                     strategyResults.push(summarizeTrades(strategyId, "simulation", simulationTrades, sampleLimit));
                 }
 
@@ -929,6 +1058,11 @@ export function startHubServer() {
                 }
 
                 strategyResults.sort((a, b) => b.totalPoints - a.totalPoints);
+                const portfolioSummary = summarizePortfolio(combinedSimulationTrades, {
+                    startBalance: DEFAULT_BACKTEST_START_BALANCE,
+                    forexRiskPct: DEFAULT_FOREX_RISK_PCT,
+                    cryptoRiskPct: DEFAULT_CRYPTO_RISK_PCT,
+                });
 
                 sendJson(res, 200, {
                     generatedAt: new Date().toISOString(),
@@ -941,6 +1075,7 @@ export function startHubServer() {
                         maxHoldMinutes,
                     },
                     strategyResults,
+                    portfolioSummary,
                 });
                 return;
             }

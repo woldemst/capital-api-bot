@@ -26,8 +26,7 @@ export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
             await bot.delay(3000);
             await rolloverCloseCheck(bot);
             await bot.delay(3000);
-            await maxHoldCheck(bot);
-            await bot.delay(3000);
+            // Max hold timeout is intentionally disabled for live trading.
         } finally {
             bot.monitorInProgress = false;
         }

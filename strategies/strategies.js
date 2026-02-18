@@ -17,15 +17,26 @@ const STAGE_RULES = {
         spreadPctMax: 0.00025,
     },
     crypto: {
-        enabled: false,
-        sellH1AdxMin: 20,
+        enabled: true,
+        blockedSymbols: ["BTCEUR", "SOLUSD", "ADAUSD"],
+        buyH1AdxMin: 18,
+        buyM15AdxMin: 5,
+        buySetupRsiMin: 45,
+        buySetupRsiMax: 62,
+        buyPullbackMax: 0.003,
+        buyMacdHistMin: -0.005,
+        buyHourStartUtc: 0,
+        buyHourEndUtc: 21,
+        sellH1AdxMin: 18,
         sellM15AdxMin: 15,
-        sellSetupRsiMin: 30,
-        sellSetupRsiMax: 65,
+        sellSetupRsiMin: 42,
+        sellSetupRsiMax: 60,
+        sellPullbackMin: -0.006,
         sellHourStartUtc: 0,
-        sellHourEndUtc: 19,
-        sellMacdHistMax: -0.003,
-        spreadPctMax: 0.003,
+        sellHourEndUtc: 21,
+        sellMacdHistMax: 0.01,
+        spreadPctMax: 0.006,
+        allowedSessions: ["CRYPTO"],
     },
 };
 
@@ -153,6 +164,21 @@ class Strategy {
                 },
             };
         }
+        if (selectedAssetClass === "crypto") {
+            const normalizedSymbol = String(symbol || "").toUpperCase();
+            const blockedSymbols = Array.isArray(rules.blockedSymbols) ? rules.blockedSymbols : [];
+            if (blockedSymbols.includes(normalizedSymbol)) {
+                return {
+                    signal: null,
+                    reason: "symbol_blocked",
+                    context: {
+                        ...baseContext,
+                        patternChecks: { symbolAllowed: false },
+                        gateStates: { biasOk, setupOk: false, entryOk: false },
+                    },
+                };
+            }
+        }
 
         const forexSellChecks = {
             trendAligned: true,
@@ -174,27 +200,50 @@ class Strategy {
             macdOk: this.isNumber(entryMacdHist) && entryMacdHist >= rules.buyMacdHistMin,
         };
 
+        const cryptoAllowedSessions =
+            Array.isArray(rules.allowedSessions) && rules.allowedSessions.length
+                ? rules.allowedSessions.map((session) => String(session).toUpperCase())
+                : ["CRYPTO"];
+        const cryptoSessionOk = normalizedSessions.some((session) => cryptoAllowedSessions.includes(session));
         const cryptoSellChecks = {
             h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.sellH1AdxMin,
             m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.sellM15AdxMin,
             m15RsiOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
+            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue >= rules.sellPullbackMin,
             m5MacdOk: this.isNumber(entryMacdHist) && entryMacdHist <= rules.sellMacdHistMax,
             spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
             hourOk: this.isNumber(hourUtc) && hourUtc >= rules.sellHourStartUtc && hourUtc <= rules.sellHourEndUtc,
-            sessionOk:
-                normalizedSessions.includes("TOKYO") || normalizedSessions.includes("SYDNEY") || normalizedSessions.includes("CRYPTO"),
+            sessionOk: cryptoSessionOk,
+        };
+        const cryptoBuyChecks = {
+            h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.buyH1AdxMin,
+            m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.buyM15AdxMin,
+            m15RsiOk: this.isNumber(setupRsi) && setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax,
+            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue <= rules.buyPullbackMax,
+            m5MacdOk: this.isNumber(entryMacdHist) && entryMacdHist >= rules.buyMacdHistMin,
+            spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
+            hourOk: this.isNumber(hourUtc) && hourUtc >= rules.buyHourStartUtc && hourUtc <= rules.buyHourEndUtc,
+            sessionOk: cryptoSessionOk,
         };
 
         const forexSellOk = Object.values(forexSellChecks).every(Boolean);
         const forexBuyOk = Object.values(forexBuyChecks).every(Boolean);
         const cryptoSellOk = Object.values(cryptoSellChecks).every(Boolean);
+        const cryptoBuyOk = Object.values(cryptoBuyChecks).every(Boolean);
 
         let signal = null;
         let patternChecks = {};
 
         if (selectedAssetClass === "crypto") {
-            signal = cryptoSellOk ? "SELL" : null;
-            patternChecks = cryptoSellChecks;
+            if (cryptoSellOk) {
+                signal = "SELL";
+                patternChecks = cryptoSellChecks;
+            } else if (cryptoBuyOk) {
+                signal = "BUY";
+                patternChecks = cryptoBuyChecks;
+            } else {
+                patternChecks = { sell: cryptoSellChecks, buy: cryptoBuyChecks };
+            }
         } else if (forexSellOk) {
             signal = "SELL";
             patternChecks = forexSellChecks;

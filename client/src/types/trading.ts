@@ -288,6 +288,35 @@ export interface BacktestCompareResponse {
     maxHoldMinutes: number;
   };
   strategyResults: BacktestStrategyResult[];
+  portfolioSummary?: {
+    startBalance: number;
+    endBalance: number;
+    returnPct: number;
+    maxDrawdownPct: number;
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    totalR: number;
+    expectancyR: number;
+    profitFactorR: number;
+    byAsset: {
+      forex: {
+        trades: number;
+        wins: number;
+        totalR: number;
+        pnlMoney: number;
+        winRate: number;
+      };
+      crypto: {
+        trades: number;
+        wins: number;
+        totalR: number;
+        pnlMoney: number;
+        winRate: number;
+      };
+    };
+  };
 }
 
 // Utility type for computed trade data
