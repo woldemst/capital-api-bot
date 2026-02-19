@@ -17,6 +17,7 @@ export function EquityChart({ data }: EquityChartProps) {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const initialHeight = window.innerWidth < 640 ? 220 : 300;
 
     const chart = createChart(containerRef.current, {
       layout: {
@@ -28,7 +29,7 @@ export function EquityChart({ data }: EquityChartProps) {
         horzLines: { color: isDark ? "#1e293b" : "#e2e8f0" },
       },
       width: containerRef.current.clientWidth,
-      height: 280,
+      height: initialHeight,
       rightPriceScale: {
         borderVisible: false,
       },
@@ -54,7 +55,10 @@ export function EquityChart({ data }: EquityChartProps) {
 
     const handleResize = () => {
       if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
+        chart.applyOptions({
+          width: containerRef.current.clientWidth,
+          height: window.innerWidth < 640 ? 220 : 300,
+        });
       }
     };
 
@@ -67,19 +71,36 @@ export function EquityChart({ data }: EquityChartProps) {
   }, [isDark]);
 
   useEffect(() => {
-    if (!seriesRef.current || !data.length) return;
+    if (!seriesRef.current) return;
+    if (!data.length) {
+      seriesRef.current.setData([]);
+      return;
+    }
 
-    const chartData: AreaData<Time>[] = data.map((point) => ({
-      time: point.timestamp.split("T")[0] as Time,
-      value: point.equity,
-    }));
+    const chartData: AreaData<Time>[] = data
+      .map((point) => {
+        const tsMs = Date.parse(point.timestamp || "");
+        if (!Number.isFinite(tsMs)) return null;
+        return {
+          time: Math.floor(tsMs / 1000) as Time,
+          value: point.equity,
+        };
+      })
+      .filter((point): point is AreaData<Time> => point !== null)
+      .sort((a, b) => Number(a.time) - Number(b.time));
+
+    if (!chartData.length) {
+      seriesRef.current.setData([]);
+      return;
+    }
 
     seriesRef.current.setData(chartData);
+    chartRef.current?.timeScale().fitContent();
   }, [data]);
 
   return (
-    <div className="glass-card p-4">
-      <h3 className="mb-4 text-sm font-medium text-muted-foreground">Equity Curve</h3>
+    <div className="space-y-3">
+      <h3 className="text-sm font-medium text-muted-foreground">Equity Curve</h3>
       <div ref={containerRef} className="w-full" />
     </div>
   );
@@ -99,6 +120,7 @@ export function DailyPnLChart({ data }: DailyPnLChartProps) {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const initialHeight = window.innerWidth < 640 ? 180 : 220;
 
     const chart = createChart(containerRef.current, {
       layout: {
@@ -110,7 +132,7 @@ export function DailyPnLChart({ data }: DailyPnLChartProps) {
         horzLines: { color: isDark ? "#1e293b" : "#e2e8f0" },
       },
       width: containerRef.current.clientWidth,
-      height: 200,
+      height: initialHeight,
       rightPriceScale: {
         borderVisible: false,
       },
@@ -128,7 +150,10 @@ export function DailyPnLChart({ data }: DailyPnLChartProps) {
 
     const handleResize = () => {
       if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
+        chart.applyOptions({
+          width: containerRef.current.clientWidth,
+          height: window.innerWidth < 640 ? 180 : 220,
+        });
       }
     };
 
@@ -143,18 +168,26 @@ export function DailyPnLChart({ data }: DailyPnLChartProps) {
   useEffect(() => {
     if (!seriesRef.current || !data.length) return;
 
-    const chartData: HistogramData<Time>[] = data.map((day) => ({
-      time: day.date as Time,
-      value: day.pnl,
-      color: day.pnl >= 0 ? "#22c55e" : "#ef4444",
-    }));
+    const chartData: HistogramData<Time>[] = data
+      .map((day) => {
+        const tsMs = Date.parse(day.date || "");
+        if (!Number.isFinite(tsMs)) return null;
+        return {
+          time: Math.floor(tsMs / 1000) as Time,
+          value: day.pnl,
+          color: day.pnl >= 0 ? "#22c55e" : "#ef4444",
+        };
+      })
+      .filter((point): point is HistogramData<Time> => point !== null)
+      .sort((a, b) => Number(a.time) - Number(b.time));
 
     seriesRef.current.setData(chartData);
+    chartRef.current?.timeScale().fitContent();
   }, [data]);
 
   return (
-    <div className="glass-card p-4">
-      <h3 className="mb-4 text-sm font-medium text-muted-foreground">Daily PnL</h3>
+    <div className="space-y-3">
+      <h3 className="text-sm font-medium text-muted-foreground">Daily PnL</h3>
       <div ref={containerRef} className="w-full" />
     </div>
   );

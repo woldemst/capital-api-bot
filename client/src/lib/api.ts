@@ -103,6 +103,9 @@ export async function runBacktestCompare(filters: BacktestCompareFilters): Promi
     sessions: filters.sessions?.length ? filters.sessions.join(",") : undefined,
     strategies: filters.strategies?.length ? filters.strategies.join(",") : undefined,
     sampleLimit: filters.sampleLimit,
+    startBalance: filters.startBalance,
+    forexRiskPct: filters.forexRiskPct,
+    cryptoRiskPct: filters.cryptoRiskPct,
   };
   return fetchApi<BacktestCompareResponse>("/backtest/compare", params);
 }

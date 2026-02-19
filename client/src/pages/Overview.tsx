@@ -6,9 +6,12 @@ import { ErrorState } from "@/components/dashboard/error-state";
 import { KPICard } from "@/components/dashboard/kpi-card";
 import { EquityChart } from "@/components/charts/equity-charts";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BacktestCompareFilters, BacktestStrategyId } from "@/types/trading";
+
+const KNOWN_CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
 
 function formatPoints(value: number, digits = 5) {
   if (!Number.isFinite(value)) return "0";
@@ -17,7 +20,7 @@ function formatPoints(value: number, digits = 5) {
 
 function formatMoney(value: number, digits = 2) {
   if (!Number.isFinite(value)) return "0";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}€`;
 }
 
 function strategyLabel(id: BacktestStrategyId) {
@@ -32,11 +35,18 @@ export default function Overview() {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
+  const [startBalanceInput, setStartBalanceInput] = useState<number>(500);
+  const [forexRiskInputPct, setForexRiskInputPct] = useState<number>(3);
+  const [cryptoRiskInputPct, setCryptoRiskInputPct] = useState<number>(2);
   const [runFilters, setRunFilters] = useState<BacktestCompareFilters | null>(null);
   const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5");
 
   const optionsQuery = useBacktestOptions();
   const compareQuery = useBacktestCompare(runFilters || {}, !!runFilters);
+  const availableCryptoSymbols = useMemo(
+    () => (optionsQuery.data?.symbols || []).filter((symbol) => KNOWN_CRYPTO_SYMBOLS.includes(symbol)),
+    [optionsQuery.data?.symbols],
+  );
 
   useEffect(() => {
     if (dateFrom || dateTo) return;
@@ -49,12 +59,16 @@ export default function Overview() {
   useEffect(() => {
     if (!optionsQuery.data) return;
     if (!selectedSymbols.length) {
-      setSelectedSymbols(optionsQuery.data.symbols.slice(0, 6));
+      setSelectedSymbols(optionsQuery.data.symbols.slice(0, 8));
     }
     if (!selectedSessions.length) {
-      setSelectedSessions(optionsQuery.data.sessions);
+      const defaults = optionsQuery.data.sessions;
+      setSelectedSessions(defaults);
+      if (defaults.includes("CRYPTO") && availableCryptoSymbols.length) {
+        setSelectedSymbols((prev) => Array.from(new Set([...prev, ...availableCryptoSymbols])));
+      }
     }
-  }, [optionsQuery.data, selectedSymbols.length, selectedSessions.length]);
+  }, [optionsQuery.data, selectedSymbols.length, selectedSessions.length, availableCryptoSymbols]);
 
   useEffect(() => {
     const best = compareQuery.data?.strategyResults?.[0];
@@ -72,6 +86,17 @@ export default function Overview() {
     () => strategyResults.reduce((acc, result) => acc + result.totalTrades, 0),
     [strategyResults],
   );
+  const rangeLabel = useMemo(() => {
+    if (dateFrom && dateTo) {
+      return `${dateFrom.toLocaleDateString()} - ${dateTo.toLocaleDateString()}`;
+    }
+    if (dateFrom && !dateTo) {
+      return `Since ${dateFrom.toLocaleDateString()}`;
+    }
+    return "All Time";
+  }, [dateFrom, dateTo]);
+  const assumptions = compareQuery.data?.portfolioAssumptions || null;
+  const moneyPnl = portfolioSummary ? portfolioSummary.endBalance - portfolioSummary.startBalance : 0;
 
   const toggleFromList = (value: string, list: string[], setList: (next: string[]) => void) => {
     if (list.includes(value)) {
@@ -89,8 +114,38 @@ export default function Overview() {
     }
     setSelectedStrategies([...selectedStrategies, strategyId]);
   };
+  const toggleSession = (session: string) => {
+    const isCryptoSession = session === "CRYPTO";
+    const cryptoSymbols = availableCryptoSymbols;
+    const cryptoSet = new Set(cryptoSymbols);
+
+    setSelectedSessions((prevSessions) => {
+      const nextSessions = prevSessions.includes(session)
+        ? prevSessions.filter((item) => item !== session)
+        : [...prevSessions, session];
+
+      if (isCryptoSession && cryptoSymbols.length) {
+        setSelectedSymbols((prevSymbols) => {
+          if (nextSessions.includes("CRYPTO")) {
+            const merged = Array.from(new Set([...prevSymbols, ...cryptoSymbols]));
+            if (merged.length === prevSymbols.length && prevSymbols.every((symbol) => merged.includes(symbol))) return prevSymbols;
+            return merged;
+          }
+          const filtered = prevSymbols.filter((symbol) => !cryptoSet.has(symbol));
+          if (filtered.length === prevSymbols.length) return prevSymbols;
+          return filtered;
+        });
+      }
+
+      return nextSessions;
+    });
+  };
 
   const runBacktest = () => {
+    const startBalance = Number.isFinite(startBalanceInput) && startBalanceInput > 0 ? startBalanceInput : 500;
+    const forexRiskPct = Number.isFinite(forexRiskInputPct) && forexRiskInputPct > 0 ? Math.min(forexRiskInputPct, 100) / 100 : 0.03;
+    const cryptoRiskPct = Number.isFinite(cryptoRiskInputPct) && cryptoRiskInputPct > 0 ? Math.min(cryptoRiskInputPct, 100) / 100 : 0.02;
+
     setRunFilters({
       from: dateFrom?.toISOString(),
       to: dateTo?.toISOString(),
@@ -98,11 +153,10 @@ export default function Overview() {
       sessions: selectedSessions,
       strategies: selectedStrategies,
       sampleLimit: 200,
+      startBalance,
+      forexRiskPct,
+      cryptoRiskPct,
     });
-  };
-
-  const applyCombinedPreset = () => {
-    setSelectedStrategies(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
   };
 
   if (optionsQuery.isError) {
@@ -116,36 +170,73 @@ export default function Overview() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold gradient-text">Backtesting Hub</h1>
-        <p className="text-sm text-muted-foreground">Compare strategies on JSONL minute logs by period, session and symbol.</p>
+    <div className="animate-fade-in space-y-4 sm:space-y-6">
+      <div className="space-y-1">
+        <h1 className="text-xl font-bold gradient-text sm:text-2xl">Backtesting Hub</h1>
+        <p className="text-sm text-muted-foreground">Compare strategy performance by time range, sessions, symbols and risk assumptions.</p>
       </div>
 
-      <div className="glass-card space-y-4 p-4">
-        <div className="flex flex-wrap items-center gap-4">
+      <div className="glass-card space-y-4 p-3 sm:p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <DateRangePicker from={dateFrom} to={dateTo} onRangeChange={(from, to) => { setDateFrom(from); setDateTo(to); }} />
-          <Button variant="outline" onClick={applyCombinedPreset}>
-            Use Combined Preset
-          </Button>
-          <Button onClick={runBacktest} disabled={compareQuery.isFetching || !selectedSymbols.length || !selectedStrategies.length}>
+          <Button className="w-full sm:w-auto" onClick={runBacktest} disabled={compareQuery.isFetching || !selectedSymbols.length || !selectedStrategies.length}>
             {compareQuery.isFetching ? "Running..." : "Run Backtest"}
           </Button>
         </div>
 
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="space-y-2">
+            <Label htmlFor="start-balance">Start Capital (€)</Label>
+            <Input
+              id="start-balance"
+              type="number"
+              min={1}
+              step={10}
+              value={startBalanceInput}
+              onChange={(event) => setStartBalanceInput(Number(event.target.value || 0))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="forex-risk">Forex Risk (%)</Label>
+            <Input
+              id="forex-risk"
+              type="number"
+              min={0.1}
+              max={100}
+              step={0.1}
+              value={forexRiskInputPct}
+              onChange={(event) => setForexRiskInputPct(Number(event.target.value || 0))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="crypto-risk">Crypto Risk (%)</Label>
+            <Input
+              id="crypto-risk"
+              type="number"
+              min={0.1}
+              max={100}
+              step={0.1}
+              value={cryptoRiskInputPct}
+              onChange={(event) => setCryptoRiskInputPct(Number(event.target.value || 0))}
+            />
+          </div>
+        </div>
+
         <div className="space-y-2">
           <Label>Symbols</Label>
-          <div className="flex flex-wrap gap-2">
-            {optionsQuery.data?.symbols.map((symbol) => (
-              <Button
-                key={symbol}
-                size="sm"
-                variant={selectedSymbols.includes(symbol) ? "default" : "outline"}
-                onClick={() => toggleFromList(symbol, selectedSymbols, setSelectedSymbols)}
-              >
-                {symbol}
-              </Button>
-            ))}
+          <div className="rounded-lg border border-border/60 p-2">
+            <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto pr-1">
+              {optionsQuery.data?.symbols.map((symbol) => (
+                <Button
+                  key={symbol}
+                  size="sm"
+                  variant={selectedSymbols.includes(symbol) ? "default" : "outline"}
+                  onClick={() => toggleFromList(symbol, selectedSymbols, setSelectedSymbols)}
+                >
+                  {symbol}
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -157,12 +248,13 @@ export default function Overview() {
                 key={session}
                 size="sm"
                 variant={selectedSessions.includes(session) ? "default" : "outline"}
-                onClick={() => toggleFromList(session, selectedSessions, setSelectedSessions)}
+                onClick={() => toggleSession(session)}
               >
                 {session}
               </Button>
             ))}
           </div>
+          <p className="text-xs text-muted-foreground">Selecting CRYPTO session auto-enables crypto symbols.</p>
         </div>
 
         <div className="space-y-2">
@@ -179,6 +271,7 @@ export default function Overview() {
               </Button>
             ))}
           </div>
+          <p className="text-xs text-muted-foreground">Combined preset is already active by default.</p>
         </div>
       </div>
 
@@ -190,10 +283,10 @@ export default function Overview() {
         />
       ) : null}
 
-      {strategyResults.length && bestStrategy && selectedStrategy ? (
+      {strategyResults.length > 0 && bestStrategy && selectedStrategy ? (
         <>
           {portfolioSummary ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
               <KPICard
                 title="Combined End Balance"
                 value={formatMoney(portfolioSummary.endBalance)}
@@ -201,9 +294,20 @@ export default function Overview() {
                 trend={portfolioSummary.endBalance >= portfolioSummary.startBalance ? "up" : "down"}
               />
               <KPICard
+                title="Money Earned"
+                value={formatMoney(moneyPnl)}
+                subtitle={rangeLabel}
+                trend={moneyPnl >= 0 ? "up" : "down"}
+              />
+              <KPICard
                 title="Combined Return"
                 value={formatPercentage(portfolioSummary.returnPct)}
                 trend={portfolioSummary.returnPct >= 0 ? "up" : "down"}
+              />
+              <KPICard
+                title="Combined Total R"
+                value={formatPoints(portfolioSummary.totalR, 3)}
+                trend={portfolioSummary.totalR >= 0 ? "up" : "down"}
               />
               <KPICard title="Combined Trades" value={portfolioSummary.totalTrades} />
               <KPICard
@@ -221,42 +325,51 @@ export default function Overview() {
 
           {portfolioSummary ? (
             <div className="glass-card p-4">
-              <h3 className="mb-3 text-sm font-medium text-muted-foreground">Combined Portfolio Breakdown (Simulation Only)</h3>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Asset</TableHead>
-                    <TableHead>Trades</TableHead>
-                    <TableHead>Win Rate</TableHead>
-                    <TableHead>Total R</TableHead>
-                    <TableHead>PnL (Balance)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow>
-                    <TableCell>Forex</TableCell>
-                    <TableCell>{portfolioSummary.byAsset.forex.trades}</TableCell>
-                    <TableCell>{formatPercentage(portfolioSummary.byAsset.forex.winRate)}</TableCell>
-                    <TableCell className={portfolioSummary.byAsset.forex.totalR >= 0 ? "text-profit" : "text-loss"}>
-                      {formatPoints(portfolioSummary.byAsset.forex.totalR, 3)}
-                    </TableCell>
-                    <TableCell className={portfolioSummary.byAsset.forex.pnlMoney >= 0 ? "text-profit" : "text-loss"}>
-                      {formatMoney(portfolioSummary.byAsset.forex.pnlMoney)}
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>Crypto</TableCell>
-                    <TableCell>{portfolioSummary.byAsset.crypto.trades}</TableCell>
-                    <TableCell>{formatPercentage(portfolioSummary.byAsset.crypto.winRate)}</TableCell>
-                    <TableCell className={portfolioSummary.byAsset.crypto.totalR >= 0 ? "text-profit" : "text-loss"}>
-                      {formatPoints(portfolioSummary.byAsset.crypto.totalR, 3)}
-                    </TableCell>
-                    <TableCell className={portfolioSummary.byAsset.crypto.pnlMoney >= 0 ? "text-profit" : "text-loss"}>
-                      {formatMoney(portfolioSummary.byAsset.crypto.pnlMoney)}
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+              <div className="mb-3 space-y-1">
+                <h3 className="text-sm font-medium text-muted-foreground">Combined Portfolio Breakdown</h3>
+                <p className="text-xs text-muted-foreground">
+                  Assumptions: Start {formatMoney(assumptions?.startBalance ?? startBalanceInput)} | Forex Risk{" "}
+                  {((assumptions?.forexRiskPct ?? (forexRiskInputPct / 100)) * 100).toFixed(2)}% | Crypto Risk{" "}
+                  {((assumptions?.cryptoRiskPct ?? (cryptoRiskInputPct / 100)) * 100).toFixed(2)}%
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[620px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Asset</TableHead>
+                      <TableHead>Trades</TableHead>
+                      <TableHead>Win Rate</TableHead>
+                      <TableHead>Total R</TableHead>
+                      <TableHead>Money PnL</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>Forex</TableCell>
+                      <TableCell>{portfolioSummary.byAsset.forex.trades}</TableCell>
+                      <TableCell>{formatPercentage(portfolioSummary.byAsset.forex.winRate)}</TableCell>
+                      <TableCell className={portfolioSummary.byAsset.forex.totalR >= 0 ? "text-profit" : "text-loss"}>
+                        {formatPoints(portfolioSummary.byAsset.forex.totalR, 3)}
+                      </TableCell>
+                      <TableCell className={portfolioSummary.byAsset.forex.pnlMoney >= 0 ? "text-profit" : "text-loss"}>
+                        {formatMoney(portfolioSummary.byAsset.forex.pnlMoney)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>Crypto</TableCell>
+                      <TableCell>{portfolioSummary.byAsset.crypto.trades}</TableCell>
+                      <TableCell>{formatPercentage(portfolioSummary.byAsset.crypto.winRate)}</TableCell>
+                      <TableCell className={portfolioSummary.byAsset.crypto.totalR >= 0 ? "text-profit" : "text-loss"}>
+                        {formatPoints(portfolioSummary.byAsset.crypto.totalR, 3)}
+                      </TableCell>
+                      <TableCell className={portfolioSummary.byAsset.crypto.pnlMoney >= 0 ? "text-profit" : "text-loss"}>
+                        {formatMoney(portfolioSummary.byAsset.crypto.pnlMoney)}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           ) : null}
 
@@ -271,34 +384,36 @@ export default function Overview() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-medium text-muted-foreground">Strategy Comparison</h3>
             </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Strategy</TableHead>
-                  <TableHead>Trades</TableHead>
-                  <TableHead>Win Rate</TableHead>
-                  <TableHead>Total Points</TableHead>
-                  <TableHead>Expectancy</TableHead>
-                  <TableHead>Profit Factor</TableHead>
-                  <TableHead>Max Drawdown</TableHead>
-                  <TableHead>Avg Hold</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {strategyResults.map((result) => (
-                  <TableRow key={result.strategyId}>
-                    <TableCell>{strategyLabel(result.strategyId)}</TableCell>
-                    <TableCell>{result.totalTrades}</TableCell>
-                    <TableCell>{formatPercentage(result.winRate)}</TableCell>
-                    <TableCell className={result.totalPoints >= 0 ? "text-profit" : "text-loss"}>{formatPoints(result.totalPoints)}</TableCell>
-                    <TableCell>{formatPoints(result.expectancyPoints)}</TableCell>
-                    <TableCell>{result.profitFactor.toFixed(2)}</TableCell>
-                    <TableCell className="text-loss">{formatPoints(result.maxDrawdownPoints)}</TableCell>
-                    <TableCell>{result.avgHoldMinutes.toFixed(1)}m</TableCell>
+            <div className="overflow-x-auto">
+              <Table className="min-w-[840px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Strategy</TableHead>
+                    <TableHead>Trades</TableHead>
+                    <TableHead>Win Rate</TableHead>
+                    <TableHead>Total Points</TableHead>
+                    <TableHead>Expectancy</TableHead>
+                    <TableHead>Profit Factor</TableHead>
+                    <TableHead>Max Drawdown</TableHead>
+                    <TableHead>Avg Hold</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {strategyResults.map((result) => (
+                    <TableRow key={result.strategyId}>
+                      <TableCell>{strategyLabel(result.strategyId)}</TableCell>
+                      <TableCell>{result.totalTrades}</TableCell>
+                      <TableCell>{formatPercentage(result.winRate)}</TableCell>
+                      <TableCell className={result.totalPoints >= 0 ? "text-profit" : "text-loss"}>{formatPoints(result.totalPoints)}</TableCell>
+                      <TableCell>{formatPoints(result.expectancyPoints)}</TableCell>
+                      <TableCell>{result.profitFactor.toFixed(2)}</TableCell>
+                      <TableCell className="text-loss">{formatPoints(result.maxDrawdownPoints)}</TableCell>
+                      <TableCell>{result.avgHoldMinutes.toFixed(1)}m</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
 
           <div className="glass-card p-4">
@@ -325,52 +440,56 @@ export default function Overview() {
           <div className="grid gap-6 xl:grid-cols-2">
             <div className="glass-card p-4">
               <h3 className="mb-3 text-sm font-medium text-muted-foreground">By Symbol ({strategyLabel(selectedStrategy.strategyId)})</h3>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Symbol</TableHead>
-                    <TableHead>Trades</TableHead>
-                    <TableHead>Win Rate</TableHead>
-                    <TableHead>Total Points</TableHead>
-                    <TableHead>Avg Points</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedStrategy.bySymbol.map((item) => (
-                    <TableRow key={`${selectedStrategy.strategyId}-${item.symbol}`}>
-                      <TableCell>{item.symbol}</TableCell>
-                      <TableCell>{item.trades}</TableCell>
-                      <TableCell>{formatPercentage(item.winRate)}</TableCell>
-                      <TableCell className={item.totalPoints >= 0 ? "text-profit" : "text-loss"}>{formatPoints(item.totalPoints)}</TableCell>
-                      <TableCell>{formatPoints(item.avgPoints)}</TableCell>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[560px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Symbol</TableHead>
+                      <TableHead>Trades</TableHead>
+                      <TableHead>Win Rate</TableHead>
+                      <TableHead>Total Points</TableHead>
+                      <TableHead>Avg Points</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedStrategy.bySymbol.map((item) => (
+                      <TableRow key={`${selectedStrategy.strategyId}-${item.symbol}`}>
+                        <TableCell>{item.symbol}</TableCell>
+                        <TableCell>{item.trades}</TableCell>
+                        <TableCell>{formatPercentage(item.winRate)}</TableCell>
+                        <TableCell className={item.totalPoints >= 0 ? "text-profit" : "text-loss"}>{formatPoints(item.totalPoints)}</TableCell>
+                        <TableCell>{formatPoints(item.avgPoints)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
 
             <div className="glass-card p-4">
               <h3 className="mb-3 text-sm font-medium text-muted-foreground">Recent Trades ({strategyLabel(selectedStrategy.strategyId)})</h3>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Symbol</TableHead>
-                    <TableHead>Signal</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Points</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedStrategy.tradesSample.slice(0, 20).map((trade) => (
-                    <TableRow key={trade.dealId}>
-                      <TableCell>{trade.symbol}</TableCell>
-                      <TableCell>{trade.signal.toUpperCase()}</TableCell>
-                      <TableCell>{trade.closeReason}</TableCell>
-                      <TableCell className={trade.pnlPoints >= 0 ? "text-profit" : "text-loss"}>{formatPoints(trade.pnlPoints)}</TableCell>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[520px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Symbol</TableHead>
+                      <TableHead>Signal</TableHead>
+                      <TableHead>Reason</TableHead>
+                      <TableHead>Points</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedStrategy.tradesSample.slice(0, 20).map((trade) => (
+                      <TableRow key={trade.dealId}>
+                        <TableCell>{trade.symbol}</TableCell>
+                        <TableCell>{trade.signal.toUpperCase()}</TableCell>
+                        <TableCell>{trade.closeReason}</TableCell>
+                        <TableCell className={trade.pnlPoints >= 0 ? "text-profit" : "text-loss"}>{formatPoints(trade.pnlPoints)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </div>
         </>

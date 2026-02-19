@@ -976,6 +976,21 @@ export function startHubServer() {
                 const to = url.searchParams.get("to");
                 const fromMs = parseTimestampMs(from);
                 const toMs = parseTimestampMs(to);
+                const requestedStartBalance = toNumber(url.searchParams.get("startBalance"));
+                const requestedForexRiskPct = toNumber(url.searchParams.get("forexRiskPct"));
+                const requestedCryptoRiskPct = toNumber(url.searchParams.get("cryptoRiskPct"));
+                const startBalance =
+                    Number.isFinite(requestedStartBalance) && requestedStartBalance > 0
+                        ? requestedStartBalance
+                        : DEFAULT_BACKTEST_START_BALANCE;
+                const forexRiskPct =
+                    Number.isFinite(requestedForexRiskPct) && requestedForexRiskPct > 0 && requestedForexRiskPct <= 1
+                        ? requestedForexRiskPct
+                        : DEFAULT_FOREX_RISK_PCT;
+                const cryptoRiskPct =
+                    Number.isFinite(requestedCryptoRiskPct) && requestedCryptoRiskPct > 0 && requestedCryptoRiskPct <= 1
+                        ? requestedCryptoRiskPct
+                        : DEFAULT_CRYPTO_RISK_PCT;
 
                 const strategyResults = [];
                 const combinedSimulationTrades = [];
@@ -1003,9 +1018,9 @@ export function startHubServer() {
 
                 strategyResults.sort((a, b) => b.totalPoints - a.totalPoints);
                 const portfolioSummary = summarizePortfolio(combinedSimulationTrades, {
-                    startBalance: DEFAULT_BACKTEST_START_BALANCE,
-                    forexRiskPct: DEFAULT_FOREX_RISK_PCT,
-                    cryptoRiskPct: DEFAULT_CRYPTO_RISK_PCT,
+                    startBalance,
+                    forexRiskPct,
+                    cryptoRiskPct,
                 });
 
                 sendJson(res, 200, {
@@ -1018,6 +1033,11 @@ export function startHubServer() {
                         strategies: strategyResults.map((result) => result.strategyId),
                     },
                     strategyResults,
+                    portfolioAssumptions: {
+                        startBalance,
+                        forexRiskPct,
+                        cryptoRiskPct,
+                    },
                     portfolioSummary,
                 });
                 return;

@@ -269,6 +269,9 @@ export interface BacktestCompareFilters {
   sessions?: string[];
   strategies?: BacktestStrategyId[];
   sampleLimit?: number;
+  startBalance?: number;
+  forexRiskPct?: number;
+  cryptoRiskPct?: number;
 }
 
 export interface BacktestCompareResponse {
@@ -281,6 +284,11 @@ export interface BacktestCompareResponse {
     strategies: BacktestStrategyId[];
   };
   strategyResults: BacktestStrategyResult[];
+  portfolioAssumptions?: {
+    startBalance: number;
+    forexRiskPct: number;
+    cryptoRiskPct: number;
+  };
   portfolioSummary?: {
     startBalance: number;
     endBalance: number;

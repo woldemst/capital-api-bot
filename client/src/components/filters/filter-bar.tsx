@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { Direction, CloseReason } from "@/types/trading";
 
 interface DateRangePickerProps {
@@ -25,6 +26,7 @@ interface DateRangePickerProps {
 }
 
 export function DateRangePicker({ from, to, onRangeChange }: DateRangePickerProps) {
+  const isMobile = useIsMobile();
   const presets = [
     { label: "Last 7 days", value: "7d", from: subDays(new Date(), 7), to: new Date() },
     { label: "Last 30 days", value: "30d", from: subDays(new Date(), 30), to: new Date() },
@@ -63,7 +65,7 @@ export function DateRangePicker({ from, to, onRangeChange }: DateRangePickerProp
             mode="range"
             selected={{ from, to }}
             onSelect={(range) => onRangeChange(range?.from, range?.to)}
-            numberOfMonths={2}
+            numberOfMonths={isMobile ? 1 : 2}
           />
         </PopoverContent>
       </Popover>
