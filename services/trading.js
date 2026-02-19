@@ -186,14 +186,6 @@ class TradingService {
             }
 
             if (!signal) {
-                const setupFails = Object.entries(primary?.context?.setupChecks || {})
-                    .filter(([, ok]) => !ok)
-                    .map(([name]) => name)
-                    .join(",");
-                const entryFails = Object.entries(primary?.context?.entryChecks || {})
-                    .filter(([, ok]) => !ok)
-                    .map(([name]) => name)
-                    .join(",");
                 const patternFails = Object.entries(primary?.context?.patternChecks || {})
                     .flatMap(([name, ok]) => {
                         if (ok && typeof ok === "object") {
@@ -204,10 +196,8 @@ class TradingService {
                         return ok ? [] : [name];
                     })
                     .join(",");
-                const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
-                const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";
                 const patternFailText = patternFails ? `, patternFails=${patternFails}` : "";
-                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText}${patternFailText})`);
+                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${patternFailText})`);
                 return;
             }
             // Re-check just placing

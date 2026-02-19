@@ -1,11 +1,11 @@
 const STAGE_RULES = {
     forex: {
-        blockedSymbols: ["GBPUSD", "NZDUSD"],
+        blockedSymbols: ["GBPUSD", "NZDUSD", "EURUSD"],
         blockedHoursUtc: [14],
         buyH1AdxMin: 25,
         buyM15AdxMin: 25,
         buySetupRsiMin: 40,
-        buySetupRsiMax: 55,
+        buySetupRsiMax: 52,
         buyPullbackMax: 0.001,
         buyMacdHistMin: 0,
         sellH1AdxMin: 25,
@@ -13,6 +13,7 @@ const STAGE_RULES = {
         sellSetupRsiMin: 45,
         sellSetupRsiMax: 55,
         sellPullbackMin: -0.002,
+        sellPullbackMax: 0,
         sellMacdHistMax: -0.002,
         spreadPctMax: 0.00025,
     },
@@ -186,7 +187,10 @@ class Strategy {
             m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.sellM15AdxMin,
             spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
             rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
-            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue >= rules.sellPullbackMin,
+            pullbackOk:
+                this.isNumber(setupPullbackValue) &&
+                setupPullbackValue >= rules.sellPullbackMin &&
+                setupPullbackValue <= rules.sellPullbackMax,
             macdOk: this.isNumber(entryMacdHist) && entryMacdHist <= rules.sellMacdHistMax,
         };
 
