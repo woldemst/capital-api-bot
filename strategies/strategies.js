@@ -1,6 +1,6 @@
 const STAGE_RULES = {
     forex: {
-        blockedSymbols: ["GBPUSD", "NZDUSD", "EURUSD"],
+        blockedSymbols: ["GBPUSD", "NZDUSD"],
         blockedHoursUtc: [14],
         buyH1AdxMin: 25,
         buyM15AdxMin: 25,
@@ -20,6 +20,7 @@ const STAGE_RULES = {
     crypto: {
         enabled: true,
         blockedSymbols: ["BTCEUR", "SOLUSD", "ADAUSD"],
+        blockedHoursUtc: [1, 15],
         buyH1AdxMin: 18,
         buyM15AdxMin: 5,
         buySetupRsiMin: 45,
@@ -168,6 +169,7 @@ class Strategy {
         if (selectedAssetClass === "crypto") {
             const normalizedSymbol = String(symbol || "").toUpperCase();
             const blockedSymbols = Array.isArray(rules.blockedSymbols) ? rules.blockedSymbols : [];
+            const blockedHoursUtc = Array.isArray(rules.blockedHoursUtc) ? rules.blockedHoursUtc : [];
             if (blockedSymbols.includes(normalizedSymbol)) {
                 return {
                     signal: null,
@@ -175,6 +177,17 @@ class Strategy {
                     context: {
                         ...baseContext,
                         patternChecks: { symbolAllowed: false },
+                        gateStates: { biasOk, setupOk: false, entryOk: false },
+                    },
+                };
+            }
+            if (this.isNumber(hourUtc) && blockedHoursUtc.includes(hourUtc)) {
+                return {
+                    signal: null,
+                    reason: "hour_blocked",
+                    context: {
+                        ...baseContext,
+                        patternChecks: { hourAllowed: false },
                         gateStates: { biasOk, setupOk: false, entryOk: false },
                     },
                 };

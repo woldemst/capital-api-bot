@@ -50,7 +50,7 @@ export const SESSIONS = {
 
 export const RISK = {
     PER_TRADE: 0.03, // 3% risk per trade
-    CRYPTO_PER_TRADE: 0.015,
+    CRYPTO_PER_TRADE: 0.02, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
 };
 
@@ -90,7 +90,7 @@ export const DEV = {
 // 1 min
 // export const PROD = { INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000 };
 
-// 5 min
+// 1 min
 export const PROD = {
-    INTERVAL: ((5 - (new Date().getMinutes() % 5)) * 60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
+    INTERVAL: (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds() + 5000,
 };

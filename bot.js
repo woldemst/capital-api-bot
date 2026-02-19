@@ -9,7 +9,7 @@ import { startMonitorOpenTrades, trailingStopCheck, logDeals, startPriceMonitor,
 import { startHubServer } from "./services/hubServer.js";
 
 const { TIMEFRAMES } = ANALYSIS;
-const ANALYSIS_REPEAT_MS = 5 * 60 * 1000;
+const ANALYSIS_REPEAT_MS = 60 * 1000;
 const MONITOR_INTERVAL_MS = 60 * 1000;
 class TradingBot {
     constructor() {
@@ -40,8 +40,8 @@ class TradingBot {
         this.allowedTradingWindows = [
             // 00:00-13:59 UTC
             { start: 0 * 60, end: 13 * 60 + 59 },
-            // 15:00-21:59 UTC (skip 14:00 hour, which was worst)
-            { start: 15 * 60, end: 21 * 60 + 59 },
+            // 15:00-23:59 UTC (skip only 14:00 hour)
+            { start: 15 * 60, end: 24 * 60 },
         ];
 
         this.cryptoTradingWindows = [
@@ -124,13 +124,13 @@ class TradingBot {
             }
         };
 
-        // First run: align to next 5th minute + 5 seconds
+        // First run: align to next minute + 5 seconds
         const interval = this.getInitialIntervalMs();
         logger.info(`[${DEV.MODE ? "DEV" : "PROD"}] Setting up analysis interval: ${interval}ms`);
 
         this.analysisStartTimeout = setTimeout(() => {
             void runAnalysis();
-            // After first run, repeat every 5 minutes
+            // After first run, repeat every minute
             this.analysisInterval = setInterval(() => {
                 void runAnalysis();
             }, this.getRepeatIntervalMs());
@@ -473,10 +473,9 @@ class TradingBot {
 
         const news = await getNewsStatus(symbol, {
             now,
-            includeImpacts: ["High", "Medium"],
+            includeImpacts: ["High"],
             windowsByImpact: {
-                High: { preMinutes: 30, postMinutes: 5 },
-                Medium: { preMinutes: 15, postMinutes: 2 },
+                High: { preMinutes: 10, postMinutes: 3 },
             },
         });
 
