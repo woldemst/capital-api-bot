@@ -19,7 +19,7 @@ const SESSION_SYMBOLS = {
     TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
 };
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
+export const CRYPTO_SYMBOLS = ["BTCUSD", "XRPUSD", "DOGEUSD"];
 export const SESSIONS = {
     LONDON: {
         START: "08:00",
@@ -49,8 +49,8 @@ export const SESSIONS = {
 };
 
 export const RISK = {
-    PER_TRADE: 0.03, // 3% risk per trade
-    CRYPTO_PER_TRADE: 0.02, // 2% risk per trade
+    PER_TRADE: 0.04, // 4% risk per trade
+    CRYPTO_PER_TRADE: 0.03, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
 };
 
