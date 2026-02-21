@@ -955,8 +955,8 @@ export function startHubServer() {
             if (apiPath === "/backtest/compare") {
                 const availableSymbols = new Set(listAvailableSymbols().map((symbol) => String(symbol).toUpperCase()));
                 const requestedSymbols = parseCsvParam(url.searchParams.get("symbols"));
-                const symbols = (requestedSymbols.length ? requestedSymbols : [...availableSymbols]).filter((symbol) =>
-                    availableSymbols.has(String(symbol).toUpperCase()),
+                const symbols = [...new Set((requestedSymbols.length ? requestedSymbols : [...availableSymbols]).map((symbol) => String(symbol).toUpperCase()))].filter(
+                    (symbol) => availableSymbols.has(symbol),
                 );
 
                 if (!symbols.length) {
@@ -965,12 +965,12 @@ export function startHubServer() {
                 }
 
                 const requestedSessions = parseCsvParam(url.searchParams.get("sessions")).map((session) => String(session).toUpperCase());
-                const selectedSessions = requestedSessions.filter((session) => BACKTEST_SESSIONS.includes(session));
+                const selectedSessions = [...new Set(requestedSessions.filter((session) => BACKTEST_SESSIONS.includes(session)))];
                 const selectedSessionsSet = new Set(selectedSessions);
 
                 const requestedStrategies = parseCsvParam(url.searchParams.get("strategies")).map((strategy) => String(strategy));
                 const validRequestedStrategyIds = requestedStrategies.filter((strategyId) => BACKTEST_STRATEGY_IDS.includes(strategyId));
-                const selectedStrategyIds = validRequestedStrategyIds.length ? validRequestedStrategyIds : BACKTEST_STRATEGY_IDS;
+                const selectedStrategyIds = [...new Set(validRequestedStrategyIds.length ? validRequestedStrategyIds : BACKTEST_STRATEGY_IDS)];
                 const sampleLimit = toNumber(url.searchParams.get("sampleLimit")) ?? 200;
                 const from = url.searchParams.get("from");
                 const to = url.searchParams.get("to");
