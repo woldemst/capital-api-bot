@@ -8,6 +8,7 @@ import { ANALYSIS } from "../config.js";
 const { TIMEFRAMES } = ANALYSIS;
 
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
+const PRICE_LOG_DIR = path.join(process.cwd(), "backtest", "prices");
 
 function ensureLogDir() {
     if (!fs.existsSync(LOG_DIR)) {
@@ -29,22 +30,32 @@ function listLogFiles() {
 
 function compactIndicators(snapshot) {
     if (!snapshot || typeof snapshot !== "object") return snapshot;
-    const indicatorKeys = ["close", "lastClose", "ema9", "ema20", "ema50", "price_vs_ema9", "bb", "rsi", "rsiPrev", "adx", "atr", "macd", "macdHistPrev", "trend"];
-    const compact = {};
-    for (const [timeframe, data] of Object.entries(snapshot)) {
-        if (!data || typeof data !== "object") {
-            compact[timeframe] = data;
-            continue;
-        }
-        const reduced = {};
-        for (const key of indicatorKeys) {
-            if (Object.prototype.hasOwnProperty.call(data, key)) {
-                reduced[key] = data[key];
-            }
-        }
-        compact[timeframe] = reduced;
-    }
-    return compact;
+    return JSON.parse(JSON.stringify(snapshot));
+}
+
+function compactCandles(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return snapshot;
+    return JSON.parse(JSON.stringify(snapshot));
+}
+
+function toIsoTimestamp(value) {
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+function getLastClosedCandle(candles = []) {
+    if (!Array.isArray(candles) || candles.length === 0) return null;
+    // Use the penultimate candle as safe "last closed" snapshot.
+    const candle = candles.length > 1 ? candles[candles.length - 2] : candles[candles.length - 1];
+    return {
+        t: toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC),
+        o: toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask),
+        h: toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask),
+        l: toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask),
+        c: toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask),
+    };
 }
 
 export function getSymbolLogPath(symbol = "unknown") {
@@ -114,6 +125,129 @@ function getPipSize(symbol) {
         : 0.0001;
 }
 
+function getPriceLogPath(symbol = "unknown") {
+    return path.join(PRICE_LOG_DIR, `${sanitizeSymbol(symbol)}.jsonl`);
+}
+
+function computeTradePathStats(entry, symbol, closePrice, closedAt) {
+    const signal = String(entry?.signal ?? entry?.side ?? "").toUpperCase();
+    const entryPrice = toNumber(entry?.entryPrice ?? entry?.level);
+    const closePriceNumber = toNumber(closePrice ?? entry?.closePrice);
+    const openedAtMs = Date.parse(entry?.openedAt ?? entry?.timestamp ?? "");
+    const closedAtMs = Date.parse(closedAt ?? entry?.closedAt ?? "");
+    const holdMinutes = Number.isFinite(openedAtMs) && Number.isFinite(closedAtMs) ? (closedAtMs - openedAtMs) / 60000 : null;
+    const canCalculateDirectional = (signal === "BUY" || signal === "SELL") && entryPrice !== null;
+    const pnlPoints = canCalculateDirectional && closePriceNumber !== null ? (signal === "BUY" ? closePriceNumber - entryPrice : entryPrice - closePriceNumber) : null;
+    const pnlPct = pnlPoints !== null && entryPrice !== 0 ? (pnlPoints / entryPrice) * 100 : null;
+
+    if (!canCalculateDirectional || !Number.isFinite(openedAtMs) || !Number.isFinite(closedAtMs) || closedAtMs < openedAtMs) {
+        return {
+            source: "summary_only",
+            pathSamples: 0,
+            holdMinutes,
+            pnlPoints,
+            pnlPct,
+            mfePoints: null,
+            mfePct: null,
+            maePoints: null,
+            maePct: null,
+            minutesToMfe: null,
+            minutesToMae: null,
+        };
+    }
+
+    const priceLogPath = getPriceLogPath(symbol ?? entry?.symbol ?? "unknown");
+    if (!fs.existsSync(priceLogPath)) {
+        return {
+            source: "no_price_log",
+            pathSamples: 0,
+            holdMinutes,
+            pnlPoints,
+            pnlPct,
+            mfePoints: null,
+            mfePct: null,
+            maePoints: null,
+            maePct: null,
+            minutesToMfe: null,
+            minutesToMae: null,
+        };
+    }
+
+    const lines = fs.readFileSync(priceLogPath, "utf-8").split("\n");
+    let pathSamples = 0;
+    let mfePoints = Number.NEGATIVE_INFINITY;
+    let maePoints = Number.POSITIVE_INFINITY;
+    let mfeAtMs = null;
+    let maeAtMs = null;
+
+    for (const raw of lines) {
+        if (!raw.trim()) continue;
+        let snapshot;
+        try {
+            snapshot = JSON.parse(raw.trim());
+        } catch {
+            continue;
+        }
+
+        const tsMs = Date.parse(snapshot?.timestamp ?? "");
+        if (!Number.isFinite(tsMs) || tsMs < openedAtMs || tsMs > closedAtMs) continue;
+
+        const snapshotPrice =
+            signal === "BUY"
+                ? toNumber(snapshot?.bid ?? snapshot?.price ?? snapshot?.mid ?? snapshot?.ask)
+                : toNumber(snapshot?.ask ?? snapshot?.price ?? snapshot?.mid ?? snapshot?.bid);
+
+        if (snapshotPrice === null) continue;
+
+        const move = signal === "BUY" ? snapshotPrice - entryPrice : entryPrice - snapshotPrice;
+        pathSamples += 1;
+
+        if (move > mfePoints) {
+            mfePoints = move;
+            mfeAtMs = tsMs;
+        }
+        if (move < maePoints) {
+            maePoints = move;
+            maeAtMs = tsMs;
+        }
+    }
+
+    if (!pathSamples) {
+        return {
+            source: "empty_price_window",
+            pathSamples: 0,
+            holdMinutes,
+            pnlPoints,
+            pnlPct,
+            mfePoints: null,
+            mfePct: null,
+            maePoints: null,
+            maePct: null,
+            minutesToMfe: null,
+            minutesToMae: null,
+        };
+    }
+
+    const mfePct = entryPrice !== 0 ? (mfePoints / entryPrice) * 100 : null;
+    const maePct = entryPrice !== 0 ? (maePoints / entryPrice) * 100 : null;
+    const minutesToMfe = Number.isFinite(mfeAtMs) ? (mfeAtMs - openedAtMs) / 60000 : null;
+    const minutesToMae = Number.isFinite(maeAtMs) ? (maeAtMs - openedAtMs) / 60000 : null;
+
+    return {
+        source: "price_log",
+        pathSamples,
+        holdMinutes,
+        pnlPoints,
+        pnlPct,
+        mfePoints: Number.isFinite(mfePoints) ? mfePoints : null,
+        mfePct,
+        maePoints: Number.isFinite(maePoints) ? maePoints : null,
+        maePct,
+        minutesToMfe,
+        minutesToMae,
+    };
+}
+
 export function getTradeEntry(dealId, symbol) {
     const targetId = String(dealId);
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
@@ -138,9 +272,10 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPrice, stopLoss, takeProfit, indicatorsOnOpening, timestamp }) {
+export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPrice, stopLoss, takeProfit, indicatorsOnOpening, candlesOnOpening, timestamp }) {
     const logPath = getSymbolLogPath(symbol);
     const compactOpening = compactIndicators(indicatorsOnOpening);
+    const compactCandlesOpening = compactCandles(candlesOnOpening);
     const normalizedOpenReason = openReason === undefined || openReason === null ? "" : String(openReason);
     const payload = {
         dealId,
@@ -151,46 +286,56 @@ export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPri
         stopLoss,
         takeProfit,
         indicatorsOnOpening: compactOpening,
+        candlesOnOpening: compactCandlesOpening,
         openedAt: timestamp,
         status: "open",
 
         // keep stable schema for later analysis
         closeReason: "",
         indicatorsOnClosing: null,
+        candlesOnClosing: null,
         closePrice: null,
         closedAt: null,
+        tradeStats: null,
     };
 
     appendLine(logPath, payload);
 }
 
-export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicatorsOnClosing, timestamp }) {
+export function logTradeClose({ dealId, symbol, closePrice, closeReason, indicatorsOnClosing, candlesOnClosing, timestamp }) {
     const normalizedReason = normalizeCloseReason(closeReason);
     const closedAt = timestamp;
     const compactClosing = compactIndicators(indicatorsOnClosing);
+    const compactCandlesClosing = compactCandles(candlesOnClosing);
     const primaryPath = symbol ? getSymbolLogPath(symbol) : null;
     const candidates = primaryPath ? [primaryPath, ...listLogFiles().filter((p) => p !== primaryPath)] : listLogFiles();
 
     for (const logPath of candidates) {
         const updated = updateEntry(logPath, dealId, (entry) => {
             const openedTimestamp = entry.openedAt ?? entry.timestamp ?? null;
+            const nextClosedAt = closedAt ?? entry.closedAt;
 
             const existingReason = entry.closeReason && String(entry.closeReason).trim() ? String(entry.closeReason) : "";
             const shouldUseNormalized = normalizedReason && normalizedReason !== "unknown";
             const finalReason = shouldUseNormalized ? normalizedReason : existingReason || normalizedReason || "unknown";
 
-            const hasClosePrice = closePrice !== undefined && closePrice !== null && closePrice !== "";
-            const nextClosePrice = hasClosePrice ? closePrice : (entry.closePrice ?? null);
+            const closePriceNumber = toNumber(closePrice);
+            const hasClosePrice = closePriceNumber !== null && closePriceNumber > 0;
+            const nextClosePrice = hasClosePrice ? closePriceNumber : (entry.closePrice ?? null);
             const nextIndicatorsOnClosing = compactClosing ?? entry.indicatorsOnClosing ?? null;
+            const nextCandlesOnClosing = compactCandlesClosing ?? entry.candlesOnClosing ?? null;
+            const nextTradeStats = computeTradePathStats(entry, symbol ?? entry?.symbol ?? null, nextClosePrice, nextClosedAt);
 
             return {
                 ...entry,
                 openedAt: openedTimestamp,
                 status: "closed",
                 closeReason: finalReason,
-                closedAt: closedAt ?? entry.closedAt,
+                closedAt: nextClosedAt,
                 closePrice: nextClosePrice,
                 indicatorsOnClosing: nextIndicatorsOnClosing,
+                candlesOnClosing: nextCandlesOnClosing,
+                tradeStats: nextTradeStats,
             };
         });
 
@@ -268,17 +413,17 @@ class TradeTracker {
             return {};
         }
     }
-    async getCloseIndicators(symbol) {
+    async getCloseSnapshot(symbol) {
         try {
             const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.historyLength);
 
             this.candleHistoryData[symbol] = {
-                D1: d1Data.prices.slice(-this.historyLength) || [],
-                H4: h4Data.prices.slice(-this.historyLength) || [],
-                H1: h1Data.prices.slice(-this.historyLength) || [],
-                M15: m15Data.prices.slice(-this.historyLength) || [],
-                M5: m5Data.prices.slice(-this.historyLength) || [],
-                M1: m1Data.prices.slice(-this.historyLength) || [],
+                D1: d1Data?.prices?.slice(-this.historyLength) || [],
+                H4: h4Data?.prices?.slice(-this.historyLength) || [],
+                H1: h1Data?.prices?.slice(-this.historyLength) || [],
+                M15: m15Data?.prices?.slice(-this.historyLength) || [],
+                M5: m5Data?.prices?.slice(-this.historyLength) || [],
+                M1: m1Data?.prices?.slice(-this.historyLength) || [],
             };
 
             const d1Candles = this.candleHistoryData[symbol].D1;
@@ -297,11 +442,28 @@ class TradeTracker {
                 m1: await calcIndicators(m1Candles, symbol, TIMEFRAMES.M1),
             };
 
-            return indicatorsClose;
+            const candlesClose = {
+                d1: getLastClosedCandle(d1Candles),
+                h4: getLastClosedCandle(h4Candles),
+                h1: getLastClosedCandle(h1Candles),
+                m15: getLastClosedCandle(m15Candles),
+                m5: getLastClosedCandle(m5Candles),
+                m1: getLastClosedCandle(m1Candles),
+            };
+
+            return {
+                indicators: indicatorsClose,
+                candles: candlesClose,
+            };
         } catch (err) {
             logger.warn(`[Reconcile] Close-indicators calc failed for ${symbol}: ${err.message}`);
             return null;
         }
+    }
+
+    async getCloseIndicators(symbol) {
+        const snapshot = await this.getCloseSnapshot(symbol);
+        return snapshot?.indicators ?? null;
     }
 
     async reconcileClosedDeals(closedDealsIds = []) {
@@ -346,13 +508,16 @@ class TradeTracker {
                 });
 
                 // Compute REAL close indicators snapshot (current candles at closing time)
-                const indicatorsOnClosing = await this.getCloseIndicators(symbol);
+                const closeSnapshot = await this.getCloseSnapshot(symbol);
+                const indicatorsOnClosing = closeSnapshot?.indicators ?? null;
+                const candlesOnClosing = closeSnapshot?.candles ?? null;
 
                 const updated = logTradeClose({
                     symbol: symbol ?? entry?.symbol ?? "unknown",
                     dealId: id,
                     closeReason: finalReason,
                     indicatorsOnClosing,
+                    candlesOnClosing,
                     closePrice: closePrice ?? null,
                     timestamp: new Date().toISOString(),
                 });

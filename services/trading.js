@@ -106,6 +106,104 @@ class TradingService {
     }
 
     // ============================================================
+    //                   MAIN PRICE LOOP
+    // ============================================================
+    async processPrice({ symbol, indicators, candles, bid, ask }) {
+        try {
+            await this.syncOpenTradesFromBroker();
+            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+
+            if (this.openTrades.length >= MAX_POSITIONS) {
+                logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
+                return;
+            }
+            if (this.isSymbolTraded(symbol)) {
+                logger.debug(`[ProcessPrice] ${symbol} already in market.`);
+                return;
+            }
+            // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
+            const primary = Strategy.generateSignal3Stage({ indicators, variant: "H4_H1_M15" });
+            let fallback = null;
+
+            let { signal, reason = "", context = {} } = primary;
+
+            // Fallback to secondary signal if primary is not generated
+            if (!signal) {
+                fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
+                const primaryBiasTrend = primary?.context?.biasTrend;
+                const primaryBiasDirection =
+                    primaryBiasTrend === "bullish" ? "BUY" : primaryBiasTrend === "bearish" ? "SELL" : null;
+                const fallbackAllowed =
+                    primary.reason === "setup_blocked" &&
+                    !!fallback.signal &&
+                    !!primaryBiasDirection &&
+                    fallback.signal === primaryBiasDirection;
+
+                if (fallbackAllowed) {
+                    signal = fallback.signal;
+                    reason = fallback.reason || "";
+                    context = fallback.context || {};
+                } else if (fallback.signal) {
+                    logger.debug(
+                        `[Signal] ${symbol}: fallback blocked (primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
+                    );
+                }
+            }
+
+            if (!signal) {
+                const setupFails = Object.entries(primary?.context?.setupChecks || {})
+                    .filter(([, ok]) => !ok)
+                    .map(([name]) => name)
+                    .join(",");
+                const entryFails = Object.entries(primary?.context?.entryChecks || {})
+                    .filter(([, ok]) => !ok)
+                    .map(([name]) => name)
+                    .join(",");
+                const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
+                const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";
+                const fallbackText = fallback?.reason ? `, fallback=${fallback.reason}` : "";
+                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText}${fallbackText})`);
+                return;
+            }
+            // Re-check just placing
+            if (this.openTrades.length >= MAX_POSITIONS) return;
+            if (this.isSymbolTraded(symbol)) return;
+
+            logger.info(`[Signal] ${symbol}: ${signal}`);
+
+            const toIsoTimestamp = (value) => {
+                if (value === undefined || value === null || value === "") return null;
+                if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
+                const parsed = new Date(value);
+                return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+            };
+            const toLastClosedCandle = (series = []) => {
+                if (!Array.isArray(series) || series.length === 0) return null;
+                const candle = series.length > 1 ? series[series.length - 2] : series[series.length - 1];
+                return {
+                    t: toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC),
+                    o: this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask),
+                    h: this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask),
+                    l: this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask),
+                    c: this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask),
+                };
+            };
+            const candlesSnapshot = {
+                d1: toLastClosedCandle(candles?.d1Candles),
+                h4: toLastClosedCandle(candles?.h4Candles),
+                h1: toLastClosedCandle(candles?.h1Candles),
+                m15: toLastClosedCandle(candles?.m15Candles),
+                m5: toLastClosedCandle(candles?.m5Candles),
+                m1: toLastClosedCandle(candles?.m1Candles),
+            };
+
+            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context, candlesSnapshot);
+        } catch (error) {
+            logger.error("[ProcessPrice] Error:", error);
+        }
+    }
+
+    // ============================================================
     //               ATR-Based Trade Parameters
     // ============================================================
     async calculateATR(symbol) {
@@ -128,7 +226,7 @@ class TradingService {
             const atr = tr.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
             return atr;
         } catch (error) {
-            console.error("[ATR] Error:", error);
+            logger.error(`[ATR] Error calculating ATR for ${symbol}: ${error.message}`);
             return 0.001;
         }
     }
@@ -152,14 +250,12 @@ class TradingService {
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
         const size = this.positionSize(this.accountBalance, price, stopLossPrice, symbol);
-        console.log(`[calculateTradeParameters] Size: ${size}`);
 
         // Trailing stop parameters
         const trailingStopParams = {
-            activationPrice:
-                isBuy
-                    ? price + stopLossPips // Activate at 1R profit
-                    : price - stopLossPips,
+            activationPrice: isBuy
+                ? price + stopLossPips // Activate at 1R profit
+                : price - stopLossPips,
             trailingDistance: atr, // Trail by 1 ATR
         };
 
@@ -170,10 +266,9 @@ class TradingService {
             stopLossPips,
             takeProfitPips,
             trailingStopParams,
-            partialTakeProfit:
-                isBuy
-                    ? price + stopLossPips // Take partial at 1R
-                    : price - stopLossPips,
+            partialTakeProfit: isBuy
+                ? price + stopLossPips // Take partial at 1R
+                : price - stopLossPips,
             price,
         };
     }
@@ -183,7 +278,7 @@ class TradingService {
         const pipValue = this.getPipValue(symbol); // Dynamic pip value
 
         if (!pipValue || pipValue <= 0) {
-            console.error("Invalid pip value calculation");
+            logger.error(`[PositionSize] Invalid pip value calculation for ${symbol}`);
             return 100; // Fallback with warning
         }
 
@@ -212,10 +307,10 @@ class TradingService {
             // Reduce size so marginRequired == maxMarginPerTrade
             size = Math.floor((maxMarginPerTrade * leverage) / marginPrice / 100) * 100;
             if (size < 100) size = 100;
-            console.log(`[PositionSize] Adjusted for margin: New size: ${size}`);
+            logger.debug(`[PositionSize] Adjusted for margin on ${symbol}: new size=${size}`);
         }
-        console.log(
-            `[PositionSize] Raw size: ${riskAmount / (stopLossPips * pipValue)}, Final size: ${size}, Margin required: ${marginRequired}, Max per trade: ${maxMarginPerTrade}`,
+        logger.debug(
+            `[PositionSize] ${symbol}: raw=${riskAmount / (stopLossPips * pipValue)} final=${size} marginRequired=${marginRequired} maxPerTrade=${maxMarginPerTrade}`,
         );
         return size;
     }
@@ -223,9 +318,9 @@ class TradingService {
     // ============================================================
     //                    Place the Trade
     // ============================================================
-    async executeTrade(symbol, signal, bid, ask, indicators, reason, context) {
+    async executeTrade(symbol, signal, bid, ask, indicators, reason, context, candlesSnapshot) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask, indicators);
+            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask);
 
             const pos = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
@@ -242,7 +337,6 @@ class TradingService {
 
             logger.info(`[Order] OPENED ${symbol} ${signal} size=${size} entry=${price} SL=${stopLossPrice} TP=${takeProfitPrice}`);
 
-            console.log("confirmation", confirmation);
             const affectedDealId = confirmation?.affectedDeals?.find((d) => d?.status === "OPENED")?.dealId;
             // or: const affectedDealId = confirmation?.affectedDeals?.[0]?.dealId;
 
@@ -278,38 +372,6 @@ class TradingService {
             this.openTrades.push(symbol);
         } catch (error) {
             logger.error(`[Order] Error placing order for ${symbol}:`, error);
-        }
-    }
-
-    // ============================================================
-    //                   MAIN PRICE LOOP
-    // ============================================================
-    async processPrice({ symbol, indicators, candles, bid, ask }) {
-        try {
-            await this.syncOpenTradesFromBroker();
-            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
-            if (this.openTrades.length >= MAX_POSITIONS) {
-                logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
-                return;
-            }
-            if (this.isSymbolTraded(symbol)) {
-                logger.debug(`[ProcessPrice] ${symbol} already in market.`);
-                return;
-            }
-
-            const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-
-            const { signal, reason = "", context = {} } = result;
-
-            if (!signal) {
-                logger.debug(`[Signal] ${symbol}: no signal (${reason})`);
-                return;
-            }
-
-            logger.info(`[Signal] ${symbol}: ${signal}`);
-            await this.executeTrade(symbol, signal, bid, ask, indicators, reason, context);
-        } catch (err) {
-            logger.error(`[ProcessPrice] Error:`, err);
         }
     }
 

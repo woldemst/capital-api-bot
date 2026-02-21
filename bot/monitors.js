@@ -2,12 +2,14 @@ import { getOpenPositions, getHistorical } from "../api.js";
 import { RISK } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import tradingService from "../services/trading.js";
+import webSocketService from "../services/websocket.js";
+import { tradeWatchIndicators } from "../indicators/indicators.js";
+
 import { tradeTracker } from "../utils/tradeLogger.js";
 import logger from "../utils/logger.js";
+import { priceLogger } from "../utils/priceLogger.js";
 
-const DEFAULT_MONITOR_INTERVAL_MS = 60 * 1000;
-
-export async function startMonitorOpenTrades(bot, intervalMs = DEFAULT_MONITOR_INTERVAL_MS) {
+export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
     logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
     if (bot.monitorInterval) clearInterval(bot.monitorInterval);
     if (!bot.dealIdMonitorInterval) logDeals(bot);
@@ -195,4 +197,67 @@ function parseOpenTimeMs(openTime) {
     }
 
     return NaN;
+}
+
+export function startPriceMonitor(bot) {
+    const interval = (60 - new Date().getUTCSeconds()) * 1000 - new Date().getUTCMilliseconds() + 1000;
+    logger.info(`[PriceMonitor] Starting (every 1 minute) after ${interval}ms at ${new Date().toISOString()}`);
+    if (bot.priceMonitorInterval) clearInterval(bot.priceMonitorInterval);
+
+    const run = async () => {
+        if (bot.priceMonitorInProgress) {
+            logger.warn("[PriceMonitor] Previous tick still running; skipping.");
+            return;
+        }
+        bot.priceMonitorInProgress = true;
+        try {
+            await priceLogger.logSnapshotsForSymbols(bot.activeSymbols);
+        } finally {
+            bot.priceMonitorInProgress = false;
+        }
+    };
+
+    setTimeout(() => {
+        run();
+        bot.priceMonitorInterval = setInterval(run, 60 * 1000);
+    }, interval);
+}
+
+export async function startWebSocket(bot) {
+    try {
+        const activeSymbols = await bot.getActiveSymbols();
+        // Initialize price tracker for all active symbols
+        bot.latestPrices = {};
+        activeSymbols.forEach((symbol) => {
+            bot.latestPrices[symbol] = { analyzeSymbol: null, ask: null, ts: null };
+        });
+
+        webSocketService.connect(bot.tokens, activeSymbols, (data) => {
+            const msg = JSON.parse(data.toString());
+            const { payload } = msg;
+            const epic = payload?.epic;
+            if (!epic) return;
+
+            bot.latestCandles[epic] = { latest: payload };
+
+            // Update bid or ask based on priceType
+            if (!bot.latestPrices[epic]) {
+                bot.latestPrices[epic] = { bid: null, ask: null, ts: null };
+            }
+
+            if (payload.priceType === "bid") {
+                bot.latestPrices[epic].bid = payload.c;
+            } else if (payload.priceType === "ask") {
+                bot.latestPrices[epic].ask = payload.c;
+            }
+
+            bot.latestPrices[epic].ts = Date.now();
+            // Only log when we have both bid and ask
+            if (bot.latestPrices[epic].bid !== null && bot.latestPrices[epic].ask !== null) {
+                logger.debug(`[WebSocket] ${epic} - bid: ${bot.latestPrices[epic].bid}, ask: ${bot.latestPrices[epic].ask}`);
+            }
+        });
+    } catch (error) {
+        logger.error("[bot.js] WebSocket message processing error:", error.message);
+    }
 }

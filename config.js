@@ -14,11 +14,12 @@ export const API = {
 // Trading Sessions (UTC times)
 const SESSION_SYMBOLS = {
     LONDON: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-    NY: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+    NY: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "EURGBP"],
     SYDNEY: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
     TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
 };
 
+// export const CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
 export const SESSIONS = {
     LONDON: {
         START: "08:00",
@@ -39,11 +40,11 @@ export const SESSIONS = {
         START: "00:00",
         END: "09:00",
         SYMBOLS: SESSION_SYMBOLS.TOKYO,
-    },
+    }
 };
 
 export const RISK = {
-    PER_TRADE: 0.02, // 2% risk per trade
+    PER_TRADE: 0.01, // 2% risk per trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     MAX_HOLD_TIME: 180, // Maximum hold time in minutes
 };
@@ -77,7 +78,7 @@ export const ANALYSIS = {
 
 // Development overrides for faster testing
 export const DEV = {
-    INTERVAL: 15 * 1000, // 60 seconds between analyses
+    INTERVAL: 15 * 1000, // 15 seconds between analyses
     MODE: false,
 };
 
