@@ -15,6 +15,7 @@ import type {
   BacktestOptionsResponse,
   BacktestCompareResponse,
   BacktestCompareFilters,
+  RuntimeConfigResponse,
 } from "@/types/trading";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -95,6 +96,10 @@ export async function getBacktestOptions(): Promise<BacktestOptionsResponse> {
   return fetchApi<BacktestOptionsResponse>("/backtest/options");
 }
 
+export async function getRuntimeConfig(): Promise<RuntimeConfigResponse> {
+  return fetchApi<RuntimeConfigResponse>("/runtime/config");
+}
+
 export async function runBacktestCompare(filters: BacktestCompareFilters): Promise<BacktestCompareResponse> {
   const params: Record<string, string | number | undefined> = {
     from: filters.from,
@@ -106,6 +111,7 @@ export async function runBacktestCompare(filters: BacktestCompareFilters): Promi
     startBalance: filters.startBalance,
     forexRiskPct: filters.forexRiskPct,
     cryptoRiskPct: filters.cryptoRiskPct,
+    respectNewsGuard: filters.respectNewsGuard,
   };
   return fetchApi<BacktestCompareResponse>("/backtest/compare", params);
 }

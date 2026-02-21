@@ -13,13 +13,35 @@ export const API = {
 
 // Trading Sessions (UTC times)
 const SESSION_SYMBOLS = {
-    LONDON: ["EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-    NY: ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "EURGBP"],
-    SYDNEY: ["AUDUSD", "NZDUSD", "AUDJPY", "NZDJPY"],
-    TOKYO: ["USDJPY", "EURJPY", "AUDJPY", "AUDUSD", "NZDUSD"],
+    LONDON: ["EURJPY", "USDJPY"],
+    NY: ["USDJPY", "EURJPY"],
+    SYDNEY: ["EURJPY", "USDJPY"],
+    TOKYO: ["EURJPY", "USDJPY"],
+};
+// can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
+
+export const CRYPTO_SYMBOLS = ["BTCUSD", "ETHUSD", "DOGEUSD"];
+export const TRADING_WINDOWS = {
+    FOREX: [
+        // 22:00-12:59 UTC
+        { start: 22 * 60, end: 12 * 60 + 59 },
+    ],
+    CRYPTO: [
+        // 02:00-05:59 UTC
+        { start: 2 * 60, end: 5 * 60 + 59 },
+        // 08:00-16:59 UTC
+        { start: 8 * 60, end: 16 * 60 + 59 },
+    ],
 };
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "XRPUSD", "DOGEUSD"];
+export const NEWS_GUARD = {
+    FOREX_ONLY: true,
+    INCLUDE_IMPACTS: ["High"],
+    WINDOWS_BY_IMPACT: {
+        High: { preMinutes: 10, postMinutes: 3 },
+    },
+};
+
 export const SESSIONS = {
     LONDON: {
         START: "08:00",
@@ -77,7 +99,7 @@ const EMA = {
 // Technical Analysis Configuration
 export const ANALYSIS = {
     TIMEFRAMES,
-    SYMBOLS: ["EURUSD", "GBPUSD", "EURGBP", "AUDUSD", "USDCAD"],
+    SYMBOLS: ["EURJPY", "USDJPY", "BTCUSD", "ETHUSD", "DOGEUSD"],
     EMA,
 };
 

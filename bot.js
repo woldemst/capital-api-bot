@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, TRADING_WINDOWS, NEWS_GUARD } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
@@ -37,17 +37,8 @@ class TradingBot {
         this.openedBrockerDealIds = [];
         this.activeSymbols = [];
 
-        this.allowedTradingWindows = [
-            // 00:00-13:59 UTC
-            { start: 0 * 60, end: 13 * 60 + 59 },
-            // 15:00-23:59 UTC (skip only 14:00 hour)
-            { start: 15 * 60, end: 24 * 60 },
-        ];
-
-        this.cryptoTradingWindows = [
-            // Crypto is tradable all day (UTC).
-            { start: 0, end: 24 * 60 },
-        ];
+        this.allowedTradingWindows = TRADING_WINDOWS.FOREX.map((window) => ({ ...window }));
+        this.cryptoTradingWindows = TRADING_WINDOWS.CRYPTO.map((window) => ({ ...window }));
         this.rolloverTimeZone = "America/New_York";
         this.rolloverHour = 17;
         this.rolloverMinute = 0;
@@ -473,10 +464,8 @@ class TradingBot {
 
         const news = await getNewsStatus(symbol, {
             now,
-            includeImpacts: ["High"],
-            windowsByImpact: {
-                High: { preMinutes: 10, postMinutes: 3 },
-            },
+            includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS,
+            windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT,
         });
 
         if (news.blocked) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DateRangePicker } from "@/components/filters/filter-bar";
-import { useBacktestCompare, useBacktestOptions } from "@/hooks/use-trading-data";
+import { useBacktestCompare, useBacktestOptions, useRuntimeConfig } from "@/hooks/use-trading-data";
 import { formatPercentage } from "@/lib/trading-utils";
 import { ErrorState } from "@/components/dashboard/error-state";
 import { KPICard } from "@/components/dashboard/kpi-card";
@@ -8,10 +8,11 @@ import { EquityChart } from "@/components/charts/equity-charts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BacktestCompareFilters, BacktestStrategyId } from "@/types/trading";
 
-const KNOWN_CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
+const KNOWN_CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "ETHUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
 
 function formatPoints(value: number, digits = 5) {
   if (!Number.isFinite(value)) return "0";
@@ -23,7 +24,20 @@ function formatMoney(value: number, digits = 2) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}€`;
 }
 
+function formatMinute(minute: number) {
+  const normalized = ((minute % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const hh = Math.floor(normalized / 60).toString().padStart(2, "0");
+  const mm = (normalized % 60).toString().padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function formatWindows(windows: Array<{ start: number; end: number }>) {
+  return windows.map((window) => `${formatMinute(window.start)}-${formatMinute(window.end)}`).join(", ");
+}
+
 function strategyLabel(id: BacktestStrategyId) {
+  if (id === "FOREX_H1_M15_M5_REGIME") return "Forex H1 / M15 / M5 Regime";
+  if (id === "CRYPTO_H1_M15_M5_REGIME") return "Crypto H1 / M15 / M5 Regime";
   if (id === "FOREX_H1_M15_M5") return "Forex H1 / M15 / M5";
   if (id === "CRYPTO_H1_M15_M5") return "Crypto H1 / M15 / M5";
   return id;
@@ -34,14 +48,17 @@ export default function Overview() {
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
-  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5", "CRYPTO_H1_M15_M5"]);
+  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5_REGIME", "CRYPTO_H1_M15_M5_REGIME"]);
   const [startBalanceInput, setStartBalanceInput] = useState<number>(500);
   const [forexRiskInputPct, setForexRiskInputPct] = useState<number>(3);
   const [cryptoRiskInputPct, setCryptoRiskInputPct] = useState<number>(2);
+  const [respectNewsGuard, setRespectNewsGuard] = useState<boolean>(true);
+  const [defaultsApplied, setDefaultsApplied] = useState<boolean>(false);
   const [runFilters, setRunFilters] = useState<BacktestCompareFilters | null>(null);
-  const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5");
+  const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5_REGIME");
 
   const optionsQuery = useBacktestOptions();
+  const runtimeConfigQuery = useRuntimeConfig();
   const compareQuery = useBacktestCompare(runFilters || {}, !!runFilters);
   const availableCryptoSymbols = useMemo(
     () => (optionsQuery.data?.symbols || []).filter((symbol) => KNOWN_CRYPTO_SYMBOLS.includes(symbol)),
@@ -57,18 +74,47 @@ export default function Overview() {
   }, [dateFrom, dateTo]);
 
   useEffect(() => {
-    if (!optionsQuery.data) return;
-    if (!selectedSymbols.length) {
-      setSelectedSymbols(optionsQuery.data.symbols.slice(0, 8));
+    if (!optionsQuery.data || defaultsApplied) return;
+
+    const availableSymbols = optionsQuery.data.symbols;
+    const availableSessions = optionsQuery.data.sessions;
+    const availableStrategyIds = new Set(optionsQuery.data.strategies.map((strategy) => strategy.id));
+    const runtimeDefaults = runtimeConfigQuery.data?.defaults;
+    const runtimeRisk = runtimeConfigQuery.data?.risk;
+
+    const fallbackSymbols = availableSymbols.slice(0, 8);
+    const nextSymbols = (runtimeDefaults?.symbols || []).filter((symbol) => availableSymbols.includes(symbol));
+    setSelectedSymbols(nextSymbols.length ? nextSymbols : fallbackSymbols);
+
+    const fallbackSessions = availableSessions;
+    const nextSessions = (runtimeDefaults?.sessions || []).filter((session) => availableSessions.includes(session));
+    const selectedDefaultSessions = nextSessions.length ? nextSessions : fallbackSessions;
+    setSelectedSessions(selectedDefaultSessions);
+
+    const nextStrategies = ((runtimeDefaults?.strategies || []) as BacktestStrategyId[]).filter((id) => availableStrategyIds.has(id));
+    if (nextStrategies.length) {
+      setSelectedStrategies(nextStrategies);
+      setEquityStrategyId(nextStrategies[0]);
     }
-    if (!selectedSessions.length) {
-      const defaults = optionsQuery.data.sessions;
-      setSelectedSessions(defaults);
-      if (defaults.includes("CRYPTO") && availableCryptoSymbols.length) {
-        setSelectedSymbols((prev) => Array.from(new Set([...prev, ...availableCryptoSymbols])));
-      }
+
+    if (Number.isFinite(runtimeDefaults?.startBalance) && Number(runtimeDefaults?.startBalance) > 0) {
+      setStartBalanceInput(Number(runtimeDefaults.startBalance));
     }
-  }, [optionsQuery.data, selectedSymbols.length, selectedSessions.length, availableCryptoSymbols]);
+    if (Number.isFinite(runtimeRisk?.forexRiskPct) && Number(runtimeRisk?.forexRiskPct) > 0) {
+      setForexRiskInputPct(Number(runtimeRisk.forexRiskPct) * 100);
+    }
+    if (Number.isFinite(runtimeRisk?.cryptoRiskPct) && Number(runtimeRisk?.cryptoRiskPct) > 0) {
+      setCryptoRiskInputPct(Number(runtimeRisk.cryptoRiskPct) * 100);
+    }
+    if (typeof runtimeConfigQuery.data?.newsGuard?.enabledInBacktestByDefault === "boolean") {
+      setRespectNewsGuard(runtimeConfigQuery.data.newsGuard.enabledInBacktestByDefault);
+    }
+
+    if (selectedDefaultSessions.includes("CRYPTO") && availableCryptoSymbols.length) {
+      setSelectedSymbols((prev) => Array.from(new Set([...prev, ...availableCryptoSymbols])));
+    }
+    setDefaultsApplied(true);
+  }, [optionsQuery.data, runtimeConfigQuery.data, defaultsApplied, availableCryptoSymbols]);
 
   useEffect(() => {
     const best = compareQuery.data?.strategyResults?.[0];
@@ -156,6 +202,7 @@ export default function Overview() {
       startBalance,
       forexRiskPct,
       cryptoRiskPct,
+      respectNewsGuard,
     });
   };
 
@@ -220,6 +267,24 @@ export default function Overview() {
               onChange={(event) => setCryptoRiskInputPct(Number(event.target.value || 0))}
             />
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+              <Label htmlFor="news-guard-switch">Respect News Guard (Forex)</Label>
+              <Switch id="news-guard-switch" checked={respectNewsGuard} onCheckedChange={setRespectNewsGuard} />
+            </div>
+            <p className="text-xs text-muted-foreground">Uses price-log flag `newsBlocked` only for forex, like live trading.</p>
+          </div>
+          {runtimeConfigQuery.data ? (
+            <div className="space-y-2 rounded-lg border border-border/60 p-3 text-xs text-muted-foreground">
+              <p>
+                Bot Sync: Max open trades {runtimeConfigQuery.data.risk.maxOpenTrades} | Forex window {formatWindows(runtimeConfigQuery.data.tradingWindows.forex)} UTC
+              </p>
+              <p>Crypto windows {formatWindows(runtimeConfigQuery.data.tradingWindows.crypto)} UTC</p>
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -310,6 +375,7 @@ export default function Overview() {
                 trend={portfolioSummary.totalR >= 0 ? "up" : "down"}
               />
               <KPICard title="Combined Trades" value={portfolioSummary.totalTrades} />
+              <KPICard title="Trades / Day" value={portfolioSummary.tradesPerDay.toFixed(2)} />
               <KPICard
                 title="Combined Win Rate"
                 value={formatPercentage(portfolioSummary.winRate)}

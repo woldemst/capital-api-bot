@@ -12,6 +12,7 @@ import {
   getPriceSnapshots,
   getBacktestOptions,
   runBacktestCompare,
+  getRuntimeConfig,
 } from "@/lib/api";
 import type { TradeFilters, MetricFilters, PriceFilters, BacktestCompareFilters } from "@/types/trading";
 
@@ -108,6 +109,14 @@ export function useBacktestOptions() {
   return useQuery({
     queryKey: ["backtest", "options"],
     queryFn: getBacktestOptions,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function useRuntimeConfig() {
+  return useQuery({
+    queryKey: ["runtime", "config"],
+    queryFn: getRuntimeConfig,
     staleTime: 10 * 60 * 1000,
   });
 }

@@ -204,7 +204,11 @@ export interface PriceFilters {
 }
 
 // Backtesting
-export type BacktestStrategyId = "FOREX_H1_M15_M5" | "CRYPTO_H1_M15_M5";
+export type BacktestStrategyId =
+  | "FOREX_H1_M15_M5"
+  | "CRYPTO_H1_M15_M5"
+  | "FOREX_H1_M15_M5_REGIME"
+  | "CRYPTO_H1_M15_M5_REGIME";
 
 export interface BacktestOptionStrategy {
   id: BacktestStrategyId;
@@ -272,6 +276,7 @@ export interface BacktestCompareFilters {
   startBalance?: number;
   forexRiskPct?: number;
   cryptoRiskPct?: number;
+  respectNewsGuard?: boolean;
 }
 
 export interface BacktestCompareResponse {
@@ -282,6 +287,7 @@ export interface BacktestCompareResponse {
     symbols: string[];
     sessions: string[];
     strategies: BacktestStrategyId[];
+    respectNewsGuard?: boolean;
   };
   strategyResults: BacktestStrategyResult[];
   portfolioAssumptions?: {
@@ -295,6 +301,7 @@ export interface BacktestCompareResponse {
     returnPct: number;
     maxDrawdownPct: number;
     totalTrades: number;
+    tradesPerDay: number;
     wins: number;
     losses: number;
     winRate: number;
@@ -317,6 +324,37 @@ export interface BacktestCompareResponse {
         winRate: number;
       };
     };
+  };
+}
+
+export interface RuntimeWindow {
+  start: number;
+  end: number;
+}
+
+export interface RuntimeConfigResponse {
+  timezone: string;
+  risk: {
+    forexRiskPct: number;
+    cryptoRiskPct: number;
+    maxOpenTrades: number;
+  };
+  tradingWindows: {
+    forex: RuntimeWindow[];
+    crypto: RuntimeWindow[];
+  };
+  newsGuard: {
+    forexOnly: boolean;
+    includeImpacts: string[];
+    windowsByImpact: Record<string, { preMinutes: number; postMinutes: number }>;
+    enabledInBacktestByDefault: boolean;
+  };
+  defaults: {
+    sessions: string[];
+    symbols: string[];
+    strategies: BacktestStrategyId[];
+    startBalance: number;
+    sampleLimit: number;
   };
 }
 

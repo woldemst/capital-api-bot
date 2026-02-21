@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import logger from "../utils/logger.js";
 import Strategy from "../strategies/strategies.js";
-import { SESSIONS, CRYPTO_SYMBOLS, RISK } from "../config.js";
+import { SESSIONS, CRYPTO_SYMBOLS, RISK, TRADING_WINDOWS, NEWS_GUARD } from "../config.js";
 
 const HUB_PORT = Number(process.env.HUB_PORT || process.env.DASHBOARD_PORT || 3001);
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
@@ -13,6 +13,8 @@ const API_PREFIX = "/api";
 const BACKTEST_STRATEGIES = {
     FOREX_H1_M15_M5: { variant: "H1_M15_M5", assetClass: "forex" },
     CRYPTO_H1_M15_M5: { variant: "H1_M15_M5", assetClass: "crypto" },
+    FOREX_H1_M15_M5_REGIME: { variant: "H1_M15_M5_REGIME", assetClass: "forex" },
+    CRYPTO_H1_M15_M5_REGIME: { variant: "H1_M15_M5_REGIME", assetClass: "crypto" },
 };
 const BACKTEST_STRATEGY_IDS = Object.keys(BACKTEST_STRATEGIES);
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
@@ -20,6 +22,8 @@ const CRYPTO_SYMBOL_SET = new Set((CRYPTO_SYMBOLS || []).map((symbol) => String(
 const DEFAULT_BACKTEST_START_BALANCE = 500;
 const DEFAULT_FOREX_RISK_PCT = Number.isFinite(Number(RISK.PER_TRADE)) ? Number(RISK.PER_TRADE) : 0.01;
 const DEFAULT_CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : DEFAULT_FOREX_RISK_PCT;
+const BACKTEST_MAX_OPEN_TRADES =
+    Number.isFinite(Number(RISK.MAX_POSITIONS)) && Number(RISK.MAX_POSITIONS) > 0 ? Number(RISK.MAX_POSITIONS) : 5;
 
 const CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -398,6 +402,14 @@ function parseTimestampMs(value) {
     return Number.isFinite(ts) ? ts : null;
 }
 
+function parseBooleanParam(value, defaultValue = true) {
+    if (value === undefined || value === null || value === "") return defaultValue;
+    const normalized = String(value).trim().toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+    return defaultValue;
+}
+
 function parseMinutes(hhmm) {
     if (typeof hhmm !== "string") return NaN;
     const [hh, mm] = hhmm.split(":").map((part) => Number(part));
@@ -604,6 +616,7 @@ function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALA
             returnPct: 0,
             maxDrawdownPct: 0,
             totalTrades: 0,
+            tradesPerDay: 0,
             wins: 0,
             losses: 0,
             winRate: 0,
@@ -671,6 +684,8 @@ function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALA
 
     byAsset.forex.winRate = byAsset.forex.trades ? byAsset.forex.wins / byAsset.forex.trades : 0;
     byAsset.crypto.winRate = byAsset.crypto.trades ? byAsset.crypto.wins / byAsset.crypto.trades : 0;
+    const closeTimes = prepared.map((trade) => trade.closedAtMs).filter((ts) => Number.isFinite(ts)).sort((a, b) => a - b);
+    const timespanDays = closeTimes.length >= 2 ? Math.max(1, (closeTimes[closeTimes.length - 1] - closeTimes[0]) / 86400000) : 1;
 
     return {
         startBalance,
@@ -678,6 +693,7 @@ function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALA
         returnPct: startBalance > 0 ? (balance - startBalance) / startBalance : 0,
         maxDrawdownPct,
         totalTrades,
+        tradesPerDay: totalTrades / timespanDays,
         wins,
         losses,
         winRate: totalTrades ? wins / totalTrades : 0,
@@ -697,175 +713,221 @@ function listAvailableSymbols() {
         .sort();
 }
 
+function buildRuntimeConfig() {
+    const defaultStrategies = ["FOREX_H1_M15_M5_REGIME", "CRYPTO_H1_M15_M5_REGIME"];
+    const defaultSessions = ["TOKYO", "LONDON", "SYDNEY", "CRYPTO"];
+    const defaultSymbols = [...new Set([
+        ...(SESSIONS.TOKYO?.SYMBOLS || []),
+        ...(SESSIONS.LONDON?.SYMBOLS || []),
+        ...(SESSIONS.SYDNEY?.SYMBOLS || []),
+        ...CRYPTO_SYMBOLS,
+    ])];
+
+    return {
+        timezone: "UTC",
+        risk: {
+            forexRiskPct: DEFAULT_FOREX_RISK_PCT,
+            cryptoRiskPct: DEFAULT_CRYPTO_RISK_PCT,
+            maxOpenTrades: BACKTEST_MAX_OPEN_TRADES,
+        },
+        tradingWindows: {
+            forex: TRADING_WINDOWS.FOREX,
+            crypto: TRADING_WINDOWS.CRYPTO,
+        },
+        newsGuard: {
+            forexOnly: Boolean(NEWS_GUARD.FOREX_ONLY),
+            includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS || [],
+            windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT || {},
+            enabledInBacktestByDefault: true,
+        },
+        defaults: {
+            sessions: defaultSessions,
+            symbols: defaultSymbols,
+            strategies: defaultStrategies,
+            startBalance: DEFAULT_BACKTEST_START_BALANCE,
+            sampleLimit: 200,
+        },
+    };
+}
+
 function buildBacktestOptions() {
     return {
         symbols: listAvailableSymbols(),
         sessions: BACKTEST_SESSIONS,
         strategies: [
+            { id: "FOREX_H1_M15_M5_REGIME", label: "Forex H1 / M15 / M5 (Regime Filtered)" },
+            { id: "CRYPTO_H1_M15_M5_REGIME", label: "Crypto H1 / M15 / M5 (Regime Filtered)" },
             { id: "FOREX_H1_M15_M5", label: "Forex H1 / M15 / M5" },
             { id: "CRYPTO_H1_M15_M5", label: "Crypto H1 / M15 / M5" },
         ],
     };
 }
 
-function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fromMs, toMs, selectedSessionsSet }) {
-    const allTrades = [];
+function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fromMs, toMs, selectedSessionsSet, respectNewsGuard = true }) {
+    const allRows = [];
 
     for (const symbol of symbols) {
         const symbolIsCrypto = isCryptoSymbol(symbol);
         if (assetClass === "crypto" && !symbolIsCrypto) continue;
         if (assetClass === "forex" && symbolIsCrypto) continue;
 
-        const rows = loadPriceSnapshots(symbol).sort((a, b) => (parseTimestampMs(a.timestamp) ?? 0) - (parseTimestampMs(b.timestamp) ?? 0));
-        if (!rows.length) continue;
-
-        let openTrade = null;
-        let tradeIndex = 0;
-
+        const rows = loadPriceSnapshots(symbol);
         for (const row of rows) {
             const tsMs = parseTimestampMs(row.timestamp);
             if (!Number.isFinite(tsMs)) continue;
             if (Number.isFinite(fromMs) && tsMs < fromMs) continue;
             if (Number.isFinite(toMs) && tsMs > toMs) continue;
+            allRows.push({ symbol, row, tsMs });
+        }
+    }
 
-            if (openTrade) {
-                const currentExitPrice = getExitPrice(openTrade.signal, row);
-                if (Number.isFinite(currentExitPrice)) {
-                    let closePrice = null;
-                    let closeReason = null;
+    if (!allRows.length) return [];
 
-                    if (openTrade.signal === "buy") {
-                        if (currentExitPrice >= openTrade.takeProfit) {
-                            closePrice = openTrade.takeProfit;
-                            closeReason = "hit_tp";
-                        } else if (currentExitPrice <= openTrade.stopLoss) {
-                            closePrice = openTrade.stopLoss;
-                            closeReason = "hit_sl";
-                        }
-                    } else if (currentExitPrice <= openTrade.takeProfit) {
-                        closePrice = openTrade.takeProfit;
+    allRows.sort((a, b) => {
+        if (a.tsMs !== b.tsMs) return a.tsMs - b.tsMs;
+        return a.symbol.localeCompare(b.symbol);
+    });
+
+    const allTrades = [];
+    const openTradesBySymbol = new Map();
+    const lastRowBySymbol = new Map();
+    let tradeIndex = 0;
+
+    for (const item of allRows) {
+        const { symbol, row, tsMs } = item;
+        lastRowBySymbol.set(symbol, row);
+
+        const existingTrade = openTradesBySymbol.get(symbol);
+        if (existingTrade) {
+            const currentExitPrice = getExitPrice(existingTrade.signal, row);
+            if (Number.isFinite(currentExitPrice)) {
+                let closePrice = null;
+                let closeReason = null;
+
+                if (existingTrade.signal === "buy") {
+                    if (currentExitPrice >= existingTrade.takeProfit) {
+                        closePrice = existingTrade.takeProfit;
                         closeReason = "hit_tp";
-                    } else if (currentExitPrice >= openTrade.stopLoss) {
-                        closePrice = openTrade.stopLoss;
+                    } else if (currentExitPrice <= existingTrade.stopLoss) {
+                        closePrice = existingTrade.stopLoss;
                         closeReason = "hit_sl";
                     }
+                } else if (currentExitPrice <= existingTrade.takeProfit) {
+                    closePrice = existingTrade.takeProfit;
+                    closeReason = "hit_tp";
+                } else if (currentExitPrice >= existingTrade.stopLoss) {
+                    closePrice = existingTrade.stopLoss;
+                    closeReason = "hit_sl";
+                }
 
-                    if (closeReason) {
-                        allTrades.push({
-                            ...openTrade,
-                            status: "closed",
-                            closePrice,
-                            closeReason,
-                            closedAt: row.timestamp,
-                        });
-                        openTrade = null;
-                    }
+                if (closeReason) {
+                    allTrades.push({
+                        ...existingTrade,
+                        status: "closed",
+                        closePrice,
+                        closeReason,
+                        closedAt: row.timestamp,
+                    });
+                    openTradesBySymbol.delete(symbol);
                 }
             }
-
-            if (openTrade) continue;
-            if (row.newsBlocked) continue;
-            if (!matchesSessionFilter(row.timestamp, row.sessions, selectedSessionsSet)) continue;
-
-            const signalResult =
-                assetClass === "crypto"
-                    ? Strategy.generateSignal3StageCrypto({
-                          symbol,
-                          indicators: row.indicators,
-                          variant,
-                          market: {
-                              bid: row.bid ?? null,
-                              ask: row.ask ?? null,
-                              spread: row.spread ?? null,
-                              price: row.price ?? row.mid ?? null,
-                          },
-                          timestamp: row.timestamp,
-                          sessions: row.sessions ?? [],
-                      })
-                    : Strategy.generateSignal3StageForex({
-                          symbol,
-                          indicators: row.indicators,
-                          variant,
-                          market: {
-                              bid: row.bid ?? null,
-                              ask: row.ask ?? null,
-                              spread: row.spread ?? null,
-                              price: row.price ?? row.mid ?? null,
-                          },
-                          timestamp: row.timestamp,
-                          sessions: row.sessions ?? [],
-                      });
-            const signal = String(signalResult?.signal || "").toUpperCase();
-            if (signal !== "BUY" && signal !== "SELL") continue;
-
-            const direction = signal === "BUY" ? "buy" : "sell";
-            const entryPrice = getEntryPrice(direction, row);
-            if (!Number.isFinite(entryPrice)) continue;
-
-            const spread = toNumber(row.spread) ?? Math.abs((toNumber(row.ask) ?? entryPrice) - (toNumber(row.bid) ?? entryPrice));
-            const atr = toNumber(row?.indicators?.m15?.atr);
-            let stopDistance;
-            let takeProfitDistance;
-
-            if (assetClass === "crypto") {
-                const fallbackDistance = Math.max(entryPrice * 0.0045, (Number.isFinite(spread) ? spread : 0) * 3);
-                stopDistance = Math.max(
-                    Number.isFinite(atr) ? 2.2 * atr : 0,
-                    Number.isFinite(spread) ? spread * 3 : 0,
-                    fallbackDistance,
-                );
-                takeProfitDistance = stopDistance * 1.8;
-            } else {
-                const fallbackStop = 8 * getPipSize(symbol);
-                stopDistance = Math.max(
-                    Number.isFinite(atr) ? 1.5 * atr : 0,
-                    Number.isFinite(spread) ? spread * 2 : 0,
-                    fallbackStop,
-                );
-                takeProfitDistance = stopDistance * 2;
-            }
-
-            const stopLoss = direction === "buy" ? entryPrice - stopDistance : entryPrice + stopDistance;
-            const takeProfit = direction === "buy" ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
-
-            tradeIndex += 1;
-            openTrade = {
-                dealId: `sim_${strategyId}_${symbol}_${tsMs}_${tradeIndex}`,
-                strategyId,
-                assetClass,
-                symbol,
-                signal: direction,
-                entryPrice,
-                stopLoss,
-                takeProfit,
-                openedAt: row.timestamp,
-                openedAtMs: tsMs,
-                status: "open",
-                closeReason: null,
-            };
         }
 
-        if (openTrade) {
-            const lastRow = rows
-                .filter((row) => {
-                    const tsMs = parseTimestampMs(row.timestamp);
-                    if (!Number.isFinite(tsMs)) return false;
-                    if (Number.isFinite(fromMs) && tsMs < fromMs) return false;
-                    if (Number.isFinite(toMs) && tsMs > toMs) return false;
-                    return true;
-                })
-                .slice(-1)[0];
-            const closePrice = getExitPrice(openTrade.signal, lastRow);
-            if (lastRow && Number.isFinite(closePrice)) {
-                allTrades.push({
-                    ...openTrade,
-                    status: "closed",
-                    closePrice,
-                    closeReason: "manual_close",
-                    closedAt: lastRow.timestamp,
-                });
-            }
+        if (openTradesBySymbol.has(symbol)) continue;
+        if (respectNewsGuard && assetClass === "forex" && row.newsBlocked) continue;
+        if (!matchesSessionFilter(row.timestamp, row.sessions, selectedSessionsSet)) continue;
+        if (openTradesBySymbol.size >= BACKTEST_MAX_OPEN_TRADES) continue;
+
+        const signalResult =
+            assetClass === "crypto"
+                ? Strategy.generateSignal3StageCrypto({
+                      symbol,
+                      indicators: row.indicators,
+                      variant,
+                      market: {
+                          bid: row.bid ?? null,
+                          ask: row.ask ?? null,
+                          spread: row.spread ?? null,
+                          price: row.price ?? row.mid ?? null,
+                      },
+                      timestamp: row.timestamp,
+                      sessions: row.sessions ?? [],
+                  })
+                : Strategy.generateSignal3StageForex({
+                      symbol,
+                      indicators: row.indicators,
+                      variant,
+                      market: {
+                          bid: row.bid ?? null,
+                          ask: row.ask ?? null,
+                          spread: row.spread ?? null,
+                          price: row.price ?? row.mid ?? null,
+                      },
+                      timestamp: row.timestamp,
+                      sessions: row.sessions ?? [],
+                  });
+        const signal = String(signalResult?.signal || "").toUpperCase();
+        if (signal !== "BUY" && signal !== "SELL") continue;
+
+        const direction = signal === "BUY" ? "buy" : "sell";
+        const entryPrice = getEntryPrice(direction, row);
+        if (!Number.isFinite(entryPrice)) continue;
+
+        const spread = toNumber(row.spread) ?? Math.abs((toNumber(row.ask) ?? entryPrice) - (toNumber(row.bid) ?? entryPrice));
+        const atr = toNumber(row?.indicators?.m15?.atr);
+        let stopDistance;
+        let takeProfitDistance;
+
+        if (assetClass === "crypto") {
+            const fallbackDistance = Math.max(entryPrice * 0.0045, (Number.isFinite(spread) ? spread : 0) * 3);
+            stopDistance = Math.max(
+                Number.isFinite(atr) ? 2.2 * atr : 0,
+                Number.isFinite(spread) ? spread * 3 : 0,
+                fallbackDistance,
+            );
+            takeProfitDistance = stopDistance * 1.8;
+        } else {
+            const fallbackStop = 8 * getPipSize(symbol);
+            stopDistance = Math.max(
+                Number.isFinite(atr) ? 1.5 * atr : 0,
+                Number.isFinite(spread) ? spread * 2 : 0,
+                fallbackStop,
+            );
+            takeProfitDistance = stopDistance * 2;
         }
+
+        const stopLoss = direction === "buy" ? entryPrice - stopDistance : entryPrice + stopDistance;
+        const takeProfit = direction === "buy" ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
+
+        tradeIndex += 1;
+        openTradesBySymbol.set(symbol, {
+            dealId: `sim_${strategyId}_${symbol}_${tsMs}_${tradeIndex}`,
+            strategyId,
+            assetClass,
+            symbol,
+            signal: direction,
+            entryPrice,
+            stopLoss,
+            takeProfit,
+            openedAt: row.timestamp,
+            openedAtMs: tsMs,
+            status: "open",
+            closeReason: null,
+        });
+    }
+
+    for (const [symbol, openTrade] of openTradesBySymbol.entries()) {
+        const lastRow = lastRowBySymbol.get(symbol);
+        if (!lastRow) continue;
+        const closePrice = getExitPrice(openTrade.signal, lastRow);
+        if (!Number.isFinite(closePrice)) continue;
+        allTrades.push({
+            ...openTrade,
+            status: "closed",
+            closePrice,
+            closeReason: "manual_close",
+            closedAt: lastRow.timestamp,
+        });
     }
 
     return allTrades;
@@ -952,6 +1014,11 @@ export function startHubServer() {
                 return;
             }
 
+            if (apiPath === "/runtime/config") {
+                sendJson(res, 200, buildRuntimeConfig());
+                return;
+            }
+
             if (apiPath === "/backtest/compare") {
                 const availableSymbols = new Set(listAvailableSymbols().map((symbol) => String(symbol).toUpperCase()));
                 const requestedSymbols = parseCsvParam(url.searchParams.get("symbols"));
@@ -979,6 +1046,7 @@ export function startHubServer() {
                 const requestedStartBalance = toNumber(url.searchParams.get("startBalance"));
                 const requestedForexRiskPct = toNumber(url.searchParams.get("forexRiskPct"));
                 const requestedCryptoRiskPct = toNumber(url.searchParams.get("cryptoRiskPct"));
+                const respectNewsGuard = parseBooleanParam(url.searchParams.get("respectNewsGuard"), true);
                 const startBalance =
                     Number.isFinite(requestedStartBalance) && requestedStartBalance > 0
                         ? requestedStartBalance
@@ -1006,6 +1074,7 @@ export function startHubServer() {
                         fromMs,
                         toMs,
                         selectedSessionsSet,
+                        respectNewsGuard,
                     });
                     combinedSimulationTrades.push(...simulationTrades);
                     strategyResults.push(summarizeTrades(strategyId, "simulation", simulationTrades, sampleLimit));
@@ -1031,6 +1100,7 @@ export function startHubServer() {
                         symbols,
                         sessions: selectedSessions,
                         strategies: strategyResults.map((result) => result.strategyId),
+                        respectNewsGuard,
                     },
                     strategyResults,
                     portfolioAssumptions: {
