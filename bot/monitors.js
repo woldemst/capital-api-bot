@@ -9,6 +9,27 @@ import { tradeTracker } from "../utils/tradeLogger.js";
 import logger from "../utils/logger.js";
 import { priceLogger } from "../utils/priceLogger.js";
 
+const TRACKING_SYMBOLS = [
+    "EURUSD",
+    "GBPUSD",
+    "EURGBP",
+    "USDCHF",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "USDCAD",
+    "EURGBP",
+    "AUDUSD",
+    "NZDUSD",
+    "AUDJPY",
+    "NZDJPY",
+    "USDJPY",
+    "EURJPY",
+    "AUDJPY",
+    "AUDUSD",
+    "NZDUSD",
+];
+
 export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
     logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
     if (bot.monitorInterval) clearInterval(bot.monitorInterval);
@@ -218,7 +239,7 @@ export function startPriceMonitor(bot) {
         }
         bot.priceMonitorInProgress = true;
         try {
-            await priceLogger.logSnapshotsForSymbols(bot.activeSymbols);
+            await priceLogger.logSnapshotsForSymbols(TRACKING_SYMBOLS);
         } finally {
             bot.priceMonitorInProgress = false;
         }
