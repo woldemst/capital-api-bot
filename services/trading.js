@@ -13,9 +13,9 @@ import { logTradeClose, logTradeOpen, logTradeTrailingStop, tradeTracker } from 
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
-const STRATEGY_VARIANTS = ["H1_M15_M5"];
-const DEFAULT_PRIMARY_VARIANT = "H1_M15_M5";
-const DEFAULT_CRYPTO_VARIANT = "H1_M15_M5";
+const STRATEGY_VARIANTS = ["H1_M15_M5", "H1_M15_M5_REGIME"];
+const DEFAULT_PRIMARY_VARIANT = "H1_M15_M5_REGIME";
+const DEFAULT_CRYPTO_VARIANT = "H1_M15_M5_REGIME";
 const PRIMARY_VARIANT = STRATEGY_VARIANTS.includes(process.env.PRIMARY_STRATEGY_VARIANT)
     ? process.env.PRIMARY_STRATEGY_VARIANT
     : DEFAULT_PRIMARY_VARIANT;

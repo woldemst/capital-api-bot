@@ -16,6 +16,14 @@ const STAGE_RULES = {
         sellPullbackMax: 0,
         sellMacdHistMax: -0.002,
         spreadPctMax: 0.00025,
+        regime: {
+            h1AdxMin: 12,
+            m15AdxMin: 12,
+            m15AtrPctMin: 0.00025,
+            m15AtrPctMax: 0.04,
+            spreadPctMax: 0.0002,
+            blockNySession: true,
+        },
     },
     crypto: {
         enabled: true,
@@ -39,6 +47,12 @@ const STAGE_RULES = {
         sellMacdHistMax: 0.01,
         spreadPctMax: 0.006,
         allowedSessions: ["CRYPTO"],
+        regime: {
+            h1AdxMin: 12,
+            m15AdxMin: 12,
+            m15AtrPctMin: 0.00025,
+            m15AtrPctMax: 0.04,
+        },
     },
 };
 
@@ -54,7 +68,7 @@ class Strategy {
         const selectedAssetClass = assetClass === "crypto" ? "crypto" : "forex";
         const rules = STAGE_RULES[selectedAssetClass];
 
-        const selectedVariant = variant === "H1_M15_M5" ? variant : "H1_M15_M5";
+        const selectedVariant = variant === "H1_M15_M5_REGIME" ? "H1_M15_M5_REGIME" : "H1_M15_M5";
         const biasTF = "h1";
         const trendTF = "h4";
         const setupTF = "m15";
@@ -283,6 +297,39 @@ class Strategy {
             };
         }
 
+        if (selectedVariant === "H1_M15_M5_REGIME") {
+            const regimeRules = rules?.regime ?? {};
+            const setupAtrPct = this.atrPct(setupIndicators);
+            const regimeChecks = {
+                h1AdxFloorOk: this.isNumber(biasAdx) && biasAdx >= (regimeRules.h1AdxMin ?? 0),
+                m15AdxFloorOk: this.isNumber(setupAdx) && setupAdx >= (regimeRules.m15AdxMin ?? 0),
+                m15AtrPctFloorOk: this.isNumber(setupAtrPct) && setupAtrPct >= (regimeRules.m15AtrPctMin ?? 0),
+                m15AtrPctCeilingOk:
+                    !this.isNumber(regimeRules.m15AtrPctMax) || (this.isNumber(setupAtrPct) && setupAtrPct <= regimeRules.m15AtrPctMax),
+                spreadOk: !this.isNumber(regimeRules.spreadPctMax) || (this.isNumber(spreadPct) && spreadPct <= regimeRules.spreadPctMax),
+                sessionOk: !regimeRules.blockNySession || !normalizedSessions.includes("NY"),
+            };
+            const regimeOk = Object.values(regimeChecks).every(Boolean);
+            if (!regimeOk) {
+                return {
+                    signal: null,
+                    reason: "regime_blocked",
+                    context: {
+                        ...baseContext,
+                        patternChecks: {
+                            direction: patternChecks,
+                            regime: regimeChecks,
+                        },
+                        gateStates: { biasOk, setupOk: true, entryOk: false },
+                    },
+                };
+            }
+            patternChecks = {
+                direction: patternChecks,
+                regime: regimeChecks,
+            };
+        }
+
         return {
             signal,
             reason: "pattern_confirmed",
@@ -334,6 +381,15 @@ class Strategy {
         const price = indicators?.close ?? indicators?.lastClose;
         const ema9 = indicators?.ema9;
         if (this.isNumber(price) && this.isNumber(ema9) && ema9 !== 0) return (price - ema9) / ema9;
+        return null;
+    }
+
+    atrPct(indicators) {
+        const direct = indicators?.atrPct;
+        if (this.isNumber(direct)) return direct;
+        const atr = indicators?.atr;
+        const close = indicators?.close ?? indicators?.lastClose;
+        if (this.isNumber(atr) && this.isNumber(close) && close !== 0) return atr / close;
         return null;
     }
 
