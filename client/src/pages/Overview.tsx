@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BacktestCompareFilters, BacktestStrategyId } from "@/types/trading";
 
-const KNOWN_CRYPTO_SYMBOLS = ["BTCUSD", "BTCEUR", "ETHUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"];
+const KNOWN_CRYPTO_SYMBOLS = ["BTCUSD", "ETHUSD", "DOGEUSD"];
 
 function formatPoints(value: number, digits = 5) {
   if (!Number.isFinite(value)) return "0";

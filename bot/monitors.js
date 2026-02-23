@@ -1,5 +1,5 @@
 import { getOpenPositions, getHistorical } from "../api.js";
-import { CRYPTO_SYMBOLS } from "../config.js";
+import { CRYPTO_SYMBOLS, SESSIONS } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import tradingService from "../services/trading.js";
 import webSocketService from "../services/websocket.js";
@@ -9,26 +9,34 @@ import { tradeTracker } from "../utils/tradeLogger.js";
 import logger from "../utils/logger.js";
 import { priceLogger } from "../utils/priceLogger.js";
 
-const TRACKING_SYMBOLS = [
-    "EURUSD",
-    "GBPUSD",
-    "EURGBP",
-    "USDCHF",
-    "EURUSD",
-    "GBPUSD",
-    "USDJPY",
-    "USDCAD",
-    "EURGBP",
-    "AUDUSD",
-    "NZDUSD",
-    "AUDJPY",
-    "NZDJPY",
-    "USDJPY",
-    "EURJPY",
-    "AUDJPY",
-    "AUDUSD",
-    "NZDUSD",
-];
+function getConfiguredForexSymbols() {
+    const set = new Set();
+    for (const [sessionName, session] of Object.entries(SESSIONS || {})) {
+        if (String(sessionName).toUpperCase() === "CRYPTO") continue;
+        for (const symbol of session?.SYMBOLS || []) {
+            if (symbol) set.add(String(symbol).toUpperCase());
+        }
+    }
+    return [...set];
+}
+
+function isForexMarketOpenUtc(now = new Date()) {
+    const day = now.getUTCDay(); // 0=Sun, 6=Sat
+    const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const sundayOpenMinutes = 22 * 60;
+    const fridayCloseMinutes = 22 * 60;
+
+    if (day === 6) return false; // Saturday closed
+    if (day === 0) return currentMinutes >= sundayOpenMinutes; // Sunday opens late UTC
+    if (day === 5) return currentMinutes < fridayCloseMinutes; // Friday closes late UTC
+    return true; // Monday-Thursday
+}
+
+function getPriceLoggingSymbols(now = new Date()) {
+    const forexSymbols = isForexMarketOpenUtc(now) ? getConfiguredForexSymbols() : [];
+    const cryptoSymbols = (CRYPTO_SYMBOLS || []).map((symbol) => String(symbol).toUpperCase());
+    return [...new Set([...forexSymbols, ...cryptoSymbols])];
+}
 
 export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
     logger.info(`[Monitoring] Checking open trades at ${new Date().toISOString()}`);
@@ -239,7 +247,13 @@ export function startPriceMonitor(bot) {
         }
         bot.priceMonitorInProgress = true;
         try {
-            await priceLogger.logSnapshotsForSymbols(TRACKING_SYMBOLS);
+            const symbolsToLog = getPriceLoggingSymbols(new Date());
+            if (!symbolsToLog.length) {
+                logger.debug("[PriceMonitor] No symbols scheduled for this tick.");
+                return;
+            }
+            logger.debug(`[PriceMonitor] Logging ${symbolsToLog.length} symbols: ${symbolsToLog.join(", ")}`);
+            await priceLogger.logSnapshotsForSymbols(symbolsToLog);
         } finally {
             bot.priceMonitorInProgress = false;
         }

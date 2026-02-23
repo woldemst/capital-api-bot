@@ -13,10 +13,10 @@ export const API = {
 
 // Trading Sessions (UTC times)
 const SESSION_SYMBOLS = {
-    LONDON: ["EURJPY", "USDJPY"],
-    NY: ["USDJPY", "EURJPY"],
-    SYDNEY: ["EURJPY", "USDJPY"],
-    TOKYO: ["EURJPY", "USDJPY"],
+    LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP"],
+    NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD"],
+    SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
+    TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
 };
 // can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
 
@@ -67,7 +67,7 @@ export const SESSIONS = {
         START: "00:00",
         END: "23:59",
         SYMBOLS: CRYPTO_SYMBOLS,
-    }
+    },
 };
 
 export const RISK = {
