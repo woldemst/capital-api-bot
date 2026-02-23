@@ -143,6 +143,15 @@ export default function Overview() {
   }, [dateFrom, dateTo]);
   const assumptions = compareQuery.data?.portfolioAssumptions || null;
   const moneyPnl = portfolioSummary ? portfolioSummary.endBalance - portfolioSummary.startBalance : 0;
+  const dataCoverage = compareQuery.data?.dataCoverage || null;
+  const staleCoverageSymbols = useMemo(
+    () => (dataCoverage?.symbols || []).filter((item) => item.isStaleForRangeEnd).map((item) => item.symbol),
+    [dataCoverage],
+  );
+  const missingCoverageSymbols = useMemo(
+    () => (dataCoverage?.symbols || []).filter((item) => !item.hasDataInRange).map((item) => item.symbol),
+    [dataCoverage],
+  );
 
   const toggleFromList = (value: string, list: string[], setList: (next: string[]) => void) => {
     if (list.includes(value)) {
@@ -346,6 +355,31 @@ export default function Overview() {
           message="Could not compute comparison. Check selected filters and API logs."
           onRetry={() => compareQuery.refetch()}
         />
+      ) : null}
+
+      {dataCoverage ? (
+        <div className={`rounded-lg border p-3 text-xs sm:text-sm ${dataCoverage.warnings.length ? "border-amber-500/40 bg-amber-500/5" : "border-border/60 bg-background/30"}`}>
+          <div className="flex flex-col gap-1">
+            <p className="font-medium">
+              Data Coverage: {dataCoverage.summary.symbolsWithDataInRange}/{dataCoverage.summary.symbolsRequested} symbols in selected range
+              {Number.isFinite(dataCoverage.summary.avgCoverageRatio)
+                ? ` | Avg coverage ${(Number(dataCoverage.summary.avgCoverageRatio) * 100).toFixed(1)}%`
+                : ""}
+            </p>
+            {dataCoverage.warnings.map((warning) => (
+              <p key={warning} className="text-amber-300">{warning}</p>
+            ))}
+            {staleCoverageSymbols.length ? (
+              <p className="text-muted-foreground">Stale symbols near range end: {staleCoverageSymbols.join(", ")}</p>
+            ) : null}
+            {missingCoverageSymbols.length ? (
+              <p className="text-muted-foreground">No data in range: {missingCoverageSymbols.join(", ")}</p>
+            ) : null}
+            {(dataCoverage.notes || []).map((note) => (
+              <p key={note} className="text-muted-foreground">{note}</p>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       {strategyResults.length > 0 && bestStrategy && selectedStrategy ? (

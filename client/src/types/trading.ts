@@ -288,6 +288,7 @@ export interface BacktestCompareResponse {
     sessions: string[];
     strategies: BacktestStrategyId[];
     respectNewsGuard?: boolean;
+    respectTradingWindows?: boolean;
   };
   strategyResults: BacktestStrategyResult[];
   portfolioAssumptions?: {
@@ -324,6 +325,33 @@ export interface BacktestCompareResponse {
         winRate: number;
       };
     };
+  };
+  dataCoverage?: {
+    requestedRange: {
+      from: string | null;
+      to: string | null;
+    };
+    summary: {
+      symbolsRequested: number;
+      symbolsWithDataInRange: number;
+      missingInRangeCount: number;
+      staleAtRangeEndCount: number;
+      avgCoverageRatio: number | null;
+    };
+    symbols: Array<{
+      symbol: string;
+      totalRows: number;
+      rowsInRange: number;
+      firstTimestamp: string | null;
+      lastTimestamp: string | null;
+      firstInRangeTimestamp: string | null;
+      lastInRangeTimestamp: string | null;
+      hasDataInRange: boolean;
+      isStaleForRangeEnd: boolean;
+      coverageRatio: number | null;
+    }>;
+    warnings: string[];
+    notes?: string[];
   };
 }
 

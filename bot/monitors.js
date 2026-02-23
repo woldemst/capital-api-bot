@@ -51,8 +51,10 @@ export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
 
         bot.monitorInProgress = true;
         try {
-            await trailingStopCheck(bot);
-            await bot.delay(3000);
+            // Trailing stop monitoring is temporarily disabled to keep live behavior closer
+            // to the dashboard backtest until trailing exits are modeled in the simulator.
+            // await trailingStopCheck(bot);
+            // await bot.delay(3000);
             await rolloverCloseCheck(bot);
             await bot.delay(3000);
         } finally {

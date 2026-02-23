@@ -447,6 +447,23 @@ function matchesSessionFilter(timestamp, snapshotSessions, selectedSessionsSet) 
     return sessions.some((s) => selectedSessionsSet.has(s));
 }
 
+function matchesTradingWindows(timestamp, assetClass) {
+    const tsMs = parseTimestampMs(timestamp);
+    if (!Number.isFinite(tsMs)) return false;
+    const date = new Date(tsMs);
+    const currentMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
+    const windows = assetClass === "crypto" ? TRADING_WINDOWS?.CRYPTO : TRADING_WINDOWS?.FOREX;
+    if (!Array.isArray(windows) || !windows.length) return true;
+
+    return windows.some((window) => {
+        const start = toNumber(window?.start);
+        const end = toNumber(window?.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+        if (start <= end) return currentMinutes >= start && currentMinutes <= end;
+        return currentMinutes >= start || currentMinutes <= end;
+    });
+}
+
 function getPipSize(symbol) {
     return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
 }
@@ -713,6 +730,104 @@ function listAvailableSymbols() {
         .sort();
 }
 
+function inspectPriceLogCoverage(symbol, { fromMs = null, toMs = null } = {}) {
+    const filePath = path.join(PRICE_LOG_DIR, `${sanitizeSymbol(symbol)}.jsonl`);
+    if (!fs.existsSync(filePath)) {
+        return {
+            symbol,
+            totalRows: 0,
+            rowsInRange: 0,
+            firstTimestamp: null,
+            lastTimestamp: null,
+            firstInRangeTimestamp: null,
+            lastInRangeTimestamp: null,
+            hasDataInRange: false,
+            isStaleForRangeEnd: false,
+            coverageRatio: null,
+        };
+    }
+
+    const rows = readJsonlFile(filePath);
+    let totalRows = 0;
+    let rowsInRange = 0;
+    let firstTsMs = null;
+    let lastTsMs = null;
+    let firstInRangeTsMs = null;
+    let lastInRangeTsMs = null;
+
+    for (const row of rows) {
+        const tsMs = parseTimestampMs(row?.timestamp);
+        if (!Number.isFinite(tsMs)) continue;
+        totalRows += 1;
+        if (!Number.isFinite(firstTsMs)) firstTsMs = tsMs;
+        lastTsMs = tsMs;
+
+        if (Number.isFinite(fromMs) && tsMs < fromMs) continue;
+        if (Number.isFinite(toMs) && tsMs > toMs) continue;
+
+        rowsInRange += 1;
+        if (!Number.isFinite(firstInRangeTsMs)) firstInRangeTsMs = tsMs;
+        lastInRangeTsMs = tsMs;
+    }
+
+    const expectedMinutes =
+        Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs ? Math.floor((toMs - fromMs) / 60000) + 1 : null;
+    const coverageRatio = Number.isFinite(expectedMinutes) && expectedMinutes > 0 ? rowsInRange / expectedMinutes : null;
+    const staleThresholdMs = 5 * 60 * 1000;
+    const isStaleForRangeEnd =
+        Number.isFinite(toMs) &&
+        (!Number.isFinite(lastInRangeTsMs) || lastInRangeTsMs < toMs - staleThresholdMs);
+
+    return {
+        symbol,
+        totalRows,
+        rowsInRange,
+        firstTimestamp: Number.isFinite(firstTsMs) ? new Date(firstTsMs).toISOString() : null,
+        lastTimestamp: Number.isFinite(lastTsMs) ? new Date(lastTsMs).toISOString() : null,
+        firstInRangeTimestamp: Number.isFinite(firstInRangeTsMs) ? new Date(firstInRangeTsMs).toISOString() : null,
+        lastInRangeTimestamp: Number.isFinite(lastInRangeTsMs) ? new Date(lastInRangeTsMs).toISOString() : null,
+        hasDataInRange: rowsInRange > 0,
+        isStaleForRangeEnd,
+        coverageRatio,
+    };
+}
+
+function buildBacktestDataCoverage({ symbols = [], fromMs = null, toMs = null } = {}) {
+    const symbolCoverage = symbols.map((symbol) => inspectPriceLogCoverage(symbol, { fromMs, toMs }));
+    const missingInRange = symbolCoverage.filter((item) => !item.hasDataInRange).map((item) => item.symbol);
+    const staleAtRangeEnd = symbolCoverage.filter((item) => item.isStaleForRangeEnd).map((item) => item.symbol);
+    const covered = symbolCoverage.filter((item) => item.hasDataInRange);
+    const avgCoverageRatio =
+        covered.length && covered.some((item) => Number.isFinite(item.coverageRatio))
+            ? covered.reduce((acc, item) => acc + (Number.isFinite(item.coverageRatio) ? item.coverageRatio : 0), 0) / covered.length
+            : null;
+
+    const warnings = [];
+    if (missingInRange.length) {
+        warnings.push(`No price log data in selected range for: ${missingInRange.join(", ")}.`);
+    }
+    if (staleAtRangeEnd.length) {
+        warnings.push(`Price logs are stale near selected range end for: ${staleAtRangeEnd.join(", ")}.`);
+    }
+
+    return {
+        requestedRange: {
+            from: Number.isFinite(fromMs) ? new Date(fromMs).toISOString() : null,
+            to: Number.isFinite(toMs) ? new Date(toMs).toISOString() : null,
+        },
+        summary: {
+            symbolsRequested: symbols.length,
+            symbolsWithDataInRange: covered.length,
+            missingInRangeCount: missingInRange.length,
+            staleAtRangeEndCount: staleAtRangeEnd.length,
+            avgCoverageRatio,
+        },
+        symbols: symbolCoverage,
+        warnings,
+        notes: ["Portfolio money PnL in backtest is simulated from R-multiples and configured risk, not broker-realized euro PnL."],
+    };
+}
+
 function buildRuntimeConfig() {
     const defaultStrategies = ["FOREX_H1_M15_M5_REGIME", "CRYPTO_H1_M15_M5_REGIME"];
     const defaultSessions = ["TOKYO", "LONDON", "SYDNEY", "CRYPTO"];
@@ -836,6 +951,7 @@ function runSimulationForVariant({ strategyId, variant, assetClass, symbols, fro
         if (openTradesBySymbol.has(symbol)) continue;
         if (respectNewsGuard && assetClass === "forex" && row.newsBlocked) continue;
         if (!matchesSessionFilter(row.timestamp, row.sessions, selectedSessionsSet)) continue;
+        if (!matchesTradingWindows(row.timestamp, assetClass)) continue;
         if (openTradesBySymbol.size >= BACKTEST_MAX_OPEN_TRADES) continue;
 
         const signalResult =
@@ -1091,6 +1207,11 @@ export function startHubServer() {
                     forexRiskPct,
                     cryptoRiskPct,
                 });
+                const dataCoverage = buildBacktestDataCoverage({
+                    symbols,
+                    fromMs,
+                    toMs,
+                });
 
                 sendJson(res, 200, {
                     generatedAt: new Date().toISOString(),
@@ -1101,6 +1222,7 @@ export function startHubServer() {
                         sessions: selectedSessions,
                         strategies: strategyResults.map((result) => result.strategyId),
                         respectNewsGuard,
+                        respectTradingWindows: true,
                     },
                     strategyResults,
                     portfolioAssumptions: {
@@ -1109,6 +1231,7 @@ export function startHubServer() {
                         cryptoRiskPct,
                     },
                     portfolioSummary,
+                    dataCoverage,
                 });
                 return;
             }
