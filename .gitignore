@@ -6,3 +6,4 @@ backtest/data/
 backtest/signals/
 backtest/results/
 backtest/analysis/
+backtest/prices/
