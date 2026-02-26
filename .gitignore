@@ -1,7 +1,25 @@
 .env*
 .DS_Store
 node_modules/
+client/dist/
 backtest/data/
 backtest/signals/
 backtest/results/
 backtest/analysis/
+backtest/reports/
+backtest/prices/
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/AUDJPY.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/AUDUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/BTCEUR.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/BTCUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/DOGEUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/ETHUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/EURGBP.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/EURJPY.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/EURUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/GBPUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/NZDJPY.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/NZDUSD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/USDCAD.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/USDCHF.jsonl
+ /Users/waldemarweinert/DEV/trading/capital-api-bot/backtest/prices/USDJPY.jsonl
