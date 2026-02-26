@@ -4,7 +4,7 @@ import { getMarketDetails, getHistorical } from "../api.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "./logger.js";
 
-import { ANALYSIS } from "../config.js";
+import { ANALYSIS, CRYPTO_SYMBOLS, RISK } from "../config.js";
 const { TIMEFRAMES } = ANALYSIS;
 
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
@@ -123,6 +123,152 @@ function getPipSize(symbol) {
         .includes("JPY")
         ? 0.01
         : 0.0001;
+}
+
+function isCryptoSymbol(symbol) {
+    const s = String(symbol || "").toUpperCase();
+    return Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.map((x) => String(x).toUpperCase()).includes(s);
+}
+
+function estimateRiskPctForEntry(entry) {
+    const explicit =
+        toNumber(entry?.riskMeta?.riskPct) ??
+        toNumber(entry?.riskPctConfigured) ??
+        toNumber(entry?.riskPct);
+    if (explicit !== null) return explicit;
+    return isCryptoSymbol(entry?.symbol) ? Number(RISK?.CRYPTO_PER_TRADE) || Number(RISK?.PER_TRADE) || null : Number(RISK?.PER_TRADE) || null;
+}
+
+function computeRMultiple(entry) {
+    const signal = String(entry?.signal ?? entry?.side ?? "").toUpperCase();
+    if (!["BUY", "SELL"].includes(signal)) return null;
+    const entryPrice = toNumber(entry?.entryPrice ?? entry?.level);
+    const stopLoss = toNumber(entry?.stopLoss ?? entry?.stopLevel);
+    const closePrice = toNumber(entry?.closePrice ?? entry?.closeLevel);
+    if (entryPrice === null || stopLoss === null || closePrice === null) return null;
+
+    const riskDistance = Math.abs(entryPrice - stopLoss);
+    if (!Number.isFinite(riskDistance) || riskDistance <= 0) return null;
+
+    const pnlDistance = signal === "BUY" ? closePrice - entryPrice : entryPrice - closePrice;
+    if (!Number.isFinite(pnlDistance)) return null;
+    return pnlDistance / riskDistance;
+}
+
+function parseClosedTradeSummary(entry) {
+    if (!entry || String(entry.status || "").toLowerCase() !== "closed") return null;
+    const closedAtMs = Date.parse(entry?.closedAt ?? "");
+    if (!Number.isFinite(closedAtMs)) return null;
+
+    const rMultiple = computeRMultiple(entry);
+    const riskPct = estimateRiskPctForEntry(entry);
+    const estimatedPnlPct = Number.isFinite(rMultiple) && Number.isFinite(riskPct) ? rMultiple * riskPct : null;
+
+    let pnlPoints = toNumber(entry?.tradeStats?.pnlPoints);
+    if (pnlPoints === null) {
+        const signal = String(entry?.signal ?? "").toUpperCase();
+        const entryPrice = toNumber(entry?.entryPrice);
+        const closePrice = toNumber(entry?.closePrice);
+        if (entryPrice !== null && closePrice !== null && (signal === "BUY" || signal === "SELL")) {
+            pnlPoints = signal === "BUY" ? closePrice - entryPrice : entryPrice - closePrice;
+        }
+    }
+
+    const isLoss = Number.isFinite(estimatedPnlPct) ? estimatedPnlPct < 0 : Number.isFinite(pnlPoints) ? pnlPoints < 0 : false;
+    const isWin = Number.isFinite(estimatedPnlPct) ? estimatedPnlPct > 0 : Number.isFinite(pnlPoints) ? pnlPoints > 0 : false;
+
+    return {
+        dealId: String(entry.dealId ?? ""),
+        symbol: String(entry.symbol ?? ""),
+        closedAtMs,
+        closedAt: entry.closedAt,
+        estimatedPnlPct,
+        rMultiple,
+        riskPct,
+        pnlPoints,
+        isLoss,
+        isWin,
+        closeReason: String(entry.closeReason ?? "unknown"),
+    };
+}
+
+export function summarizeClosedTrades({ sinceMs = null, untilMs = null } = {}) {
+    const closedTrades = [];
+    for (const logPath of listLogFiles()) {
+        if (!fs.existsSync(logPath)) continue;
+        const lines = fs.readFileSync(logPath, "utf-8").split("\n");
+        for (const raw of lines) {
+            if (!raw.trim()) continue;
+            let entry;
+            try {
+                entry = JSON.parse(raw.trim());
+            } catch {
+                continue;
+            }
+            const parsed = parseClosedTradeSummary(entry);
+            if (!parsed) continue;
+            closedTrades.push(parsed);
+        }
+    }
+
+    closedTrades.sort((a, b) => a.closedAtMs - b.closedAtMs);
+
+    let currentLossStreak = 0;
+    let lastLossAt = null;
+    let lastClosedAt = null;
+    for (const trade of closedTrades) {
+        lastClosedAt = trade.closedAt;
+        if (trade.isLoss) {
+            currentLossStreak += 1;
+            lastLossAt = trade.closedAt;
+        } else if (trade.isWin) {
+            currentLossStreak = 0;
+        }
+    }
+
+    const inPeriod = closedTrades.filter((t) => {
+        if (Number.isFinite(sinceMs) && t.closedAtMs < sinceMs) return false;
+        if (Number.isFinite(untilMs) && t.closedAtMs > untilMs) return false;
+        return true;
+    });
+
+    let estimatedPnlPct = 0;
+    let estimatedLossPct = 0;
+    let estimatedGainPct = 0;
+    let wins = 0;
+    let losses = 0;
+    let breakeven = 0;
+
+    for (const trade of inPeriod) {
+        const ep = trade.estimatedPnlPct;
+        if (Number.isFinite(ep)) {
+            estimatedPnlPct += ep;
+            if (ep < 0) estimatedLossPct += ep;
+            if (ep > 0) estimatedGainPct += ep;
+        }
+        if (trade.isWin) wins += 1;
+        else if (trade.isLoss) losses += 1;
+        else breakeven += 1;
+    }
+
+    return {
+        all: {
+            closedCount: closedTrades.length,
+            currentLossStreak,
+            lastLossAt,
+            lastClosedAt,
+        },
+        period: {
+            closedCount: inPeriod.length,
+            wins,
+            losses,
+            breakeven,
+            estimatedPnlPct,
+            estimatedLossPct, // negative value
+            estimatedGainPct,
+            winRate: inPeriod.length ? wins / inPeriod.length : null,
+        },
+    };
 }
 
 function getPriceLogPath(symbol = "unknown") {
@@ -272,7 +418,19 @@ export function getTradeEntry(dealId, symbol) {
     return { entry: null, logPath: null };
 }
 
-export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPrice, stopLoss, takeProfit, indicatorsOnOpening, candlesOnOpening, timestamp }) {
+export function logTradeOpen({
+    dealId,
+    symbol,
+    signal,
+    openReason = "",
+    entryPrice,
+    stopLoss,
+    takeProfit,
+    indicatorsOnOpening,
+    candlesOnOpening,
+    timestamp,
+    riskMeta = null,
+}) {
     const logPath = getSymbolLogPath(symbol);
     const compactOpening = compactIndicators(indicatorsOnOpening);
     const compactCandlesOpening = compactCandles(candlesOnOpening);
@@ -300,6 +458,7 @@ export function logTradeOpen({ dealId, symbol, signal, openReason = "", entryPri
         trailingStops: {
             updates: [],
         },
+        riskMeta: riskMeta && typeof riskMeta === "object" ? riskMeta : null,
     };
 
     appendLine(logPath, payload);

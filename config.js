@@ -20,7 +20,7 @@ const SESSION_SYMBOLS = {
 };
 // can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "ETHUSD", "DOGEUSD"];
+export const CRYPTO_SYMBOLS = ["BTCUSD", "ETHUSD", "DOGEUSD", "XRPUSD"];
 export const TRADING_WINDOWS = {
     FOREX: [
         // 22:00-12:59 UTC
@@ -71,9 +71,24 @@ export const SESSIONS = {
 };
 
 export const RISK = {
-    PER_TRADE: 0.04, // 4% risk per trade
-    CRYPTO_PER_TRADE: 0.03, // 2% risk per trade
-    MAX_POSITIONS: 5, // Maximum simultaneous positions
+    // Conservative defaults for small accounts; can be overridden via env later.
+    PER_TRADE: 0.005, // 0.5% risk per forex trade
+    CRYPTO_PER_TRADE: 0.004, // 0.4% risk per crypto trade
+    MAX_POSITIONS: 3, // Maximum simultaneous positions
+    GUARDS: {
+        MAX_DAILY_LOSS_PCT: 0.02, // stop new entries after -2% estimated realized day PnL
+        MAX_OPEN_RISK_PCT: 0.015, // cap estimated total open risk across all positions
+        MAX_LOSS_STREAK: 3, // consecutive losing closes before cooldown
+        LOSS_STREAK_COOLDOWN_MINUTES: 180,
+        SUMMARY_CACHE_MS: 15000,
+    },
+    EXITS: {
+        TRAIL_ACTIVATION_TP_PROGRESS: 0.45, // was 0.70
+        BREAKEVEN_ACTIVATION_TP_PROGRESS: 0.5, // was 0.70
+        TRAIL_DISTANCE_TP_FRACTION: 0.18,
+        TRAIL_DISTANCE_ATR_MULTIPLIER: 0.8,
+        SOFT_EXIT_ON_M5_M15_BREAK: true,
+    },
 };
 
 const TIMEFRAMES = {
@@ -99,7 +114,7 @@ const EMA = {
 // Technical Analysis Configuration
 export const ANALYSIS = {
     TIMEFRAMES,
-    SYMBOLS: ["EURJPY", "USDJPY", "BTCUSD", "ETHUSD", "DOGEUSD"],
+    SYMBOLS: ["EURJPY", "USDJPY", "BTCUSD", "ETHUSD", "DOGEUSD", "XRPUSD"],
     EMA,
 };
 

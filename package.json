@@ -4,9 +4,14 @@
   "description": "",
   "main": "bot.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"Use npm run test:intraday\"",
+    "test:intraday": "node --test tests/intraday/*.test.js",
     "start": "nodemon bot.js",
-    "backtest": "nodemon test-historical.js"
+    "backtest": "nodemon test-historical.js",
+    "backtest:intraday7:research": "node scripts/researchIntraday7Backtest.mjs",
+    "analyze:prices": "node scripts/analyzePriceSetups.mjs",
+    "analyze:trades": "node scripts/analyzeTradeLogs.mjs",
+    "analyze:windows": "node scripts/analyzePriceWindows.mjs"
   },
   "keywords": [],
   "author": "",

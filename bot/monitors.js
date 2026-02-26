@@ -51,10 +51,8 @@ export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
 
         bot.monitorInProgress = true;
         try {
-            // Trailing stop monitoring is temporarily disabled to keep live behavior closer
-            // to the dashboard backtest until trailing exits are modeled in the simulator.
-            // await trailingStopCheck(bot);
-            // await bot.delay(3000);
+            await trailingStopCheck(bot);
+            await bot.delay(3000);
             await rolloverCloseCheck(bot);
             await bot.delay(3000);
         } finally {
@@ -138,7 +136,10 @@ export async function trailingStopCheck(bot) {
                 entryPrice: pos.position.level,
                 takeProfit: pos.position.profitLevel,
                 stopLoss: pos.position.stopLevel,
-                currentPrice: pos.market.bid,
+                currentPrice:
+                    String(pos.position.direction || "").toUpperCase() === "SELL"
+                        ? (pos.market.offer ?? pos.market.ask ?? pos.market.bid)
+                        : (pos.market.bid ?? pos.market.offer ?? pos.market.ask),
                 trailingStop: pos.position.trailingStop,
             };
 

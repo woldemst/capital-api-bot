@@ -1,50 +1,93 @@
 const STAGE_RULES = {
     forex: {
-        blockedSymbols: ["GBPUSD", "NZDUSD"],
-        blockedHoursUtc: [14],
-        buyH1AdxMin: 25,
-        buyM15AdxMin: 25,
-        buySetupRsiMin: 40,
-        buySetupRsiMax: 52,
-        buyPullbackMax: 0.001,
-        buyMacdHistMin: 0,
-        sellH1AdxMin: 25,
+        allowedSymbols: ["EURJPY", "USDJPY"],
+        blockedSymbols: [],
+        blockedHoursUtc: [],
+        requireH4H1Alignment: true,
+        requireD1Filter: true,
+        allowD1Neutral: true,
+        useM1Timing: true,
+        buyH1AdxMin: 18,
+        buyM15AdxMin: 15,
+        buySetupRsiMin: 28,
+        buySetupRsiMax: 45,
+        buyPullbackMin: -0.005,
+        buyPullbackMax: 0,
+        buyMacdHistMin: -0.03,
+        buyEntryMacdSlopeMin: 0,
+        buyEntryBbPbMax: 0.45,
+        buyM1MacdSlopeMin: 0,
+        buyM1RsiMax: 55,
+        sellH1AdxMin: 18,
         sellM15AdxMin: 15,
-        sellSetupRsiMin: 45,
-        sellSetupRsiMax: 55,
-        sellPullbackMin: -0.002,
-        sellPullbackMax: 0,
-        sellMacdHistMax: -0.002,
+        sellSetupRsiMin: 55,
+        sellSetupRsiMax: 78,
+        sellPullbackMin: 0,
+        sellPullbackMax: 0.005,
+        sellMacdHistMax: 0.03,
+        sellEntryMacdSlopeMax: 0,
+        sellEntryBbPbMin: 0.55,
+        sellM1MacdSlopeMax: 0,
+        sellM1RsiMin: 45,
         spreadPctMax: 0.00025,
+        symbolOverrides: {
+            EURJPY: {
+                buyH1AdxMin: 14,
+                sellH1AdxMin: 14,
+                regime: {
+                    h1AdxMin: 10,
+                },
+            },
+            USDJPY: {
+                buyH1AdxMin: 18,
+                sellH1AdxMin: 18,
+            },
+        },
         regime: {
             h1AdxMin: 12,
             m15AdxMin: 12,
             m15AtrPctMin: 0.00025,
             m15AtrPctMax: 0.04,
             spreadPctMax: 0.0002,
-            blockNySession: true,
+            blockNySession: false,
         },
     },
     crypto: {
         enabled: true,
         blockedSymbols: ["BTCEUR", "SOLUSD", "ADAUSD"],
         blockedHoursUtc: [1, 15],
+        requireH4H1Alignment: true,
+        requireD1Filter: false,
+        allowD1Neutral: true,
+        blockCounterTrendLongInDoubleBear: true,
+        blockCounterTrendShortInDoubleBull: false,
+        useM1Timing: true,
         buyH1AdxMin: 18,
-        buyM15AdxMin: 5,
-        buySetupRsiMin: 45,
-        buySetupRsiMax: 62,
-        buyPullbackMax: 0.003,
-        buyMacdHistMin: -0.005,
+        buyM15AdxMin: 12,
+        buySetupRsiMin: 30,
+        buySetupRsiMax: 45,
+        buyPullbackMin: -0.012,
+        buyPullbackMax: 0,
+        buyMacdHistMin: -0.05,
+        buyEntryMacdSlopeMin: 0,
+        buyEntryBbPbMax: 0.4,
+        buyM1MacdSlopeMin: 0,
+        buyM1RsiMax: 52,
         buyHourStartUtc: 0,
         buyHourEndUtc: 21,
         sellH1AdxMin: 18,
         sellM15AdxMin: 15,
-        sellSetupRsiMin: 42,
-        sellSetupRsiMax: 60,
-        sellPullbackMin: -0.006,
+        sellSetupRsiMin: 55,
+        sellSetupRsiMax: 85,
+        sellPullbackMin: 0,
+        sellPullbackMax: 0.015,
         sellHourStartUtc: 0,
         sellHourEndUtc: 21,
-        sellMacdHistMax: 0.01,
+        sellMacdHistMax: 0.05,
+        sellEntryMacdSlopeMax: 0,
+        sellEntryBbPbMin: 0.55,
+        sellM1MacdSlopeMax: 0,
+        sellM1RsiMin: 48,
         spreadPctMax: 0.006,
         allowedSessions: ["CRYPTO"],
         regime: {
@@ -66,19 +109,25 @@ class Strategy {
         }
 
         const selectedAssetClass = assetClass === "crypto" ? "crypto" : "forex";
-        const rules = STAGE_RULES[selectedAssetClass];
+        const normalizedSymbol = String(symbol || "").toUpperCase();
+        let rules = STAGE_RULES[selectedAssetClass];
+        if (rules?.symbolOverrides?.[normalizedSymbol]) {
+            rules = this.mergeRuleConfig(rules, rules.symbolOverrides[normalizedSymbol]);
+        }
 
         const selectedVariant = variant === "H1_M15_M5_REGIME" ? "H1_M15_M5_REGIME" : "H1_M15_M5";
         const biasTF = "h1";
         const trendTF = "h4";
         const setupTF = "m15";
         const entryTF = "m5";
+        const microTF = "m1";
 
         const biasIndicators = indicators?.[biasTF];
         const d1Indicators = indicators?.d1;
         const trendIndicators = indicators?.[trendTF];
         const setupIndicators = indicators?.[setupTF];
         const entryIndicators = indicators?.[entryTF];
+        const microIndicators = indicators?.[microTF];
 
         const tsMs = Date.parse(String(timestamp || ""));
         const hourUtc = Number.isFinite(tsMs) ? new Date(tsMs).getUTCHours() : null;
@@ -111,15 +160,25 @@ class Strategy {
         const setupRsi = this.rsi(setupIndicators);
         const setupRsiPrev = this.rsiPrev(setupIndicators);
         const setupAdx = this.adx(setupIndicators);
+        const setupAtrPct = this.atrPct(setupIndicators);
         const entryMacdHist = this.macdHist(entryIndicators);
+        const entryMacdHistSlope = this.macdHistSlope(entryIndicators);
         const entryPullbackValue = this.priceVsEma9(entryIndicators);
         const entryAdx = this.adx(entryIndicators);
+        const entryBbPb = this.bbPb(entryIndicators);
+        const microMacdHist = this.macdHist(microIndicators);
+        const microMacdHistSlope = this.macdHistSlope(microIndicators);
+        const microRsi = this.rsi(microIndicators);
 
         const biasOk = this.isNumber(biasAdx);
+        const doubleBull = h4Trend === "bullish" && biasTrend === "bullish";
+        const doubleBear = h4Trend === "bearish" && biasTrend === "bearish";
+        const d1BuyOk = !rules.requireD1Filter || d1Trend === "bullish" || (rules.allowD1Neutral && d1Trend === "neutral");
+        const d1SellOk = !rules.requireD1Filter || d1Trend === "bearish" || (rules.allowD1Neutral && d1Trend === "neutral");
 
         const baseContext = {
             assetClass: selectedAssetClass,
-            symbol: String(symbol || "").toUpperCase(),
+            symbol: normalizedSymbol,
             variant: selectedVariant,
             biasTF,
             d1Trend,
@@ -132,19 +191,38 @@ class Strategy {
             setupRsi,
             setupRsiPrev,
             setupAdx,
+            setupAtrPct,
             entryMacdHist,
+            entryMacdHistSlope,
             entryPullbackValue,
             entryAdx,
+            entryBbPb,
+            microTF,
+            microMacdHist,
+            microMacdHistSlope,
+            microRsi,
             hourUtc,
             sessions: normalizedSessions,
             spreadPct,
+            trendAlignment: { doubleBull, doubleBear, d1BuyOk, d1SellOk },
             gateStates: { biasOk, setupOk: false, entryOk: false },
         };
 
         if (selectedAssetClass === "forex") {
-            const normalizedSymbol = String(symbol || "").toUpperCase();
+            const allowedSymbols = Array.isArray(rules.allowedSymbols) ? rules.allowedSymbols.map((s) => String(s).toUpperCase()) : [];
             const blockedSymbols = Array.isArray(rules.blockedSymbols) ? rules.blockedSymbols : [];
             const blockedHoursUtc = Array.isArray(rules.blockedHoursUtc) ? rules.blockedHoursUtc : [];
+            if (allowedSymbols.length && !allowedSymbols.includes(normalizedSymbol)) {
+                return {
+                    signal: null,
+                    reason: "symbol_not_allowed",
+                    context: {
+                        ...baseContext,
+                        patternChecks: { symbolAllowed: false },
+                        gateStates: { biasOk, setupOk: false, entryOk: false },
+                    },
+                };
+            }
             if (blockedSymbols.includes(normalizedSymbol)) {
                 return {
                     signal: null,
@@ -181,9 +259,20 @@ class Strategy {
             };
         }
         if (selectedAssetClass === "crypto") {
-            const normalizedSymbol = String(symbol || "").toUpperCase();
+            const allowedSymbols = Array.isArray(rules.allowedSymbols) ? rules.allowedSymbols.map((s) => String(s).toUpperCase()) : [];
             const blockedSymbols = Array.isArray(rules.blockedSymbols) ? rules.blockedSymbols : [];
             const blockedHoursUtc = Array.isArray(rules.blockedHoursUtc) ? rules.blockedHoursUtc : [];
+            if (allowedSymbols.length && !allowedSymbols.includes(normalizedSymbol)) {
+                return {
+                    signal: null,
+                    reason: "symbol_not_allowed",
+                    context: {
+                        ...baseContext,
+                        patternChecks: { symbolAllowed: false },
+                        gateStates: { biasOk, setupOk: false, entryOk: false },
+                    },
+                };
+            }
             if (blockedSymbols.includes(normalizedSymbol)) {
                 return {
                     signal: null,
@@ -208,27 +297,49 @@ class Strategy {
             }
         }
 
+        const buyTrendAligned = rules.requireH4H1Alignment ? doubleBull : biasTrend !== "bearish";
+        const sellTrendAligned = rules.requireH4H1Alignment ? doubleBear : biasTrend !== "bullish";
+        const buyCounterTrendBlocked = selectedAssetClass === "crypto" && Boolean(rules.blockCounterTrendLongInDoubleBear) && doubleBear;
+        const sellCounterTrendBlocked = selectedAssetClass === "crypto" && Boolean(rules.blockCounterTrendShortInDoubleBull) && doubleBull;
+        const m1BuyTimingOk =
+            !rules.useM1Timing ||
+            ((rules.buyM1MacdSlopeMin === undefined || (this.isNumber(microMacdHistSlope) && microMacdHistSlope >= rules.buyM1MacdSlopeMin)) &&
+                (rules.buyM1RsiMax === undefined || (this.isNumber(microRsi) && microRsi <= rules.buyM1RsiMax)));
+        const m1SellTimingOk =
+            !rules.useM1Timing ||
+            ((rules.sellM1MacdSlopeMax === undefined || (this.isNumber(microMacdHistSlope) && microMacdHistSlope <= rules.sellM1MacdSlopeMax)) &&
+                (rules.sellM1RsiMin === undefined || (this.isNumber(microRsi) && microRsi >= rules.sellM1RsiMin)));
+
         const forexSellChecks = {
-            trendAligned: true,
+            trendAligned: sellTrendAligned,
+            d1Ok: d1SellOk,
             h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.sellH1AdxMin,
             m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.sellM15AdxMin,
             spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
-            rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
-            pullbackOk:
-                this.isNumber(setupPullbackValue) &&
-                setupPullbackValue >= rules.sellPullbackMin &&
-                setupPullbackValue <= rules.sellPullbackMax,
+            rsiRangeOk: this.inRange(setupRsi, rules.sellSetupRsiMin, rules.sellSetupRsiMax),
+            pullbackOk: this.inRange(setupPullbackValue, rules.sellPullbackMin, rules.sellPullbackMax),
             macdOk: this.isNumber(entryMacdHist) && entryMacdHist <= rules.sellMacdHistMax,
+            m5MacdSlopeOk:
+                rules.sellEntryMacdSlopeMax === undefined ||
+                (this.isNumber(entryMacdHistSlope) && entryMacdHistSlope <= rules.sellEntryMacdSlopeMax),
+            m5BbOk: rules.sellEntryBbPbMin === undefined || (this.isNumber(entryBbPb) && entryBbPb >= rules.sellEntryBbPbMin),
+            m1TimingOk: m1SellTimingOk,
         };
 
         const forexBuyChecks = {
-            trendAligned: true,
+            trendAligned: buyTrendAligned,
+            d1Ok: d1BuyOk,
             h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.buyH1AdxMin,
             m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.buyM15AdxMin,
             spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
-            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue <= rules.buyPullbackMax,
-            rsiRangeOk: this.isNumber(setupRsi) && setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax,
+            pullbackOk: this.inRange(setupPullbackValue, rules.buyPullbackMin, rules.buyPullbackMax),
+            rsiRangeOk: this.inRange(setupRsi, rules.buySetupRsiMin, rules.buySetupRsiMax),
             macdOk: this.isNumber(entryMacdHist) && entryMacdHist >= rules.buyMacdHistMin,
+            m5MacdSlopeOk:
+                rules.buyEntryMacdSlopeMin === undefined ||
+                (this.isNumber(entryMacdHistSlope) && entryMacdHistSlope >= rules.buyEntryMacdSlopeMin),
+            m5BbOk: rules.buyEntryBbPbMax === undefined || (this.isNumber(entryBbPb) && entryBbPb <= rules.buyEntryBbPbMax),
+            m1TimingOk: m1BuyTimingOk,
         };
 
         const cryptoAllowedSessions =
@@ -237,21 +348,37 @@ class Strategy {
                 : ["CRYPTO"];
         const cryptoSessionOk = normalizedSessions.some((session) => cryptoAllowedSessions.includes(session));
         const cryptoSellChecks = {
+            trendAligned: sellTrendAligned,
+            d1Ok: d1SellOk,
+            counterTrendOk: !sellCounterTrendBlocked,
             h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.sellH1AdxMin,
             m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.sellM15AdxMin,
-            m15RsiOk: this.isNumber(setupRsi) && setupRsi >= rules.sellSetupRsiMin && setupRsi <= rules.sellSetupRsiMax,
-            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue >= rules.sellPullbackMin,
+            m15RsiOk: this.inRange(setupRsi, rules.sellSetupRsiMin, rules.sellSetupRsiMax),
+            pullbackOk: this.inRange(setupPullbackValue, rules.sellPullbackMin, rules.sellPullbackMax),
             m5MacdOk: this.isNumber(entryMacdHist) && entryMacdHist <= rules.sellMacdHistMax,
+            m5MacdSlopeOk:
+                rules.sellEntryMacdSlopeMax === undefined ||
+                (this.isNumber(entryMacdHistSlope) && entryMacdHistSlope <= rules.sellEntryMacdSlopeMax),
+            m5BbOk: rules.sellEntryBbPbMin === undefined || (this.isNumber(entryBbPb) && entryBbPb >= rules.sellEntryBbPbMin),
+            m1TimingOk: m1SellTimingOk,
             spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
             hourOk: this.isNumber(hourUtc) && hourUtc >= rules.sellHourStartUtc && hourUtc <= rules.sellHourEndUtc,
             sessionOk: cryptoSessionOk,
         };
         const cryptoBuyChecks = {
+            trendAligned: buyTrendAligned,
+            d1Ok: d1BuyOk,
+            counterTrendOk: !buyCounterTrendBlocked,
             h1AdxOk: this.isNumber(biasAdx) && biasAdx >= rules.buyH1AdxMin,
             m15AdxOk: this.isNumber(setupAdx) && setupAdx >= rules.buyM15AdxMin,
-            m15RsiOk: this.isNumber(setupRsi) && setupRsi >= rules.buySetupRsiMin && setupRsi <= rules.buySetupRsiMax,
-            pullbackOk: this.isNumber(setupPullbackValue) && setupPullbackValue <= rules.buyPullbackMax,
+            m15RsiOk: this.inRange(setupRsi, rules.buySetupRsiMin, rules.buySetupRsiMax),
+            pullbackOk: this.inRange(setupPullbackValue, rules.buyPullbackMin, rules.buyPullbackMax),
             m5MacdOk: this.isNumber(entryMacdHist) && entryMacdHist >= rules.buyMacdHistMin,
+            m5MacdSlopeOk:
+                rules.buyEntryMacdSlopeMin === undefined ||
+                (this.isNumber(entryMacdHistSlope) && entryMacdHistSlope >= rules.buyEntryMacdSlopeMin),
+            m5BbOk: rules.buyEntryBbPbMax === undefined || (this.isNumber(entryBbPb) && entryBbPb <= rules.buyEntryBbPbMax),
+            m1TimingOk: m1BuyTimingOk,
             spreadOk: this.isNumber(spreadPct) && spreadPct <= rules.spreadPctMax,
             hourOk: this.isNumber(hourUtc) && hourUtc >= rules.buyHourStartUtc && hourUtc <= rules.buyHourEndUtc,
             sessionOk: cryptoSessionOk,
@@ -266,7 +393,13 @@ class Strategy {
         let patternChecks = {};
 
         if (selectedAssetClass === "crypto") {
-            if (cryptoSellOk) {
+            if (doubleBull && cryptoBuyOk) {
+                signal = "BUY";
+                patternChecks = cryptoBuyChecks;
+            } else if (doubleBear && cryptoSellOk) {
+                signal = "SELL";
+                patternChecks = cryptoSellChecks;
+            } else if (cryptoSellOk) {
                 signal = "SELL";
                 patternChecks = cryptoSellChecks;
             } else if (cryptoBuyOk) {
@@ -299,7 +432,6 @@ class Strategy {
 
         if (selectedVariant === "H1_M15_M5_REGIME") {
             const regimeRules = rules?.regime ?? {};
-            const setupAtrPct = this.atrPct(setupIndicators);
             const regimeChecks = {
                 h1AdxFloorOk: this.isNumber(biasAdx) && biasAdx >= (regimeRules.h1AdxMin ?? 0),
                 m15AdxFloorOk: this.isNumber(setupAdx) && setupAdx >= (regimeRules.m15AdxMin ?? 0),
@@ -375,6 +507,20 @@ class Strategy {
         return this.isNumber(hist) ? hist : null;
     }
 
+    macdHistSlope(indicators) {
+        const direct = indicators?.macdHistSlope;
+        if (this.isNumber(direct)) return direct;
+        const current = this.macdHist(indicators);
+        const prev = indicators?.macdHistPrev;
+        if (this.isNumber(current) && this.isNumber(prev)) return current - prev;
+        return null;
+    }
+
+    bbPb(indicators) {
+        const pb = indicators?.bb?.pb;
+        return this.isNumber(pb) ? pb : null;
+    }
+
     priceVsEma9(indicators) {
         const direct = indicators?.price_vs_ema9;
         if (this.isNumber(direct)) return direct;
@@ -391,6 +537,33 @@ class Strategy {
         const close = indicators?.close ?? indicators?.lastClose;
         if (this.isNumber(atr) && this.isNumber(close) && close !== 0) return atr / close;
         return null;
+    }
+
+    inRange(value, min = null, max = null) {
+        if (!this.isNumber(value)) return false;
+        if (this.isNumber(min) && value < min) return false;
+        if (this.isNumber(max) && value > max) return false;
+        return true;
+    }
+
+    mergeRuleConfig(base, override) {
+        const next = { ...(base || {}) };
+        for (const [key, value] of Object.entries(override || {})) {
+            if (key === "symbolOverrides") continue;
+            if (
+                value &&
+                typeof value === "object" &&
+                !Array.isArray(value) &&
+                base?.[key] &&
+                typeof base[key] === "object" &&
+                !Array.isArray(base[key])
+            ) {
+                next[key] = { ...base[key], ...value };
+            } else {
+                next[key] = value;
+            }
+        }
+        return next;
     }
 
     pickTrend(indicator) {

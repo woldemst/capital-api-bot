@@ -1,6 +1,5 @@
 import {
     placePosition,
-    updateTrailingStop,
     getDealConfirmation,
     closePosition as apiClosePosition,
     getOpenPositions,
@@ -9,10 +8,13 @@ import {
 } from "../api.js";
 import { RISK, ANALYSIS, CRYPTO_SYMBOLS } from "../config.js";
 import logger from "../utils/logger.js";
-import { logTradeClose, logTradeOpen, logTradeTrailingStop, tradeTracker } from "../utils/tradeLogger.js";
+import { logTradeClose, logTradeOpen, logTradeTrailingStop, tradeTracker, summarizeClosedTrades } from "../utils/tradeLogger.js";
 import Strategy from "../strategies/strategies.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
+const CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : PER_TRADE;
+const GUARDS = RISK.GUARDS || {};
+const EXITS = RISK.EXITS || {};
 const STRATEGY_VARIANTS = ["H1_M15_M5", "H1_M15_M5_REGIME"];
 const DEFAULT_PRIMARY_VARIANT = "H1_M15_M5_REGIME";
 const DEFAULT_CRYPTO_VARIANT = "H1_M15_M5_REGIME";
@@ -22,15 +24,28 @@ const PRIMARY_VARIANT = STRATEGY_VARIANTS.includes(process.env.PRIMARY_STRATEGY_
 const CRYPTO_VARIANT = STRATEGY_VARIANTS.includes(process.env.CRYPTO_STRATEGY_VARIANT)
     ? process.env.CRYPTO_STRATEGY_VARIANT
     : DEFAULT_CRYPTO_VARIANT;
-const CRYPTO_PER_TRADE = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : PER_TRADE;
+const CRYPTO_PER_TRADE = CRYPTO_RISK_PCT;
+const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0.02;
+const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT)) ? Number(GUARDS.MAX_OPEN_RISK_PCT) : Math.max(PER_TRADE, CRYPTO_PER_TRADE) * 2;
+const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
+const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
+    ? Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES)
+    : 180;
+const RISK_SUMMARY_CACHE_MS = Number.isFinite(Number(GUARDS.SUMMARY_CACHE_MS)) ? Number(GUARDS.SUMMARY_CACHE_MS) : 15000;
 
 class TradingService {
     constructor() {
         this.openTrades = [];
+        this.openPositionsBroker = [];
         this.accountBalance = 0;
         this.availableMargin = 0;
         this.dailyLoss = 0;
-        this.dailyLossLimitPct = 0.05;
+        this.dailyLossLimitPct = MAX_DAILY_LOSS_PCT;
+        this.riskGuardState = {
+            refreshedAtMs: 0,
+            summary: null,
+        };
+        this.guardLogThrottle = new Map();
         logger.info(`[Strategy] ForexPrimary=${PRIMARY_VARIANT} CryptoPrimary=${CRYPTO_VARIANT}`);
     }
 
@@ -82,6 +97,102 @@ class TradingService {
         return this.openTrades.includes(symbol);
     }
 
+    getConfiguredRiskPct(symbol) {
+        return this.isCryptoSymbol(symbol) ? CRYPTO_PER_TRADE : PER_TRADE;
+    }
+
+    getUtcDayStartMs(tsMs = Date.now()) {
+        const d = new Date(tsMs);
+        d.setUTCHours(0, 0, 0, 0);
+        return d.getTime();
+    }
+
+    pctText(value) {
+        return Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "n/a";
+    }
+
+    logGuardBlock(key, message, throttleMs = 60000) {
+        const now = Date.now();
+        const last = this.guardLogThrottle.get(key) || 0;
+        if (now - last >= throttleMs) {
+            logger.warn(message);
+            this.guardLogThrottle.set(key, now);
+        }
+    }
+
+    async refreshRiskGuardSummary({ force = false } = {}) {
+        const now = Date.now();
+        if (!force && this.riskGuardState.summary && now - this.riskGuardState.refreshedAtMs < RISK_SUMMARY_CACHE_MS) {
+            return this.riskGuardState.summary;
+        }
+
+        const dayStartMs = this.getUtcDayStartMs(now);
+        const summary = summarizeClosedTrades({ sinceMs: dayStartMs });
+        this.riskGuardState = {
+            refreshedAtMs: now,
+            summary,
+        };
+
+        const period = summary?.period || {};
+        this.dailyLoss = Math.abs(Math.min(0, Number(period.estimatedPnlPct) || 0));
+        return summary;
+    }
+
+    estimateOpenConfiguredRiskPct() {
+        if (!Array.isArray(this.openPositionsBroker) || !this.openPositionsBroker.length) return 0;
+        return this.openPositionsBroker.reduce((sum, pos) => sum + this.getConfiguredRiskPct(pos?.symbol), 0);
+    }
+
+    async shouldBlockNewTrade(symbol) {
+        const summary = await this.refreshRiskGuardSummary();
+        const period = summary?.period || {};
+        const global = summary?.all || {};
+
+        const todayEstimatedPnlPct = Number(period.estimatedPnlPct) || 0;
+        const todayEstimatedLossPctAbs = Math.abs(Math.min(0, todayEstimatedPnlPct));
+        if (todayEstimatedLossPctAbs >= this.dailyLossLimitPct) {
+            this.logGuardBlock(
+                "daily_loss_limit",
+                `[RiskGuard] Daily loss limit reached (${this.pctText(todayEstimatedLossPctAbs)} >= ${this.pctText(this.dailyLossLimitPct)}). Blocking new entries.`,
+            );
+            return { blocked: true, reason: "daily_loss_limit" };
+        }
+
+        const currentLossStreak = Number(global.currentLossStreak) || 0;
+        if (currentLossStreak >= MAX_LOSS_STREAK) {
+            const lastLossAtMs = Date.parse(String(global.lastLossAt || ""));
+            const cooldownMs = LOSS_STREAK_COOLDOWN_MINUTES * 60000;
+            const cooldownActive = Number.isFinite(lastLossAtMs) ? Date.now() - lastLossAtMs < cooldownMs : true;
+            if (cooldownActive) {
+                this.logGuardBlock(
+                    "loss_streak_cooldown",
+                    `[RiskGuard] Loss streak ${currentLossStreak} reached (limit=${MAX_LOSS_STREAK}). Cooldown active for ${LOSS_STREAK_COOLDOWN_MINUTES}m. Blocking new entries.`,
+                );
+                return { blocked: true, reason: "loss_streak_cooldown" };
+            }
+        }
+
+        const currentOpenRiskPct = this.estimateOpenConfiguredRiskPct();
+        const nextRiskPct = this.getConfiguredRiskPct(symbol);
+        if (currentOpenRiskPct + nextRiskPct > MAX_OPEN_RISK_PCT + 1e-9) {
+            this.logGuardBlock(
+                "open_risk_cap",
+                `[RiskGuard] Open risk cap exceeded by new ${symbol} trade (${this.pctText(currentOpenRiskPct)} + ${this.pctText(nextRiskPct)} > ${this.pctText(MAX_OPEN_RISK_PCT)}).`,
+            );
+            return { blocked: true, reason: "open_risk_cap" };
+        }
+
+        return {
+            blocked: false,
+            reason: null,
+            snapshot: {
+                todayEstimatedPnlPct,
+                currentLossStreak,
+                currentOpenRiskPct,
+            },
+        };
+    }
+
     roundPrice(price, symbol) {
         if (this.isCryptoSymbol(symbol)) {
             if (price >= 1000) return Number(price).toFixed(2) * 1;
@@ -111,6 +222,15 @@ class TradingService {
         const symbols = positions.map((p) => p?.market?.epic ?? p?.position?.epic).filter(Boolean);
 
         this.openTrades = [...new Set(symbols)];
+        this.openPositionsBroker = positions.map((p) => ({
+            dealId: p?.position?.dealId ?? p?.dealId ?? null,
+            symbol: p?.market?.epic ?? p?.position?.epic ?? null,
+            direction: p?.position?.direction ?? null,
+            size: this.toNumber(p?.position?.size),
+            entryPrice: this.firstNumber(p?.position?.level),
+            stopLoss: this.firstNumber(p?.position?.stopLevel, p?.position?.stopLoss),
+            takeProfit: this.firstNumber(p?.position?.profitLevel, p?.position?.takeProfit, p?.position?.limitLevel),
+        }));
     }
 
     async getPositionContext(dealId) {
@@ -139,7 +259,12 @@ class TradingService {
     async processPrice({ symbol, indicators, bid, ask, timestamp, sessions = [] }) {
         try {
             await this.syncOpenTradesFromBroker();
-            logger.info(`[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€`);
+            const guard = await this.shouldBlockNewTrade(symbol);
+            logger.info(
+                `[ProcessPrice] Open trades: ${this.openTrades.length}/${MAX_POSITIONS} | Balance: ${this.accountBalance}€ | AvailMargin: ${
+                    Number.isFinite(this.availableMargin) ? this.availableMargin : "n/a"
+                }€`,
+            );
 
             if (this.openTrades.length >= MAX_POSITIONS) {
                 logger.info(`[ProcessPrice] Max trades reached. Skipping ${symbol}.`);
@@ -147,6 +272,10 @@ class TradingService {
             }
             if (this.isSymbolTraded(symbol)) {
                 logger.debug(`[ProcessPrice] ${symbol} already in market.`);
+                return;
+            }
+            if (guard?.blocked) {
+                logger.debug(`[ProcessPrice] Risk guard blocked ${symbol}: ${guard.reason}`);
                 return;
             }
             const isCrypto = this.isCryptoSymbol(symbol);
@@ -203,6 +332,8 @@ class TradingService {
             // Re-check just placing
             if (this.openTrades.length >= MAX_POSITIONS) return;
             if (this.isSymbolTraded(symbol)) return;
+            const guardRecheck = await this.shouldBlockNewTrade(symbol);
+            if (guardRecheck?.blocked) return;
 
             logger.info(`[Signal] ${symbol}: ${signal}`);
             await this.executeTrade(symbol, signal, bid, ask, indicators, reason);
@@ -265,6 +396,8 @@ class TradingService {
         const takeProfitPips = 2 * stopLossPips; // 2:1 reward-risk ratio
         const takeProfitPrice = isBuy ? price + takeProfitPips : price - takeProfitPips;
         const size = this.positionSizeForex(this.accountBalance, price, stopLossPrice, symbol);
+        const riskPctConfigured = this.getConfiguredRiskPct(symbol);
+        const riskAmountConfigured = Number.isFinite(this.accountBalance) ? this.accountBalance * riskPctConfigured : null;
 
         return {
             size,
@@ -273,6 +406,10 @@ class TradingService {
             stopLossPips,
             takeProfitPips,
             price,
+            riskPctConfigured,
+            riskAmountConfigured,
+            stopDistance: Math.abs(price - stopLossPrice),
+            takeProfitDistance: Math.abs(takeProfitPrice - price),
         };
     }
 
@@ -296,6 +433,8 @@ class TradingService {
         const stopLossPrice = isBuy ? price - stopLossDistance : price + stopLossDistance;
         const takeProfitPrice = isBuy ? price + takeProfitDistance : price - takeProfitDistance;
         const size = this.positionSizeCrypto(this.accountBalance, price, stopLossPrice, symbol);
+        const riskPctConfigured = this.getConfiguredRiskPct(symbol);
+        const riskAmountConfigured = Number.isFinite(this.accountBalance) ? this.accountBalance * riskPctConfigured : null;
 
         return {
             size,
@@ -304,6 +443,10 @@ class TradingService {
             stopLossPips: stopLossDistance,
             takeProfitPips: takeProfitDistance,
             price,
+            riskPctConfigured,
+            riskAmountConfigured,
+            stopDistance: Math.abs(price - stopLossPrice),
+            takeProfitDistance: Math.abs(takeProfitPrice - price),
         };
     }
 
@@ -334,7 +477,7 @@ class TradingService {
         // Margin required = (size * entryPrice) / leverage
         const marginRequired = (size * marginPrice) / leverage;
         // Use available margin from account (set by updateAccountInfo)
-        const availableMargin = this.accountBalance; // You may want to use a more precise available margin if tracked
+        const availableMargin = Number.isFinite(this.availableMargin) && this.availableMargin > 0 ? this.availableMargin : this.accountBalance;
         // Ensure margin for one trade is no more than 1/5 of available
         const maxMarginPerTrade = availableMargin / 5;
         if (marginRequired > maxMarginPerTrade) {
@@ -363,7 +506,7 @@ class TradingService {
 
         const leverage = 2;
         const marginRequired = (size * entryPrice) / leverage;
-        const availableMargin = this.accountBalance;
+        const availableMargin = Number.isFinite(this.availableMargin) && this.availableMargin > 0 ? this.availableMargin : this.accountBalance;
         const maxMarginPerTrade = availableMargin / 5;
         if (marginRequired > maxMarginPerTrade && entryPrice > 0) {
             size = Math.floor(((maxMarginPerTrade * leverage) / entryPrice) * 1000) / 1000;
@@ -379,7 +522,8 @@ class TradingService {
     // ============================================================
     async executeTrade(symbol, signal, bid, ask, indicators, reason) {
         try {
-            const { size, price, stopLossPrice, takeProfitPrice } = await this.calculateTradeParameters(signal, symbol, bid, ask);
+            const { size, price, stopLossPrice, takeProfitPrice, riskPctConfigured, riskAmountConfigured, stopDistance, takeProfitDistance } =
+                await this.calculateTradeParameters(signal, symbol, bid, ask);
 
             const pos = await placePosition(symbol, signal, size, price, stopLossPrice, takeProfitPrice);
 
@@ -431,6 +575,16 @@ class TradingService {
                         takeProfit: takeProfitRounded,
                         indicatorsOnOpening: indicators,
                         timestamp: logTimestamp,
+                        riskMeta: {
+                            riskPct: Number.isFinite(riskPctConfigured) ? riskPctConfigured : null,
+                            riskAmount: Number.isFinite(riskAmountConfigured) ? riskAmountConfigured : null,
+                            stopDistance: Number.isFinite(stopDistance) ? stopDistance : null,
+                            takeProfitDistance: Number.isFinite(takeProfitDistance) ? takeProfitDistance : null,
+                            size: Number.isFinite(size) ? size : null,
+                            accountBalanceAtOpen: Number.isFinite(this.accountBalance) ? this.accountBalance : null,
+                            availableMarginAtOpen: Number.isFinite(this.availableMargin) ? this.availableMargin : null,
+                            assetClass: this.isCryptoSymbol(symbol) ? "crypto" : "forex",
+                        },
                     });
 
                     tradeTracker.registerOpenDeal(affectedDealId, symbol);
@@ -441,6 +595,7 @@ class TradingService {
             }
 
             this.openTrades.push(symbol);
+            this.riskGuardState.refreshedAtMs = 0; // force refresh next tick (new open trade + future close calc)
         } catch (error) {
             logger.error(`[Order] Error placing order for ${symbol}:`, error);
         }
@@ -496,9 +651,15 @@ class TradingService {
 
         if (!dealId) return;
 
+        const trailActivationProgress = Number.isFinite(Number(EXITS.TRAIL_ACTIVATION_TP_PROGRESS))
+            ? Number(EXITS.TRAIL_ACTIVATION_TP_PROGRESS)
+            : 0.45;
+        const breakevenActivationProgress = Number.isFinite(Number(EXITS.BREAKEVEN_ACTIVATION_TP_PROGRESS))
+            ? Number(EXITS.BREAKEVEN_ACTIVATION_TP_PROGRESS)
+            : 0.5;
         const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
-        if (tpProgress === null || tpProgress < 0.7) {
-            return; // activate trailing stop only after 70% TP progress
+        if (tpProgress === null || tpProgress < trailActivationProgress) {
+            return;
         }
 
         // --- Trend misalignment → Breakeven exit ---
@@ -512,8 +673,8 @@ class TradingService {
                 (direction === "BUY" && (m5Trend === "bearish" || m15Trend === "bearish")) ||
                 (direction === "SELL" && (m5Trend === "bullish" || m15Trend === "bullish"));
 
-            if (broken) {
-                await this.softExitToBreakeven(position);
+            if (broken && EXITS.SOFT_EXIT_ON_M5_M15_BREAK !== false) {
+                await this.softExitToBreakeven(position, { minProgress: breakevenActivationProgress });
                 return;
             }
         }
@@ -526,13 +687,18 @@ class TradingService {
         if (tpDist <= 0) return;
 
         const dir = this.normalizeDirection(direction);
-        const activation = dir === "BUY" ? entry + tpDist * 0.7 : entry - tpDist * 0.7;
+        const activation = dir === "BUY" ? entry + tpDist * trailActivationProgress : entry - tpDist * trailActivationProgress;
 
         const activated = (dir === "BUY" && price >= activation) || (dir === "SELL" && price <= activation);
 
         if (!activated) return;
 
-        const trailDist = tpDist * 0.2;
+        const trailFraction = Number.isFinite(Number(EXITS.TRAIL_DISTANCE_TP_FRACTION)) ? Number(EXITS.TRAIL_DISTANCE_TP_FRACTION) : 0.18;
+        const atrMultiplier = Number.isFinite(Number(EXITS.TRAIL_DISTANCE_ATR_MULTIPLIER)) ? Number(EXITS.TRAIL_DISTANCE_ATR_MULTIPLIER) : 0.8;
+        const m5Atr = this.firstNumber(m5?.atr);
+        const m15Atr = this.firstNumber(m15?.atr);
+        const atrFloor = Math.max(0, (Number.isFinite(m5Atr) ? m5Atr : 0) * atrMultiplier, (Number.isFinite(m15Atr) ? m15Atr : 0) * atrMultiplier * 0.5);
+        const trailDist = Math.max(tpDist * trailFraction, atrFloor);
         let newSL = dir === "BUY" ? price - trailDist : price + trailDist;
 
         const stop = Number(stopLoss);
@@ -541,7 +707,7 @@ class TradingService {
         }
 
         try {
-            await updateTrailingStop(dealId, price, entry, tp, dir, symbol);
+            await updatePositionProtection(dealId, newSL, tp, symbol);
             logger.info(`[Trail] Updated SL → ${newSL} for ${dealId}`);
             const updatedTrailLog = logTradeTrailingStop({
                 dealId,
@@ -562,17 +728,22 @@ class TradingService {
     // ============================================================
     //               Breakeven Soft Exit
     // ============================================================
-    async softExitToBreakeven(position) {
+    async softExitToBreakeven(position, { minProgress = null } = {}) {
         const { dealId, entryPrice, takeProfit, currentPrice, direction, symbol } = position;
 
         try {
             const tpProgress = this.getTpProgress(direction, entryPrice, takeProfit, currentPrice);
-            if (tpProgress === null || tpProgress < 0.7) {
-                logger.info(`[SoftExit] Skipped breakeven: TP progress ${(tpProgress ?? 0).toFixed(2)} < 0.70 for ${dealId}`);
+            const threshold = Number.isFinite(Number(minProgress))
+                ? Number(minProgress)
+                : Number.isFinite(Number(EXITS.BREAKEVEN_ACTIVATION_TP_PROGRESS))
+                  ? Number(EXITS.BREAKEVEN_ACTIVATION_TP_PROGRESS)
+                  : 0.5;
+            if (tpProgress === null || tpProgress < threshold) {
+                logger.info(`[SoftExit] Skipped breakeven: TP progress ${(tpProgress ?? 0).toFixed(2)} < ${threshold.toFixed(2)} for ${dealId}`);
                 return;
             }
 
-            await updateTrailingStop(dealId, currentPrice, entryPrice, takeProfit, direction, symbol);
+            await updatePositionProtection(dealId, entryPrice, takeProfit, symbol);
 
             logger.info(`[SoftExit] ${symbol}: misalignment → moved SL to breakeven for ${dealId}`);
             const updatedTrailLog = logTradeTrailingStop({
@@ -676,7 +847,10 @@ class TradingService {
                 indicatorsOnClosing: indicatorSnapshot,
                 timestamp: new Date().toISOString(),
             });
-            if (updated) tradeTracker.markDealClosed(dealId);
+            if (updated) {
+                tradeTracker.markDealClosed(dealId);
+                this.riskGuardState.refreshedAtMs = 0;
+            }
         } catch (logErr) {
             logger.error(`[ClosePos] Failed to log closure for ${dealId}:`, logErr);
         }
