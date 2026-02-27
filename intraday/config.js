@@ -5,7 +5,7 @@ export const SESSION_SYMBOLS = {
     TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
 };
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "ETHUSD", "DOGEUSD", "XRPUSD"];
+export const CRYPTO_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
 
 export const NEWS_MODE = {
     AVOID: "AVOID",
@@ -99,4 +99,3 @@ export function isCryptoSymbol(symbol) {
 export function assetClassOfSymbol(symbol) {
     return isCryptoSymbol(symbol) ? "crypto" : "forex";
 }
-

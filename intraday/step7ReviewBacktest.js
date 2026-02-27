@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_INTRADAY_CONFIG, assetClassOfSymbol } from "./config.js";
 import { createIntradayRuntimeState, ensureStateDay, getOpenPosition, registerClosedTrade, registerOpenedTrade } from "./state.js";
+import { CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID } from "../strategies/cryptoLiquidityWindowMomentum.js";
 
 export const STEP7_NAME = "REVIEW_JOURNAL_BACKTEST";
 
@@ -394,8 +395,22 @@ export async function runReplayBacktest({
 } = {}) {
     let selectedEngine = engine;
     if (!selectedEngine) {
-        const mod = await import("./engine.js");
-        selectedEngine = mod.createIntradaySevenStepEngine({ ...config, strategyId });
+        if (String(strategyId || "").toUpperCase() === CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID) {
+            const mod = await import("./cryptoLiquidityWindowMomentumEngine.js");
+            let strategyConfig = config;
+            if (!strategyConfig || typeof strategyConfig !== "object" || !strategyConfig.window || !strategyConfig.entry || !strategyConfig.risk) {
+                try {
+                    const rootCfg = await import("../config.js");
+                    strategyConfig = rootCfg?.STRATEGIES?.CRYPTO_LIQUIDITY_WINDOW_MOMENTUM || config || {};
+                } catch {
+                    strategyConfig = config || {};
+                }
+            }
+            selectedEngine = mod.createCryptoLiquidityWindowMomentumEngine({ config: strategyConfig });
+        } else {
+            const mod = await import("./engine.js");
+            selectedEngine = mod.createIntradaySevenStepEngine({ ...config, strategyId });
+        }
     }
 
     const snapshots = loadSnapshotsFromPriceFiles(priceFiles);
@@ -440,7 +455,18 @@ export async function runReplayBacktest({
                 registerClosedTrade(state, {
                     symbol: position.symbol,
                     pnl: toNum(tradeRecord.pnl),
+                    tradeId: position.tradeId,
+                    timestamp: snapshot.timestamp,
                 });
+                if (typeof selectedEngine?.onTradeClosed === "function") {
+                    selectedEngine.onTradeClosed({
+                        tradeRecord,
+                        position,
+                        snapshot,
+                        exitTimestamp: snapshot.timestamp,
+                        state,
+                    });
+                }
             }
         }
 
@@ -483,7 +509,18 @@ export async function runReplayBacktest({
                 registerClosedTrade(state, {
                     symbol: existingAfterDecision.symbol,
                     pnl: toNum(tradeRecord.pnl),
+                    tradeId: existingAfterDecision.tradeId,
+                    timestamp: snapshot.timestamp,
                 });
+                if (typeof selectedEngine?.onTradeClosed === "function") {
+                    selectedEngine.onTradeClosed({
+                        tradeRecord,
+                        position: existingAfterDecision,
+                        snapshot,
+                        exitTimestamp: snapshot.timestamp,
+                        state,
+                    });
+                }
             }
         }
 
@@ -518,6 +555,9 @@ export async function runReplayBacktest({
                     entryDecision: decision,
                 };
                 registerOpenedTrade(state, clonePositionForState(position));
+                if (typeof selectedEngine?.onTradeOpened === "function") {
+                    selectedEngine.onTradeOpened({ position, snapshot, state });
+                }
             }
         }
 
@@ -555,7 +595,18 @@ export async function runReplayBacktest({
         registerClosedTrade(state, {
             symbol: position.symbol,
             pnl: toNum(tradeRecord.pnl),
+            tradeId: position.tradeId,
+            timestamp: lastSnapshot.timestamp,
         });
+        if (typeof selectedEngine?.onTradeClosed === "function") {
+            selectedEngine.onTradeClosed({
+                tradeRecord,
+                position,
+                snapshot: lastSnapshot,
+                exitTimestamp: lastSnapshot.timestamp,
+                state,
+            });
+        }
     }
     state.openPositions.clear();
 

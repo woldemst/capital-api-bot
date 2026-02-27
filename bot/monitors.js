@@ -109,6 +109,15 @@ export async function trailingStopCheck(bot) {
         if (!openCount) return;
         for (const pos of positions.positions) {
             const symbol = pos.market ? pos.market.epic : pos.position.epic;
+            const dealId = pos?.position?.dealId ?? pos?.dealId;
+
+            if (
+                typeof tradingService.shouldUseCryptoLiquidityWindowMomentumForOpenDeal === "function" &&
+                tradingService.shouldUseCryptoLiquidityWindowMomentumForOpenDeal(dealId, symbol)
+            ) {
+                logger.debug(`[Monitoring] Skipping legacy trailing stop logic for ${symbol} (${dealId}) - managed by ${"CRYPTO_LIQUIDITY_WINDOW_MOMENTUM"}.`);
+                continue;
+            }
 
             let indicators;
             try {

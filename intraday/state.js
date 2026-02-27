@@ -8,6 +8,7 @@ export function createIntradayRuntimeState(seed = {}) {
         strategyId: seed.strategyId || null,
         dayKey: seed.dayKey || null,
         dailyTradeCount: 0,
+        dailyTradeCountBySymbol: new Map(),
         dailyPnl: 0,
         openPositions: new Map(),
         closedTrades: [],
@@ -23,13 +24,16 @@ export function ensureStateDay(state, nowUtc) {
     state.dayKey = nextDayKey;
     state.dailyTradeCount = 0;
     state.dailyPnl = 0;
+    state.dailyTradeCountBySymbol = new Map();
     state.lastDecisionBySymbol = new Map();
     return state;
 }
 
 export function registerOpenedTrade(state, position) {
-    state.openPositions.set(String(position.symbol).toUpperCase(), { ...position });
+    const symbolKey = String(position.symbol).toUpperCase();
+    state.openPositions.set(symbolKey, { ...position });
     state.dailyTradeCount += 1;
+    state.dailyTradeCountBySymbol.set(symbolKey, (state.dailyTradeCountBySymbol.get(symbolKey) || 0) + 1);
     return state;
 }
 
@@ -57,4 +61,3 @@ export function getSentimentForSymbol(state, symbol) {
 export function getOpenPosition(state, symbol) {
     return state.openPositions.get(String(symbol || "").toUpperCase()) || null;
 }
-

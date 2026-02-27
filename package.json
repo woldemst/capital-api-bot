@@ -9,6 +9,7 @@
     "start": "nodemon bot.js",
     "backtest": "nodemon test-historical.js",
     "backtest:intraday7:research": "node scripts/researchIntraday7Backtest.mjs",
+    "backtest:crypto-lwm": "node scripts/backtestCryptoLiquidityWindowMomentum.mjs",
     "analyze:prices": "node scripts/analyzePriceSetups.mjs",
     "analyze:trades": "node scripts/analyzeTradeLogs.mjs",
     "analyze:windows": "node scripts/analyzePriceWindows.mjs"

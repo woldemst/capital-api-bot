@@ -32,6 +32,7 @@ class TradingBot {
         this.dealIdMonitorInterval = null; // Interval handle for dealId monitor
         this.dealIdMonitorInProgress = false; // Prevent overlapping dealId checks
         this.maxCandleHistory = 200; // Rolling window size for indicators
+        this.maxCandleHistoryExtended = 260; // Used by strategies that need >=200 closed candles
         this.openedPositions = {}; // Track opened positions
 
         this.openedBrockerDealIds = [];
@@ -273,7 +274,8 @@ class TradingBot {
     async analyzeSymbol(symbol) {
         logger.info(`[Analyze] Processing ${symbol}`);
 
-        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.maxCandleHistory);
+        const historyLength = this.getHistoryLengthForSymbol(symbol);
+        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, historyLength);
 
         if (!d1Data?.prices || !h4Data?.prices || !h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
             logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
@@ -390,13 +392,14 @@ class TradingBot {
     }
 
     storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data }) {
+        const historyLimit = this.getHistoryLengthForSymbol(symbol);
         this.candleHistory[symbol] = {
-            D1: d1Data.prices.slice(-this.maxCandleHistory) || [],
-            H4: h4Data.prices.slice(-this.maxCandleHistory) || [],
-            H1: h1Data.prices.slice(-this.maxCandleHistory) || [],
-            M15: m15Data.prices.slice(-this.maxCandleHistory) || [],
-            M5: m5Data.prices.slice(-this.maxCandleHistory) || [],
-            M1: m1Data.prices.slice(-this.maxCandleHistory) || [],
+            D1: d1Data.prices.slice(-historyLimit) || [],
+            H4: h4Data.prices.slice(-historyLimit) || [],
+            H1: h1Data.prices.slice(-historyLimit) || [],
+            M15: m15Data.prices.slice(-historyLimit) || [],
+            M5: m5Data.prices.slice(-historyLimit) || [],
+            M1: m1Data.prices.slice(-historyLimit) || [],
         };
     }
 
@@ -428,6 +431,9 @@ class TradingBot {
         const currentMinutes = Number.isFinite(context.currentMinutes) ? context.currentMinutes : now.getUTCHours() * 60 + now.getUTCMinutes();
 
         if (this.isCryptoSymbol(symbol)) {
+            if (typeof tradingService.shouldAlwaysEvaluateCryptoSymbol === "function" && tradingService.shouldAlwaysEvaluateCryptoSymbol(symbol)) {
+                return true;
+            }
             const cryptoAllowed = this.cryptoTradingWindows.some((win) => {
                 return this.inSession(currentMinutes, win.start, win.end, { inclusiveEnd: true });
             });
@@ -479,6 +485,13 @@ class TradingBot {
 
     delay(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    getHistoryLengthForSymbol(symbol) {
+        if (typeof tradingService.shouldAlwaysEvaluateCryptoSymbol === "function" && tradingService.shouldAlwaysEvaluateCryptoSymbol(symbol)) {
+            return Math.max(this.maxCandleHistory, this.maxCandleHistoryExtended);
+        }
+        return this.maxCandleHistory;
     }
 }
 

@@ -430,6 +430,8 @@ export function logTradeOpen({
     candlesOnOpening,
     timestamp,
     riskMeta = null,
+    strategyId = null,
+    strategyMeta = null,
 }) {
     const logPath = getSymbolLogPath(symbol);
     const compactOpening = compactIndicators(indicatorsOnOpening);
@@ -459,6 +461,8 @@ export function logTradeOpen({
             updates: [],
         },
         riskMeta: riskMeta && typeof riskMeta === "object" ? riskMeta : null,
+        strategyId: strategyId ? String(strategyId) : null,
+        strategyMeta: strategyMeta && typeof strategyMeta === "object" ? strategyMeta : null,
     };
 
     appendLine(logPath, payload);
