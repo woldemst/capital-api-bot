@@ -75,7 +75,7 @@ export const RISK = {
     // Conservative defaults for small accounts; can be overridden via env later.
     PER_TRADE: 0.005, // 0.5% risk per forex trade
     CRYPTO_PER_TRADE: 0.004, // 0.4% risk per crypto trade
-    MAX_POSITIONS: 3, // Maximum simultaneous positions
+    MAX_POSITIONS: 5, // Maximum simultaneous positions
     GUARDS: {
         MAX_DAILY_LOSS_PCT: 0.02, // stop new entries after -2% estimated realized day PnL
         MAX_OPEN_RISK_PCT: 0.015, // cap estimated total open risk across all positions
