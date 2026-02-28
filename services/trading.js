@@ -122,47 +122,13 @@ class TradingService {
                 return;
             }
             // const result = Strategy.generateSignal({ symbol, indicators, bid, ask, candles });
-            const primary = Strategy.generateSignal3Stage({ indicators, variant: "H4_H1_M15" });
+            const primary = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5_REGIME" });
             let fallback = null;
 
             let { signal, reason = "", context = {} } = primary;
 
-            // Fallback to secondary signal if primary is not generated
             if (!signal) {
-                fallback = Strategy.generateSignal3Stage({ indicators, variant: "H1_M15_M5" });
-                const primaryBiasTrend = primary?.context?.biasTrend;
-                const primaryBiasDirection =
-                    primaryBiasTrend === "bullish" ? "BUY" : primaryBiasTrend === "bearish" ? "SELL" : null;
-                const fallbackAllowed =
-                    primary.reason === "setup_blocked" &&
-                    !!fallback.signal &&
-                    !!primaryBiasDirection &&
-                    fallback.signal === primaryBiasDirection;
-
-                if (fallbackAllowed) {
-                    signal = fallback.signal;
-                    reason = fallback.reason || "";
-                    context = fallback.context || {};
-                } else if (fallback.signal) {
-                    logger.debug(
-                        `[Signal] ${symbol}: fallback blocked (primaryReason=${primary.reason}, primaryBias=${primaryBiasDirection}, fallback=${fallback.signal})`,
-                    );
-                }
-            }
-
-            if (!signal) {
-                const setupFails = Object.entries(primary?.context?.setupChecks || {})
-                    .filter(([, ok]) => !ok)
-                    .map(([name]) => name)
-                    .join(",");
-                const entryFails = Object.entries(primary?.context?.entryChecks || {})
-                    .filter(([, ok]) => !ok)
-                    .map(([name]) => name)
-                    .join(",");
-                const setupFailText = setupFails ? `, setupFails=${setupFails}` : "";
-                const entryFailText = entryFails ? `, entryFails=${entryFails}` : "";
-                const fallbackText = fallback?.reason ? `, fallback=${fallback.reason}` : "";
-                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${setupFailText}${entryFailText}${fallbackText})`);
+                logger.debug(`[ProcessPrice] No signal from primary for ${symbol}.`);
                 return;
             }
             // Re-check just placing

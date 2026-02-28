@@ -10,7 +10,6 @@ const SELL_SETUP_RSI_MAX = 65;
 class Strategy {
     constructor() {}
 
-    // Variants: H4_H1_M15 (default) and H1_M15_M5.
     generateSignal3Stage({ indicators, variant }) {
         if (!indicators) {
             return { signal: null, reason: "no_indicators", context: {} };
@@ -18,7 +17,7 @@ class Strategy {
 
         const variants = {
             H4_H1_M15: { biasTF: "h4", setupTF: "h1", entryTF: "m15" },
-            H1_M15_M5: { biasTF: "h1", setupTF: "m15", entryTF: "m5" },
+            H1_M15_M5_REGIME: { biasTF: "h1", setupTF: "m15", entryTF: "m5" },
         };
         const selectedVariant = variants[variant] ? variant : "H4_H1_M15";
         const { biasTF, setupTF, entryTF } = variants[selectedVariant];
@@ -58,24 +57,50 @@ class Strategy {
             gateStates: { biasOk, setupOk: false, entryOk: false },
         };
 
+        if (selectedVariant === "H1_M15_M5_REGIME") {
+            const regimeRules = rules?.regime ?? {};
+            const setupAtrPct = this.atrPct(setupIndicators);
+            const regimeChecks = {
+                h1AdxFloorOk: this.isNumber(biasAdx) && biasAdx >= (regimeRules.h1AdxMin ?? 0),
+                m15AdxFloorOk: this.isNumber(setupAdx) && setupAdx >= (regimeRules.m15AdxMin ?? 0),
+                m15AtrPctFloorOk: this.isNumber(setupAtrPct) && setupAtrPct >= (regimeRules.m15AtrPctMin ?? 0),
+                m15AtrPctCeilingOk: !this.isNumber(regimeRules.m15AtrPctMax) || (this.isNumber(setupAtrPct) && setupAtrPct <= regimeRules.m15AtrPctMax),
+                spreadOk: !this.isNumber(regimeRules.spreadPctMax) || (this.isNumber(spreadPct) && spreadPct <= regimeRules.spreadPctMax),
+                sessionOk: !regimeRules.blockNySession || !normalizedSessions.includes("NY"),
+            };
+            const regimeOk = Object.values(regimeChecks).every(Boolean);
+            if (!regimeOk) {
+                return {
+                    signal: null,
+                    reason: "regime_blocked",
+                    context: {
+                        ...baseContext,
+                        patternChecks: {
+                            direction: patternChecks,
+                            regime: regimeChecks,
+                        },
+                        gateStates: { biasOk, setupOk: true, entryOk: false },
+                    },
+                };
+            }
+            patternChecks = {
+                direction: patternChecks,
+                regime: regimeChecks,
+            };
+        }
+
         if (!biasOk) {
             return { signal: null, reason: "bias_blocked", context: baseContext };
         }
 
         const isBuy = direction === "BUY";
-        const setupPullbackOk =
-            this.isNumber(setupPullbackValue) &&
-            (isBuy ? setupPullbackValue <= 0 : setupPullbackValue >= 0);
+        const setupPullbackOk = this.isNumber(setupPullbackValue) && (isBuy ? setupPullbackValue <= 0 : setupPullbackValue >= 0);
         const setupRsiRangeOk =
             this.isNumber(setupRsi) &&
-            (isBuy
-                ? setupRsi >= BUY_SETUP_RSI_MIN && setupRsi <= BUY_SETUP_RSI_MAX
-                : setupRsi >= SELL_SETUP_RSI_MIN && setupRsi <= SELL_SETUP_RSI_MAX);
+            (isBuy ? setupRsi >= BUY_SETUP_RSI_MIN && setupRsi <= BUY_SETUP_RSI_MAX : setupRsi >= SELL_SETUP_RSI_MIN && setupRsi <= SELL_SETUP_RSI_MAX);
         const setupRsiSlopeOk =
             !this.isNumber(setupRsiPrev) ||
-            (isBuy
-                ? setupRsi >= setupRsiPrev - SETUP_RSI_SLOPE_TOLERANCE
-                : setupRsi <= setupRsiPrev + SETUP_RSI_SLOPE_TOLERANCE);
+            (isBuy ? setupRsi >= setupRsiPrev - SETUP_RSI_SLOPE_TOLERANCE : setupRsi <= setupRsiPrev + SETUP_RSI_SLOPE_TOLERANCE);
         const setupAdxOk = !this.isNumber(setupAdx) || setupAdx >= SETUP_ADX_MIN;
         const setupChecks = {
             pullbackOk: setupPullbackOk,
@@ -99,11 +124,8 @@ class Strategy {
             };
         }
 
-        const entryMacdOk =
-            this.isNumber(entryMacdHist) && (isBuy ? entryMacdHist > 0 : entryMacdHist < 0);
-        const entryPriceReclaimOk =
-            this.isNumber(entryPullbackValue) &&
-            (isBuy ? entryPullbackValue >= 0 : entryPullbackValue <= 0);
+        const entryMacdOk = this.isNumber(entryMacdHist) && (isBuy ? entryMacdHist > 0 : entryMacdHist < 0);
+        const entryPriceReclaimOk = this.isNumber(entryPullbackValue) && (isBuy ? entryPullbackValue >= 0 : entryPullbackValue <= 0);
         const entryAdxOk = !this.isNumber(entryAdx) || entryAdx >= ENTRY_ADX_MIN;
         const entryChecks = {
             macdOk: entryMacdOk,
