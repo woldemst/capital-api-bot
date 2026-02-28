@@ -54,7 +54,7 @@ const STAGE_RULES = {
     },
     crypto: {
         enabled: true,
-        blockedSymbols: ["BTCEUR", "SOLUSD", "ADAUSD"],
+        blockedSymbols: ["BTCEUR", "SOLUSD", "ADAUSD", "ETHUSD", "XRPUSD"],
         blockedHoursUtc: [1, 15],
         requireH4H1Alignment: true,
         requireD1Filter: false,
@@ -89,7 +89,7 @@ const STAGE_RULES = {
         sellM1MacdSlopeMax: 0,
         sellM1RsiMin: 48,
         spreadPctMax: 0.006,
-        allowedSessions: ["CRYPTO"],
+        allowedSessions: ["TOKYO", "SYDNEY"],
         regime: {
             h1AdxMin: 12,
             m15AdxMin: 12,

@@ -498,23 +498,18 @@ class TradingBot {
 startHubServer();
 
 const bot = new TradingBot();
-const hubOnlyMode = ["1", "true", "yes"].includes(String(process.env.HUB_ONLY || "").toLowerCase());
-const hasAlwaysOnCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.length > 0;
 
-if (hubOnlyMode) {
-    logger.info("[Bot] HUB_ONLY mode enabled. Trading logic is disabled.");
+const hasAlwaysOnCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.length > 0;
+const now = new Date();
+const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
+if ((day === 0 || day === 6) && !hasAlwaysOnCrypto) {
+    logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
 } else {
-    const now = new Date();
-    const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
-    if ((day === 0 || day === 6) && !hasAlwaysOnCrypto) {
-        logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
-    } else {
-        if ((day === 0 || day === 6) && hasAlwaysOnCrypto) {
-            logger.info("[Bot] Weekend detected, but CRYPTO symbols are configured. Starting bot.");
-        }
-        bot.initialize().catch((error) => {
-            logger.error("[bot.js] Bot initialization failed:", error);
-            process.exit(1);
-        });
+    if ((day === 0 || day === 6) && hasAlwaysOnCrypto) {
+        logger.info("[Bot] Weekend detected, but CRYPTO symbols are configured. Starting bot.");
     }
+    bot.initialize().catch((error) => {
+        logger.error("[bot.js] Bot initialization failed:", error);
+        process.exit(1);
+    });
 }
