@@ -37,6 +37,7 @@ export function step3Setup(input, config = DEFAULT_INTRADAY_CONFIG) {
     const ema50 = toNum(m15Indicators.ema50);
     const rsi = toNum(m15Indicators.rsi);
     const bbPb = toNum(m15Indicators?.bb?.pb ?? m15Indicators.bbPb);
+    const h1Adx = toNum(regime?.logFields?.h1Adx ?? regime?.h1Adx);
 
     const setupReasons = [];
     let setupType = "NONE";
@@ -59,9 +60,21 @@ export function step3Setup(input, config = DEFAULT_INTRADAY_CONFIG) {
         if (structureOk) setupReasons.push("structure_pullback_valid");
 
         if (inEmaZone && rsiOk && structureOk) {
-            setupType = "TREND_PULLBACK";
-            side = regime.trendBias;
-            setupScore = 0.75 + (regime.regimeScore || 0) * 0.2;
+            const maxH1AdxForTrendSetup = Number(params.maxH1AdxForTrendSetup);
+            if (Number.isFinite(maxH1AdxForTrendSetup) && maxH1AdxForTrendSetup > 0 && Number.isFinite(h1Adx) && h1Adx > maxH1AdxForTrendSetup) {
+                setupReasons.push(`h1_adx_above_max=${maxH1AdxForTrendSetup}`);
+            } else {
+                setupType = "TREND_PULLBACK";
+                const trendEntryMode = String(params.trendEntryMode || "continuation").toLowerCase();
+                if (trendEntryMode === "reversion") {
+                    side = regime.trendBias === "LONG" ? "SHORT" : "LONG";
+                    setupReasons.push("trend_entry_mode_reversion");
+                } else {
+                    side = regime.trendBias;
+                    setupReasons.push("trend_entry_mode_continuation");
+                }
+                setupScore = 0.75 + (regime.regimeScore || 0) * 0.2;
+            }
         }
     }
 
@@ -105,4 +118,3 @@ export function step3Setup(input, config = DEFAULT_INTRADAY_CONFIG) {
         },
     };
 }
-

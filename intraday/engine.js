@@ -13,6 +13,12 @@ function toNum(value) {
     return Number.isFinite(n) ? n : null;
 }
 
+function invertSide(side) {
+    if (side === "LONG") return "SHORT";
+    if (side === "SHORT") return "LONG";
+    return side;
+}
+
 function buildMinuteSnapshotRecord({ strategyId, snapshot, decision }) {
     const indicators = snapshot?.indicators || {};
     const bars = snapshot?.bars || snapshot?.candles || {};
@@ -108,7 +114,18 @@ export function createIntradaySevenStepEngine(userConfig = {}) {
             config,
         );
 
-        const side = step4.side || step3.side || null;
+        let side = step4.side || step3.side || null;
+        const h1Adx = toNum(snapshot?.indicators?.h1?.adx?.adx ?? snapshot?.indicators?.h1?.adx);
+        const invertSignal = Boolean(config?.trigger?.invertSignal);
+        const invertSignalH1AdxMin = toNum(config?.trigger?.invertSignalH1AdxMin);
+        const shouldInvertSignal = Boolean(
+            side &&
+                invertSignal &&
+                (!Number.isFinite(invertSignalH1AdxMin) || (Number.isFinite(h1Adx) && h1Adx >= invertSignalH1AdxMin)),
+        );
+        if (shouldInvertSignal) {
+            side = invertSide(side);
+        }
         const sentiment = snapshot?.sentiment || state?.sentimentBySymbol?.get?.(symbol) || null;
         const guardrails = evaluateGuardrails(
             {
@@ -177,6 +194,7 @@ export function createIntradaySevenStepEngine(userConfig = {}) {
             ...step2.contextReasons,
             ...step3.setupReasons,
             ...step4.triggerReasons,
+            ...(shouldInvertSignal ? ["signal_inverted"] : []),
             ...(guardrails.blockReasons || []),
             ...(step5.planReasons || []),
         ];
