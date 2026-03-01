@@ -205,10 +205,7 @@ export interface PriceFilters {
 
 // Backtesting
 export type BacktestStrategyId =
-  | "FOREX_H1_M15_M5"
-  | "CRYPTO_H1_M15_M5"
-  | "FOREX_H1_M15_M5_REGIME"
-  | "CRYPTO_H1_M15_M5_REGIME";
+  | "INTRADAY_7STEP_V1";
 
 export interface BacktestOptionStrategy {
   id: BacktestStrategyId;

@@ -7,7 +7,52 @@ import { step3Setup } from "./step3Setup.js";
 import { step4Trigger } from "./step4Trigger.js";
 import { step5EntryRisk } from "./step5EntryRisk.js";
 import { step6TradeManagement } from "./step6TradeManagement.js";
-import { buildMinuteSnapshotRecord } from "./step7ReviewBacktest.js";
+
+function toNum(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+function buildMinuteSnapshotRecord({ strategyId, snapshot, decision }) {
+    const indicators = snapshot?.indicators || {};
+    const bars = snapshot?.bars || snapshot?.candles || {};
+    const sentiment = snapshot?.sentiment || {};
+
+    return {
+        strategyId: strategyId || null,
+        timestamp: snapshot?.timestamp || new Date().toISOString(),
+        symbol: String(snapshot?.symbol || "").toUpperCase(),
+        bid: toNum(snapshot?.bid),
+        ask: toNum(snapshot?.ask),
+        mid: toNum(snapshot?.mid),
+        spread: toNum(snapshot?.spread),
+        bars: {
+            m1: bars.m1 || null,
+            m5: bars.m5 || null,
+            m15: bars.m15 || null,
+            h1: bars.h1 || null,
+        },
+        indicators: {
+            m1: indicators.m1 || null,
+            m5: indicators.m5 || null,
+            m15: indicators.m15 || null,
+            h1: indicators.h1 || null,
+        },
+        session: decision?.step1?.activeSession || null,
+        sessions: decision?.step1?.activeSessions || snapshot?.sessions || [],
+        newsWindowActive: Boolean(snapshot?.newsWindowActive ?? snapshot?.newsBlocked),
+        clientLongPct: toNum(sentiment?.clientLongPct),
+        clientShortPct: toNum(sentiment?.clientShortPct),
+        regimeType: decision?.step2?.regimeType || null,
+        regimeScore: toNum(decision?.step2?.regimeScore),
+        setupType: decision?.step3?.setupType || "NONE",
+        setupScore: toNum(decision?.step3?.setupScore),
+        triggerScore: toNum(decision?.step4?.triggerScore),
+        finalSignal: decision?.finalSignal || null,
+        reasons: Array.isArray(decision?.reasons) ? decision.reasons : [],
+        guardrails: decision?.guardrails?.logFields || null,
+    };
+}
 
 export function createIntradaySevenStepEngine(userConfig = {}) {
     const config = {
@@ -165,4 +210,3 @@ export function createIntradaySevenStepEngine(userConfig = {}) {
         evaluateSnapshot,
     };
 }
-

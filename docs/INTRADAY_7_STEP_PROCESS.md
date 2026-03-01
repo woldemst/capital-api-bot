@@ -17,7 +17,6 @@ This repository now contains an additive intraday strategy architecture in `/Use
 - Step 4: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/step4Trigger.js`
 - Step 5: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/step5EntryRisk.js`
 - Step 6: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/step6TradeManagement.js`
-- Step 7: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/step7ReviewBacktest.js`
 - Guardrails: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/guardrails.js`
 - Runtime state: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/state.js`
 - Orchestrator: `/Users/waldemarweinert/DEV/trading/capital-api-bot/intraday/engine.js`
@@ -31,11 +30,10 @@ This repository now contains an additive intraday strategy architecture in `/Use
 5. Guardrails must pass before Step 5.
 6. Step 5 builds an order plan with mandatory initial `SL` and `TP`.
 7. Step 6 manages open trades intraday (breakeven/trailing/cutoff).
-8. Step 7 records minute snapshots and trade logs and supports backtest replay/metrics.
+8. Backtest/replay modules are intentionally decoupled from the live decision path.
 
 ## Integration Notes
 
-- Existing legacy strategy code remains untouched.
-- The new engine can be wired into live or replay flows incrementally.
+- The intraday engine is the default live strategy path.
+- Replay/backtest modules are optional and can be kept outside the live runtime tree.
 - Price snapshots should include bars/indicators/sessions/news/sentiment so replay and live share the same decision path.
-

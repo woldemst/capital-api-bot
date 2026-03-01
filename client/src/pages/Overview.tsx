@@ -36,10 +36,7 @@ function formatWindows(windows: Array<{ start: number; end: number }>) {
 }
 
 function strategyLabel(id: BacktestStrategyId) {
-  if (id === "FOREX_H1_M15_M5_REGIME") return "Forex H1 / M15 / M5 Regime";
-  if (id === "CRYPTO_H1_M15_M5_REGIME") return "Crypto H1 / M15 / M5 Regime";
-  if (id === "FOREX_H1_M15_M5") return "Forex H1 / M15 / M5";
-  if (id === "CRYPTO_H1_M15_M5") return "Crypto H1 / M15 / M5";
+  if (id === "INTRADAY_7STEP_V1") return "Intraday 7-Step";
   return id;
 }
 
@@ -48,14 +45,14 @@ export default function Overview() {
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
-  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["FOREX_H1_M15_M5_REGIME", "CRYPTO_H1_M15_M5_REGIME"]);
+  const [selectedStrategies, setSelectedStrategies] = useState<BacktestStrategyId[]>(["INTRADAY_7STEP_V1"]);
   const [startBalanceInput, setStartBalanceInput] = useState<number>(500);
   const [forexRiskInputPct, setForexRiskInputPct] = useState<number>(3);
   const [cryptoRiskInputPct, setCryptoRiskInputPct] = useState<number>(2);
   const [respectNewsGuard, setRespectNewsGuard] = useState<boolean>(true);
   const [defaultsApplied, setDefaultsApplied] = useState<boolean>(false);
   const [runFilters, setRunFilters] = useState<BacktestCompareFilters | null>(null);
-  const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("FOREX_H1_M15_M5_REGIME");
+  const [equityStrategyId, setEquityStrategyId] = useState<BacktestStrategyId>("INTRADAY_7STEP_V1");
 
   const optionsQuery = useBacktestOptions();
   const runtimeConfigQuery = useRuntimeConfig();

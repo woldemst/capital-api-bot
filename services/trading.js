@@ -18,7 +18,9 @@ import {
     getSymbolLogPath,
     getTradeEntry,
 } from "../utils/tradeLogger.js";
-import Strategy from "../strategies/strategies.js";
+import { createIntradaySevenStepEngine } from "../intraday/engine.js";
+import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
+import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import {
     CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID,
     evaluateCryptoLiquidityWindowMomentum,
@@ -30,15 +32,6 @@ const { PER_TRADE, MAX_POSITIONS } = RISK;
 const CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : PER_TRADE;
 const GUARDS = RISK.GUARDS || {};
 const EXITS = RISK.EXITS || {};
-const STRATEGY_VARIANTS = ["H1_M15_M5", "H1_M15_M5_REGIME"];
-const DEFAULT_PRIMARY_VARIANT = "H1_M15_M5_REGIME";
-const DEFAULT_CRYPTO_VARIANT = "H1_M15_M5_REGIME";
-const PRIMARY_VARIANT = STRATEGY_VARIANTS.includes(process.env.PRIMARY_STRATEGY_VARIANT)
-    ? process.env.PRIMARY_STRATEGY_VARIANT
-    : DEFAULT_PRIMARY_VARIANT;
-const CRYPTO_VARIANT = STRATEGY_VARIANTS.includes(process.env.CRYPTO_STRATEGY_VARIANT)
-    ? process.env.CRYPTO_STRATEGY_VARIANT
-    : DEFAULT_CRYPTO_VARIANT;
 const CRYPTO_PER_TRADE = CRYPTO_RISK_PCT;
 const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0.02;
 const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT)) ? Number(GUARDS.MAX_OPEN_RISK_PCT) : Math.max(PER_TRADE, CRYPTO_PER_TRADE) * 2;
@@ -48,8 +41,11 @@ const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_C
     : 180;
 const RISK_SUMMARY_CACHE_MS = Number.isFinite(Number(GUARDS.SUMMARY_CACHE_MS)) ? Number(GUARDS.SUMMARY_CACHE_MS) : 15000;
 const CRYPTO_LWM_CONFIG = STRATEGIES?.CRYPTO_LIQUIDITY_WINDOW_MOMENTUM || null;
-const FOREX_PRIMARY_STRATEGY_NAME = String(STRATEGY_SELECTION?.FOREX_PRIMARY || PRIMARY_VARIANT).toUpperCase();
-const CRYPTO_PRIMARY_STRATEGY_NAME = String(STRATEGY_SELECTION?.CRYPTO_PRIMARY || CRYPTO_VARIANT).toUpperCase();
+const INTRADAY_DEFAULT_STRATEGY_ID = "INTRADAY_7STEP_V1";
+const INTRADAY_FOREX_STRATEGY_ID = "INTRADAY_7STEP_FOREX";
+const INTRADAY_CRYPTO_STRATEGY_ID = "INTRADAY_7STEP_CRYPTO";
+const FOREX_PRIMARY_STRATEGY_NAME = String(STRATEGY_SELECTION?.FOREX_PRIMARY || INTRADAY_DEFAULT_STRATEGY_ID).toUpperCase();
+const CRYPTO_PRIMARY_STRATEGY_NAME = String(STRATEGY_SELECTION?.CRYPTO_PRIMARY || INTRADAY_DEFAULT_STRATEGY_ID).toUpperCase();
 
 class TradingService {
     constructor() {
@@ -65,8 +61,47 @@ class TradingService {
         };
         this.guardLogThrottle = new Map();
         this.cryptoLwmLastClosedM5KeyBySymbol = new Map();
+
+        this.intradayForexConfig = {
+            ...DEFAULT_INTRADAY_CONFIG,
+            strategyId: INTRADAY_FOREX_STRATEGY_ID,
+            context: { ...(DEFAULT_INTRADAY_CONFIG.context || {}) },
+            setup: { ...(DEFAULT_INTRADAY_CONFIG.setup || {}) },
+            trigger: { ...(DEFAULT_INTRADAY_CONFIG.trigger || {}) },
+            risk: { ...(DEFAULT_INTRADAY_CONFIG.risk || {}) },
+            guardrails: { ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}) },
+            backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
+        };
+        this.intradayCryptoConfig = {
+            ...DEFAULT_INTRADAY_CONFIG,
+            strategyId: INTRADAY_CRYPTO_STRATEGY_ID,
+            context: {
+                ...(DEFAULT_INTRADAY_CONFIG.context || {}),
+                adxTrendMin: 16,
+                adxRangeMax: 20,
+            },
+            setup: {
+                ...(DEFAULT_INTRADAY_CONFIG.setup || {}),
+                trendPullbackZonePct: 0.003,
+                trendRsiMin: 30,
+                trendRsiMax: 70,
+            },
+            trigger: {
+                ...(DEFAULT_INTRADAY_CONFIG.trigger || {}),
+                displacementAtrMultiplier: 0.7,
+                requireStructureBreak: false,
+            },
+            risk: { ...(DEFAULT_INTRADAY_CONFIG.risk || {}) },
+            guardrails: { ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}) },
+            backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
+        };
+        this.intradayForexEngine = createIntradaySevenStepEngine(this.intradayForexConfig);
+        this.intradayCryptoEngine = createIntradaySevenStepEngine(this.intradayCryptoConfig);
+        this.intradayForexState = createIntradayRuntimeState({ strategyId: INTRADAY_FOREX_STRATEGY_ID });
+        this.intradayCryptoState = createIntradayRuntimeState({ strategyId: INTRADAY_CRYPTO_STRATEGY_ID });
+
         logger.info(
-            `[Strategy] ForexPrimary=${FOREX_PRIMARY_STRATEGY_NAME} CryptoPrimary=${CRYPTO_PRIMARY_STRATEGY_NAME} LegacyForexVariant=${PRIMARY_VARIANT} LegacyCryptoVariant=${CRYPTO_VARIANT}`,
+            `[Strategy] ForexPrimary=${FOREX_PRIMARY_STRATEGY_NAME} CryptoPrimary=${CRYPTO_PRIMARY_STRATEGY_NAME} IntradayDefault=${INTRADAY_DEFAULT_STRATEGY_ID}`,
         );
     }
 
@@ -270,6 +305,19 @@ class TradingService {
         return this.isCryptoSymbol(symbol) ? CRYPTO_PER_TRADE : PER_TRADE;
     }
 
+    pickTrend(indicator) {
+        if (!indicator || typeof indicator !== "object") return "neutral";
+        const ema20 = this.toNumber(indicator?.ema20);
+        const ema50 = this.toNumber(indicator?.ema50);
+        if (Number.isFinite(ema20) && Number.isFinite(ema50)) {
+            if (ema20 > ema50) return "bullish";
+            if (ema20 < ema50) return "bearish";
+        }
+        const trend = String(indicator?.trend || "").toLowerCase();
+        if (trend === "bullish" || trend === "bearish") return trend;
+        return "neutral";
+    }
+
     getUtcDayStartMs(tsMs = Date.now()) {
         const d = new Date(tsMs);
         d.setUTCHours(0, 0, 0, 0);
@@ -462,54 +510,70 @@ class TradingService {
                 return;
             }
             const isCrypto = this.isCryptoSymbol(symbol);
-            let primary;
-            let signal;
-            let reason = "";
             const signalTimestamp = timestamp || new Date().toISOString();
-            const marketContext = {
-                bid,
-                ask,
-                spread: Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : null,
-                price: this.resolveMarketPrice("BUY", bid, ask),
-            };
-
-            if (isCrypto) {
-                primary = Strategy.generateSignal3StageCrypto({
-                    symbol,
-                    indicators,
-                    variant: CRYPTO_VARIANT,
-                    market: marketContext,
-                    timestamp: signalTimestamp,
-                    sessions,
+            const intradayState = isCrypto ? this.intradayCryptoState : this.intradayForexState;
+            const intradayEngine = isCrypto ? this.intradayCryptoEngine : this.intradayForexEngine;
+            ensureStateDay(intradayState, signalTimestamp);
+            if (!(intradayState.openPositions instanceof Map)) {
+                intradayState.openPositions = new Map();
+            }
+            intradayState.openPositions.clear();
+            for (const position of this.openPositionsBroker) {
+                const symbolKey = String(position?.symbol || "").toUpperCase();
+                if (!symbolKey) continue;
+                const direction = String(position?.direction || "").toUpperCase();
+                intradayState.openPositions.set(symbolKey, {
+                    symbol: symbolKey,
+                    side: direction === "SELL" ? "SHORT" : "LONG",
+                    entryPrice: this.toNumber(position?.entryPrice),
+                    currentSl: this.toNumber(position?.stopLoss),
+                    initialSl: this.toNumber(position?.stopLoss),
+                    takeProfit: this.toNumber(position?.takeProfit),
+                    size: this.toNumber(position?.size),
+                    entryTimestamp: signalTimestamp,
+                    assetClass: this.isCryptoSymbol(symbolKey) ? "crypto" : "forex",
                 });
-                signal = primary?.signal;
-                reason = primary?.reason || "";
-            } else {
-                primary = Strategy.generateSignal3StageForex({
-                    symbol,
-                    indicators,
-                    variant: PRIMARY_VARIANT,
-                    market: marketContext,
-                    timestamp: signalTimestamp,
-                    sessions,
-                });
-                signal = primary?.signal;
-                reason = primary?.reason || "";
             }
 
-            if (!signal) {
-                const patternFails = Object.entries(primary?.context?.patternChecks || {})
-                    .flatMap(([name, ok]) => {
-                        if (ok && typeof ok === "object") {
-                            return Object.entries(ok)
-                                .filter(([, nestedOk]) => !nestedOk)
-                                .map(([nestedName]) => `${name}.${nestedName}`);
-                        }
-                        return ok ? [] : [name];
-                    })
-                    .join(",");
-                const patternFailText = patternFails ? `, patternFails=${patternFails}` : "";
-                logger.debug(`[Signal] ${symbol}: no signal (${primary.reason}${patternFailText})`);
+            const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : null;
+            const toClosedBar = (arr, backFromEnd) => {
+                if (!Array.isArray(arr) || arr.length <= backFromEnd) return null;
+                return normalizeBar(arr[arr.length - 1 - backFromEnd]);
+            };
+            const snapshot = {
+                symbol: String(symbol || "").toUpperCase(),
+                timestamp: signalTimestamp,
+                bid: this.toNumber(bid),
+                ask: this.toNumber(ask),
+                mid: this.resolveMarketPrice("BUY", bid, ask),
+                spread,
+                sessions: Array.isArray(sessions) ? sessions : [],
+                indicators: indicators || {},
+                bars: {
+                    h1: toClosedBar(candles?.h1Candles, 1),
+                    m15: toClosedBar(candles?.m15Candles, 1),
+                    m5: toClosedBar(candles?.m5Candles, 1),
+                    m1: toClosedBar(candles?.m1Candles, 1),
+                },
+                prevBars: {
+                    m15: toClosedBar(candles?.m15Candles, 2),
+                    m5: toClosedBar(candles?.m5Candles, 2),
+                },
+                prev2Bars: {
+                    m5: toClosedBar(candles?.m5Candles, 3),
+                },
+                equity: Number.isFinite(this.accountBalance) ? this.accountBalance : null,
+                newsBlocked: false,
+            };
+
+            const decision = intradayEngine.evaluateSnapshot({ snapshot, state: intradayState });
+            const orderPlan = decision?.step5?.orderPlan || null;
+            const signal = decision?.step5?.valid && orderPlan ? this.toTradeSignalFromStrategySide(orderPlan.side) : null;
+            const reasonParts = Array.isArray(decision?.reasons) ? decision.reasons : [];
+            const reason = reasonParts.length ? reasonParts.join("|") : "intraday_no_reason";
+
+            if (!signal || !orderPlan) {
+                logger.debug(`[Signal] ${symbol}: no intraday signal (${reason})`);
                 return;
             }
             // Re-check just placing
@@ -518,8 +582,33 @@ class TradingService {
             const guardRecheck = await this.shouldBlockNewTrade(symbol);
             if (guardRecheck?.blocked) return;
 
-            logger.info(`[Signal] ${symbol}: ${signal}`);
-            await this.executeTrade(symbol, signal, bid, ask, indicators, reason);
+            logger.info(`[Signal] ${symbol}: ${signal} (${decision?.step2?.regimeType || "UNKNOWN"} / ${decision?.step3?.setupType || "NONE"})`);
+            const strategyMeta = {
+                id: isCrypto ? INTRADAY_CRYPTO_STRATEGY_ID : INTRADAY_FOREX_STRATEGY_ID,
+                name: INTRADAY_DEFAULT_STRATEGY_ID,
+            };
+            const execution = await this.executeTradePlanned({
+                symbol,
+                signal,
+                orderPlan,
+                indicators,
+                reason,
+                strategyMeta,
+            });
+
+            if (execution?.accepted) {
+                registerOpenedTrade(intradayState, {
+                    symbol: String(symbol || "").toUpperCase(),
+                    side: orderPlan.side,
+                    entryPrice: this.firstNumber(execution?.filledPrice, orderPlan.entryPrice),
+                    currentSl: this.firstNumber(execution?.sl, orderPlan.sl),
+                    initialSl: this.firstNumber(execution?.sl, orderPlan.sl),
+                    takeProfit: this.firstNumber(execution?.tp, orderPlan.tp),
+                    size: this.firstNumber(execution?.size, orderPlan.size),
+                    entryTimestamp: signalTimestamp,
+                    assetClass: isCrypto ? "crypto" : "forex",
+                });
+            }
         } catch (error) {
             logger.error("[ProcessPrice] Error:", error);
         }
@@ -1172,8 +1261,8 @@ class TradingService {
         const m5 = indicators.m5;
         const m15 = indicators.m15;
         if (m5 && m15) {
-            const m5Trend = Strategy.pickTrend(m5, { symbol, timeframe: "M5", atr: m5.atr });
-            const m15Trend = Strategy.pickTrend(m15, { symbol, timeframe: "M15", atr: m15.atr });
+            const m5Trend = this.pickTrend(m5);
+            const m15Trend = this.pickTrend(m15);
 
             const broken =
                 (direction === "BUY" && (m5Trend === "bearish" || m15Trend === "bearish")) ||
@@ -1356,6 +1445,21 @@ class TradingService {
             if (updated) {
                 tradeTracker.markDealClosed(dealId);
                 this.riskGuardState.refreshedAtMs = 0;
+                const symbolKey = String(symbol || "").toUpperCase();
+                if (symbolKey) {
+                    registerClosedTrade(this.intradayForexState, {
+                        symbol: symbolKey,
+                        pnl: null,
+                        tradeId: dealId,
+                        timestamp: new Date().toISOString(),
+                    });
+                    registerClosedTrade(this.intradayCryptoState, {
+                        symbol: symbolKey,
+                        pnl: null,
+                        tradeId: dealId,
+                        timestamp: new Date().toISOString(),
+                    });
+                }
             }
         } catch (logErr) {
             logger.error(`[ClosePos] Failed to log closure for ${dealId}:`, logErr);
