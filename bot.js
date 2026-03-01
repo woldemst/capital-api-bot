@@ -434,17 +434,20 @@ class TradingBot {
             if (typeof tradingService.shouldAlwaysEvaluateCryptoSymbol === "function" && tradingService.shouldAlwaysEvaluateCryptoSymbol(symbol)) {
                 return true;
             }
-            const cryptoAllowed = this.cryptoTradingWindows.some((win) => {
-                return this.inSession(currentMinutes, win.start, win.end, { inclusiveEnd: true });
-            });
-            if (!cryptoAllowed) {
-                return false;
-            }
+            // Crypto is traded 24/7.
             return true;
         }
 
         const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
-        if (day === 0 || day === 6) {
+        const sundayOpenMinutes = 22 * 60;
+        const fridayCloseMinutes = 22 * 60;
+        if (day === 6) {
+            return false;
+        }
+        if (day === 0 && currentMinutes < sundayOpenMinutes) {
+            return false;
+        }
+        if (day === 5 && currentMinutes >= fridayCloseMinutes) {
             return false;
         }
 
