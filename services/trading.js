@@ -77,7 +77,7 @@ class TradingService {
             strategyId: INTRADAY_CRYPTO_STRATEGY_ID,
             context: {
                 ...(DEFAULT_INTRADAY_CONFIG.context || {}),
-                adxTrendMin: 24,
+                adxTrendMin: 18,
                 adxRangeMax: 18,
             },
             setup: {
@@ -85,6 +85,10 @@ class TradingService {
                 trendPullbackZonePct: 0.0023,
                 trendRsiMin: 38,
                 trendRsiMax: 62,
+                rangeBbPbLow: 0.2,
+                rangeBbPbHigh: 0.8,
+                rangeRsiLow: 40,
+                rangeRsiHigh: 60,
             },
             trigger: {
                 ...(DEFAULT_INTRADAY_CONFIG.trigger || {}),
@@ -92,7 +96,10 @@ class TradingService {
                 requireStructureBreak: true,
             },
             risk: { ...(DEFAULT_INTRADAY_CONFIG.risk || {}) },
-            guardrails: { ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}) },
+            guardrails: {
+                ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}),
+                allowRangeContrarian: true,
+            },
             backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
         };
         this.intradayForexEngine = createIntradaySevenStepEngine(this.intradayForexConfig);

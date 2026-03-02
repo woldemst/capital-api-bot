@@ -451,14 +451,8 @@ class TradingBot {
             return false;
         }
 
-        // Check if current time is inside any allowed window
-        const allowed = this.allowedTradingWindows.some((win) => {
-            return this.inSession(currentMinutes, win.start, win.end, { inclusiveEnd: true });
-        });
-
-        if (!allowed) {
-            return false;
-        }
+        // Forex timing is already controlled by session symbols (getActiveSymbols),
+        // plus weekend and rollover/news blocks below.
 
         const rolloverMinutes = this.rolloverHour * 60 + this.rolloverMinute;
         const nyMinutes = this.getMinutesInTimeZone(this.rolloverTimeZone, now);
