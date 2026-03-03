@@ -4,6 +4,86 @@ import logger from "./utils/logger.js";
 
 let cst, xsecurity;
 let sessionStartTime = Date.now();
+const HISTORICAL_CACHE_TTL_MS = 5000;
+const HISTORICAL_MAX_RETRIES = 3;
+const HISTORICAL_RETRY_BASE_MS = 350;
+const historicalCache = new Map();
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeSnapshotTimestamp(value) {
+    if (value === undefined || value === null || value === "") return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+    if (typeof value === "number") {
+        const d = new Date(value);
+        return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+        const d = new Date(raw);
+        return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+    }
+
+    // IG usually returns "YYYY/MM/DD HH:mm:ss" or "YYYY-MM-DD HH:mm:ss" in UTC.
+    const igUtc = raw.match(/^(\d{4})[/-](\d{2})[/-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (igUtc) {
+        const [, y, m, d, hh, mm, ss = "00"] = igUtc;
+        return `${y}-${m}-${d}T${hh}:${mm}:${ss}Z`;
+    }
+
+    // Final fallback for already-parseable date strings.
+    const parsed = new Date(raw);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+function mapHistoricalPrices(rawPrices = []) {
+    return (Array.isArray(rawPrices) ? rawPrices : []).map((p) => ({
+        close: p.closePrice?.bid,
+        high: p.highPrice?.bid,
+        low: p.lowPrice?.bid,
+        open: p.openPrice?.bid,
+        timestamp: normalizeSnapshotTimestamp(p.snapshotTimeUTC ?? p.snapshotTime),
+    }));
+}
+
+function historicalCacheKey(symbol, resolution, count) {
+    return `${String(symbol || "").toUpperCase()}|${String(resolution || "")}|${Number(count) || 0}`;
+}
+
+async function fetchHistoricalWithRetry(symbol, resolution, count) {
+    const url = `${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`;
+
+    for (let attempt = 1; attempt <= HISTORICAL_MAX_RETRIES; attempt += 1) {
+        try {
+            const response = await axios.get(url, { headers: getHeaders(true) });
+            return {
+                prices: mapHistoricalPrices(response.data?.prices),
+            };
+        } catch (error) {
+            const status = error?.response?.status;
+            const retryAfterHeader = error?.response?.headers?.["retry-after"];
+            const retryable = status === 429 || (status >= 500 && status < 600);
+            const hasNextAttempt = attempt < HISTORICAL_MAX_RETRIES;
+
+            if (!retryable || !hasNextAttempt) throw error;
+
+            const retryAfterMs = Number.isFinite(Number(retryAfterHeader)) ? Number(retryAfterHeader) * 1000 : null;
+            const expBackoffMs = HISTORICAL_RETRY_BASE_MS * 2 ** (attempt - 1);
+            const jitterMs = Math.floor(Math.random() * 120);
+            const waitMs = Math.max(retryAfterMs || 0, expBackoffMs + jitterMs);
+            logger.warn(
+                `[API] getHistorical retry ${attempt}/${HISTORICAL_MAX_RETRIES - 1} for ${symbol} ${resolution} after ${status}. Waiting ${waitMs}ms.`,
+            );
+            await sleep(waitMs);
+        }
+    }
+
+    return { prices: [] };
+}
 
 export const getHeaders = (includeContentType = false) => {
     const baseHeaders = {
@@ -130,17 +210,28 @@ export const getOpenPositions = async () =>
     });
 
 export async function getHistorical(symbol, resolution, count) {
-    // logger.info(`[API] Fetching historical: ${symbol} resolution=${resolution}`);
-    const response = await axios.get(`${API.BASE_URL}/prices/${symbol}?resolution=${resolution}&max=${count}`, { headers: getHeaders(true) });
-    return {
-        prices: response.data.prices.map((p) => ({
-            close: p.closePrice?.bid,
-            high: p.highPrice?.bid,
-            low: p.lowPrice?.bid,
-            open: p.openPrice?.bid,
-            timestamp: new Date(p.snapshotTime).toLocaleString(), // Human readable timestamp
-        })),
-    };
+    const key = historicalCacheKey(symbol, resolution, count);
+    const now = Date.now();
+    const cached = historicalCache.get(key);
+
+    if (cached?.data && Number.isFinite(cached.expiresAt) && cached.expiresAt > now) {
+        return cached.data;
+    }
+    if (cached?.promise) {
+        return cached.promise;
+    }
+
+    const requestPromise = withSessionRetry(() => fetchHistoricalWithRetry(symbol, resolution, count));
+    historicalCache.set(key, { promise: requestPromise, expiresAt: now + HISTORICAL_CACHE_TTL_MS });
+
+    try {
+        const data = await requestPromise;
+        historicalCache.set(key, { data, expiresAt: Date.now() + HISTORICAL_CACHE_TTL_MS });
+        return data;
+    } catch (error) {
+        historicalCache.delete(key);
+        throw error;
+    }
 }
 
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {

@@ -227,18 +227,48 @@ class TradingBot {
         activeSessions.forEach((arr) => (arr || []).forEach((symbol) => combinedSet.add(symbol)));
         const sessionSymbols = [...combinedSet];
         const tradableSymbols = [];
+        const blockedByReason = {};
+        const blockedDetails = [];
 
         for (const symbol of sessionSymbols) {
-            if (await this.isTradingAllowed(symbol, { now, currentMinutes })) {
+            const checkContext = { now, currentMinutes, rejectReason: null, rejectDetail: null };
+            if (await this.isTradingAllowed(symbol, checkContext)) {
                 tradableSymbols.push(symbol);
+                continue;
             }
+            const reason = checkContext.rejectReason || "filtered_unknown";
+            blockedByReason[reason] = (blockedByReason[reason] || 0) + 1;
+            blockedDetails.push(
+                `${symbol}:${reason}${checkContext.rejectDetail ? `(${checkContext.rejectDetail})` : ""}`,
+            );
         }
 
+        const blockedSummary = Object.entries(blockedByReason)
+            .map(([reason, count]) => `${reason}=${count}`)
+            .join(", ");
+
         logger.info(
-            `[Bot] Active sessions (UTC): ${activeSessions.length} (${activeSessionNames.length ? activeSessionNames.join(", ") : "none"}), Tradable symbols: ${
-                tradableSymbols.length ? tradableSymbols.join(", ") : "none"
+            `[Bot] Active sessions (UTC): ${activeSessions.length} (${activeSessionNames.length ? activeSessionNames.join(", ") : "none"}), Session symbols: ${
+                sessionSymbols.length ? sessionSymbols.join(", ") : "none"
+            }, Tradable symbols: ${tradableSymbols.length ? tradableSymbols.join(", ") : "none"
             }`,
         );
+        if (blockedSummary) {
+            logger.info(`[Bot][Filter] Blocked summary: ${blockedSummary}`);
+        }
+        if (blockedDetails.length) {
+            logger.debug(`[Bot][Filter] Blocked detail: ${blockedDetails.join(", ")}`);
+        }
+        if (!sessionSymbols.length) {
+            logger.warn(
+                `[Bot][Filter] Active sessions produced zero symbols. Sessions: ${activeSessionNames.length ? activeSessionNames.join(", ") : "none"}`,
+            );
+        }
+        if (!tradableSymbols.length && sessionSymbols.length) {
+            logger.warn(
+                `[Bot][Filter] All session symbols were filtered out this tick. SessionCount=${activeSessions.length}, SymbolCount=${sessionSymbols.length}`,
+            );
+        }
         return tradableSymbols;
     }
 
@@ -429,6 +459,8 @@ class TradingBot {
     async isTradingAllowed(symbol, context = {}) {
         const now = context.now instanceof Date ? context.now : new Date();
         const currentMinutes = Number.isFinite(context.currentMinutes) ? context.currentMinutes : now.getUTCHours() * 60 + now.getUTCMinutes();
+        context.rejectReason = null;
+        context.rejectDetail = null;
 
         if (this.isCryptoSymbol(symbol)) {
             if (typeof tradingService.shouldAlwaysEvaluateCryptoSymbol === "function" && tradingService.shouldAlwaysEvaluateCryptoSymbol(symbol)) {
@@ -442,12 +474,15 @@ class TradingBot {
         const sundayOpenMinutes = 22 * 60;
         const fridayCloseMinutes = 22 * 60;
         if (day === 6) {
+            context.rejectReason = "weekend_saturday";
             return false;
         }
         if (day === 0 && currentMinutes < sundayOpenMinutes) {
+            context.rejectReason = "weekend_pre_open";
             return false;
         }
         if (day === 5 && currentMinutes >= fridayCloseMinutes) {
+            context.rejectReason = "weekend_post_close";
             return false;
         }
 
@@ -459,6 +494,7 @@ class TradingBot {
         const inRolloverBuffer = nyMinutes >= rolloverMinutes - this.rolloverBufferMinutes && nyMinutes < rolloverMinutes;
 
         if (inRolloverBuffer) {
+            context.rejectReason = "rollover_buffer";
             logger.info(
                 `[Bot][Rollover] Entry blocked (${this.rolloverTimeZone} ${this.rolloverHour}:${String(this.rolloverMinute).padStart(2, "0")}, buffer ${this.rolloverBufferMinutes}m).`,
             );
@@ -473,6 +509,8 @@ class TradingBot {
 
         if (news.blocked) {
             const titles = news.blockingEvents.map((e) => `${e.impact}:${e.country}:${e.title}`);
+            context.rejectReason = "news_blocked";
+            context.rejectDetail = titles.slice(0, 2).join(" | ");
             logger.info(`[Bot][News] Trading blocked for ${symbol} until ${news.blockUntilUtc?.toISOString()}. Events: ${titles.join(" | ")}`);
             return false;
         }

@@ -6,6 +6,8 @@
   "scripts": {
     "test": "echo \"Use npm run test:intraday\"",
     "test:intraday": "node --test tests/intraday/*.test.js",
+    "dataset:generate": "node backtest/generateDataset.js",
+    "dataset:convert:jsonl": "DATASET_CONVERT_ONLY=true DATASET_FILE_FORMAT=jsonl node backtest/generateDataset.js",
     "start": "nodemon bot.js"
   },
   "keywords": [],

@@ -93,7 +93,7 @@ class TradingService {
             trigger: {
                 ...(DEFAULT_INTRADAY_CONFIG.trigger || {}),
                 displacementAtrMultiplier: 1.0,
-                requireStructureBreak: true,
+                requireStructureBreak: false,
             },
             risk: { ...(DEFAULT_INTRADAY_CONFIG.risk || {}) },
             guardrails: {
@@ -383,7 +383,7 @@ class TradingService {
         }
 
         const currentLossStreak = Number(global.currentLossStreak) || 0;
-        if (currentLossStreak >= MAX_LOSS_STREAK) {
+        if (MAX_LOSS_STREAK > 0 && LOSS_STREAK_COOLDOWN_MINUTES > 0 && currentLossStreak >= MAX_LOSS_STREAK) {
             const lastLossAtMs = Date.parse(String(global.lastLossAt || ""));
             const cooldownMs = LOSS_STREAK_COOLDOWN_MINUTES * 60000;
             const cooldownActive = Number.isFinite(lastLossAtMs) ? Date.now() - lastLossAtMs < cooldownMs : true;

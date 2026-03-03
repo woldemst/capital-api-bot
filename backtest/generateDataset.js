@@ -1,265 +1,493 @@
-// generateDataset.js
 import fs from "fs";
+import path from "path";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "../utils/logger.js";
+
 dotenv.config();
 
-// === CONFIG ===
 const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY;
-
 const BASE_URL = "https://api.twelvedata.com/time_series";
 
-// === SYMBOLS ===
-// Format: "EUR/USD"
-const symbols = ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CAD", "AUD/USD", "NZD/USD", "EUR/JPY", "GBP/JPY"];
+const OUTPUT_DIR = process.env.DATASET_OUTPUT_DIR || "./backtest/generated-dataset";
+const DRY_RUN = String(process.env.DATASET_DRY_RUN || "").toLowerCase() === "true";
+const INCLUDE_INDICATORS = String(process.env.DATASET_INCLUDE_INDICATORS || "true").toLowerCase() !== "false";
+const BACKFILL_EXISTING = String(process.env.DATASET_BACKFILL_EXISTING || "").toLowerCase() === "true";
+const CONVERT_ONLY = String(process.env.DATASET_CONVERT_ONLY || "").toLowerCase() === "true";
+const REQUEST_DELAY_MS = Number.isFinite(Number(process.env.TWELVE_REQUEST_DELAY_MS)) ? Number(process.env.TWELVE_REQUEST_DELAY_MS) : 8500;
+const MAX_RETRIES = Number.isFinite(Number(process.env.TWELVE_MAX_RETRIES)) ? Number(process.env.TWELVE_MAX_RETRIES) : 4;
+const MAX_CANDLES_PER_REQUEST =
+    Number.isFinite(Number(process.env.TWELVE_MAX_CANDLES_PER_REQUEST)) && Number(process.env.TWELVE_MAX_CANDLES_PER_REQUEST) > 0
+        ? Number(process.env.TWELVE_MAX_CANDLES_PER_REQUEST)
+        : 5000;
+const MAX_BACKFILL_CHUNKS_PER_SERIES =
+    Number.isFinite(Number(process.env.TWELVE_MAX_BACKFILL_CHUNKS_PER_SERIES)) && Number(process.env.TWELVE_MAX_BACKFILL_CHUNKS_PER_SERIES) > 0
+        ? Number(process.env.TWELVE_MAX_BACKFILL_CHUNKS_PER_SERIES)
+        : 120;
+const MAX_FORWARD_CHUNKS_PER_SERIES =
+    Number.isFinite(Number(process.env.TWELVE_MAX_FORWARD_CHUNKS_PER_SERIES)) && Number(process.env.TWELVE_MAX_FORWARD_CHUNKS_PER_SERIES) > 0
+        ? Number(process.env.TWELVE_MAX_FORWARD_CHUNKS_PER_SERIES)
+        : 40;
+const INDICATOR_WARMUP_BARS = Number.isFinite(Number(process.env.DATASET_INDICATOR_WARMUP_BARS)) ? Number(process.env.DATASET_INDICATOR_WARMUP_BARS) : 60;
+const INDICATOR_LOOKBACK = Number.isFinite(Number(process.env.DATASET_INDICATOR_LOOKBACK)) ? Number(process.env.DATASET_INDICATOR_LOOKBACK) : 260;
+const FILE_FORMAT = String(process.env.DATASET_FILE_FORMAT || "jsonl").toLowerCase() === "json" ? "json" : "jsonl";
 
-// === TIMEFRAMES ===
-const timeframes = {
+const DEFAULT_FX_SYMBOLS = [
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "USD/CHF",
+    "USD/CAD",
+    "AUD/USD",
+    "NZD/USD",
+    "EUR/GBP",
+    "EUR/JPY",
+    "GBP/JPY",
+    "AUD/JPY",
+    "NZD/JPY",
+    "EUR/CHF",
+    "GBP/CHF",
+    "CAD/JPY",
+    "CHF/JPY",
+    "EUR/CAD",
+    "GBP/CAD",
+    "EUR/AUD",
+    "EUR/NZD",
+    "GBP/AUD",
+    "AUD/CAD",
+    "AUD/NZD",
+    "NZD/CAD",
+    "NZD/CHF",
+    "AUD/CHF",
+];
+
+const DEFAULT_CRYPTO_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD", "ADA/USD", "LTC/USD", "BCH/USD", "DOT/USD", "LINK/USD"];
+
+const ALL_TIMEFRAMES = {
     M1: "1min",
     M5: "5min",
     M15: "15min",
     H1: "1h",
     H4: "4h",
+    D1: "1day",
 };
+const DEFAULT_TIMEFRAME_KEYS = ["M1", "M5", "M15", "H1"];
 
-// Maximum candles per request as per Twelve Data limitations
-const MAX_CANDLES_PER_REQUEST = 5000;
-
-// Helper to convert timeframe to minutes
-const timeframeToMinutes = {
+const TIMEFRAME_TO_MINUTES = {
     "1min": 1,
     "5min": 5,
     "15min": 15,
     "1h": 60,
     "4h": 240,
+    "1day": 1440,
 };
 
-function mergeCandles(existing, incoming) {
-    const map = new Map();
-
-    for (const c of existing) {
-        map.set(new Date(c.timestamp).getTime(), c);
+function normalizeSymbol(raw) {
+    const value = String(raw || "")
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "");
+    if (!value) return "";
+    if (value.includes("/")) return value;
+    if (/^[A-Z0-9]{6,8}$/.test(value)) {
+        return `${value.slice(0, value.length / 2)}/${value.slice(value.length / 2)}`;
     }
-
-    for (const c of incoming) {
-        const ts = new Date(c.timestamp).getTime();
-        if (!map.has(ts)) {
-            map.set(ts, c);
-        }
-    }
-
-    // Convert back to array sorted ASC
-    return Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    return value;
 }
 
-// Helper function to wait for given milliseconds
+function parseSymbols() {
+    const envSymbols = String(process.env.DATASET_SYMBOLS || "")
+        .split(",")
+        .map((s) => normalizeSymbol(s))
+        .filter(Boolean);
+    if (envSymbols.length) return [...new Set(envSymbols)];
+    return [...new Set([...DEFAULT_FX_SYMBOLS, ...DEFAULT_CRYPTO_SYMBOLS])];
+}
+
+function parseTimeframes() {
+    const envFrames = String(process.env.DATASET_TIMEFRAMES || "")
+        .split(",")
+        .map((f) => String(f || "").trim().toUpperCase())
+        .filter(Boolean);
+    if (!envFrames.length) {
+        const defaults = {};
+        for (const key of DEFAULT_TIMEFRAME_KEYS) {
+            if (ALL_TIMEFRAMES[key]) defaults[key] = ALL_TIMEFRAMES[key];
+        }
+        return defaults;
+    }
+    const selected = {};
+    for (const key of envFrames) {
+        if (ALL_TIMEFRAMES[key]) selected[key] = ALL_TIMEFRAMES[key];
+    }
+    if (Object.keys(selected).length) return selected;
+    const defaults = {};
+    for (const key of DEFAULT_TIMEFRAME_KEYS) {
+        if (ALL_TIMEFRAMES[key]) defaults[key] = ALL_TIMEFRAMES[key];
+    }
+    return defaults;
+}
+
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// === UTILITY: fetch candles from Twelve Data ===
-async function fetchTwelveDataCandles(symbol, interval, startDate, endDate) {
-    // Twelve Data API expects symbol like "EUR/USD"
-    // startDate and endDate in ISO format (YYYY-MM-DD HH:mm:ss)
-    // We'll fetch in chunks if needed to stay under MAX_CANDLES_PER_REQUEST
+function toApiDate(date) {
+    return new Date(date).toISOString().slice(0, 19).replace("T", " ");
+}
 
-    const allCandles = [];
+function toNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
 
-    // Calculate total minutes between startDate and endDate
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const totalMinutes = (end - start) / (1000 * 60);
-    const intervalMinutes = timeframeToMinutes[interval];
+function parseCandleRow(candle) {
+    const ts = new Date(candle?.timestamp).toISOString();
+    if (!ts) return null;
+    const row = {
+        timestamp: ts,
+        open: toNumber(candle.open),
+        high: toNumber(candle.high),
+        low: toNumber(candle.low),
+        close: toNumber(candle.close),
+    };
+    if (![row.open, row.high, row.low, row.close].every(Number.isFinite)) return null;
+    return row;
+}
 
-    // Calculate max duration per request in minutes
-    const maxDurationMinutes = MAX_CANDLES_PER_REQUEST * intervalMinutes;
+function mergeCandles(existing, incoming) {
+    const map = new Map();
+    for (const candle of existing || []) {
+        const row = parseCandleRow(candle);
+        if (!row) continue;
+        map.set(row.timestamp, row);
+    }
+    for (const candle of incoming || []) {
+        const row = parseCandleRow(candle);
+        if (!row) continue;
+        map.set(row.timestamp, row);
+    }
+    return [...map.values()]
+        .filter((c) => [c.open, c.high, c.low, c.close].every(Number.isFinite))
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
 
-    let chunkStart = new Date(start);
-    while (chunkStart < end) {
-        const chunkEnd = new Date(Math.min(chunkStart.getTime() + maxDurationMinutes * 60 * 1000, end.getTime()));
+function readJsonCandles(filePath) {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return mergeCandles([], parsed);
+}
 
-        const from = chunkStart.toISOString().slice(0, 19);
-        const to = chunkEnd.toISOString().slice(0, 19);
-
-        const url = new URL(BASE_URL);
-        url.searchParams.append("symbol", symbol);
-        url.searchParams.append("interval", interval);
-        url.searchParams.append("apikey", TWELVEDATA_API_KEY);
-        url.searchParams.append("start_date", from);
-        url.searchParams.append("end_date", to);
-        url.searchParams.append("format", "JSON");
-        url.searchParams.append("order", "asc");
-        url.searchParams.append("timezone", "UTC");
-
-        logger.info(`📡 Fetching ${symbol} ${interval} candles from ${from} to ${to}...`);
-
-        const response = await fetch(url.toString());
-        const data = await response.json();
-
-        await wait(8000);
-
-        if (data.status === "error") {
-            throw new Error(data.message || "Error fetching data from Twelve Data");
+function readJsonlCandles(filePath) {
+    const text = fs.readFileSync(filePath, "utf8");
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const rows = [];
+    for (const line of lines) {
+        try {
+            const obj = JSON.parse(line);
+            rows.push(obj);
+        } catch {
+            // ignore malformed line
         }
+    }
+    return mergeCandles([], rows);
+}
 
-        if (!data.values || data.values.length === 0) {
-            logger.info(`⚠️ No data returned for ${symbol} ${interval} between ${from} and ${to}`);
+function fileExt(filePath) {
+    return path.extname(filePath).toLowerCase();
+}
+
+function loadCandlesFromPath(filePath) {
+    const ext = fileExt(filePath);
+    if (ext === ".jsonl") return readJsonlCandles(filePath);
+    return readJsonCandles(filePath);
+}
+
+function buildFilePath(symbol, timeframeName, format = FILE_FORMAT) {
+    const symbolKey = symbol.replace("/", "");
+    const ext = format === "jsonl" ? "jsonl" : "json";
+    return path.join(OUTPUT_DIR, `${symbolKey}_${timeframeName}.${ext}`);
+}
+
+function resolveDatasetPaths(symbol, timeframeName) {
+    const targetPath = buildFilePath(symbol, timeframeName, FILE_FORMAT);
+    const fallbackFormat = FILE_FORMAT === "jsonl" ? "json" : "jsonl";
+    const fallbackPath = buildFilePath(symbol, timeframeName, fallbackFormat);
+    return { targetPath, fallbackPath };
+}
+
+function loadExistingCandles(targetPath, fallbackPath) {
+    try {
+        if (fs.existsSync(targetPath)) {
+            const candles = loadCandlesFromPath(targetPath);
+            return { candles, loadedFromPath: targetPath };
+        }
+        if (fallbackPath && fs.existsSync(fallbackPath)) {
+            const candles = loadCandlesFromPath(fallbackPath);
+            return { candles, loadedFromPath: fallbackPath };
+        }
+        return { candles: [], loadedFromPath: null };
+    } catch (error) {
+        logger.warn(`⚠️ Failed to read existing dataset (${targetPath}${fallbackPath ? ` / ${fallbackPath}` : ""}): ${error.message}`);
+        return { candles: [], loadedFromPath: null };
+    }
+}
+
+async function fetchChunk(symbol, interval, startDate, endDate) {
+    const url = new URL(BASE_URL);
+    url.searchParams.append("symbol", symbol);
+    url.searchParams.append("interval", interval);
+    url.searchParams.append("apikey", TWELVEDATA_API_KEY || "");
+    url.searchParams.append("start_date", toApiDate(startDate));
+    url.searchParams.append("end_date", toApiDate(endDate));
+    url.searchParams.append("outputsize", String(MAX_CANDLES_PER_REQUEST));
+    url.searchParams.append("order", "asc");
+    url.searchParams.append("timezone", "UTC");
+    url.searchParams.append("format", "JSON");
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await fetch(url.toString());
+            const payload = await response.json();
+
+            if (payload?.status === "error") {
+                const message = payload?.message || "Unknown Twelve Data error";
+                if (/no data is available/i.test(message)) {
+                    return [];
+                }
+                const shouldRetry = /limit|rate|credits|thrott/i.test(message);
+                if (!shouldRetry || attempt === MAX_RETRIES) {
+                    throw new Error(message);
+                }
+                const retryMs = REQUEST_DELAY_MS * attempt;
+                logger.warn(`⏳ ${symbol} ${interval} retry ${attempt}/${MAX_RETRIES} after API limit: ${message}`);
+                await wait(retryMs);
+                continue;
+            }
+
+            const values = Array.isArray(payload?.values) ? payload.values : [];
+            const candles = values
+                .map((value) => {
+                    const timestamp = new Date(`${value?.datetime || ""}Z`).toISOString();
+                    return {
+                        timestamp,
+                        open: toNumber(value?.open),
+                        high: toNumber(value?.high),
+                        low: toNumber(value?.low),
+                        close: toNumber(value?.close),
+                    };
+                })
+                .filter((c) => c.timestamp && [c.open, c.high, c.low, c.close].every(Number.isFinite))
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+            return candles;
+        } catch (error) {
+            if (attempt === MAX_RETRIES) throw error;
+            const retryMs = REQUEST_DELAY_MS * attempt;
+            logger.warn(`⚠️ ${symbol} ${interval} fetch attempt ${attempt}/${MAX_RETRIES} failed: ${error.message}. Retrying in ${retryMs}ms`);
+            await wait(retryMs);
+        }
+    }
+
+    return [];
+}
+
+async function fetchBackfill(symbol, interval, endAt, maxChunks) {
+    const intervalMinutes = TIMEFRAME_TO_MINUTES[interval];
+    const intervalMs = intervalMinutes * 60 * 1000;
+    const chunkSpanMs = intervalMs * MAX_CANDLES_PER_REQUEST;
+    let cursorEnd = new Date(endAt);
+    let merged = [];
+    let previousEarliest = null;
+
+    for (let chunkIndex = 1; chunkIndex <= maxChunks; chunkIndex++) {
+        const chunkStart = new Date(cursorEnd.getTime() - chunkSpanMs + intervalMs);
+        logger.info(
+            `📡 [Backfill ${chunkIndex}/${maxChunks}] ${symbol} ${interval} ${toApiDate(chunkStart)} -> ${toApiDate(cursorEnd)}`,
+        );
+        const candles = await fetchChunk(symbol, interval, chunkStart, cursorEnd);
+        if (!candles.length) {
+            logger.info(`ℹ️ [Backfill] ${symbol} ${interval}: no older candles in requested range. Stopping backfill at chunk ${chunkIndex}.`);
             break;
         }
-
-        // data.values is array of candles ordered descending by datetime, we want ascending
-        const candles = data.values
-            .map((c) => ({
-                timestamp: new Date(c.datetime + "Z"),
-                open: parseFloat(c.open),
-                high: parseFloat(c.high),
-                low: parseFloat(c.low),
-                close: parseFloat(c.close),
-            }))
-            .reverse();
-
-        allCandles.push(...candles);
-
-        // Move chunkStart forward
-        chunkStart = new Date(chunkEnd.getTime() + 60 * 1000 * intervalMinutes);
+        merged = mergeCandles(merged, candles);
+        const earliest = new Date(candles[0].timestamp).getTime();
+        if (!Number.isFinite(earliest) || (previousEarliest !== null && earliest >= previousEarliest)) break;
+        previousEarliest = earliest;
+        cursorEnd = new Date(earliest - intervalMs);
+        await wait(REQUEST_DELAY_MS);
     }
 
-    return allCandles;
+    return merged;
 }
 
-// === UTILITY: aggregate H4 from H1 ===
-function aggregateH4FromH1(h1Candles) {
-    // Assumes h1Candles sorted ascending by timestamp
-    const h4Candles = [];
-    for (let i = 0; i < h1Candles.length; i += 4) {
-        const chunk = h1Candles.slice(i, i + 4);
-        if (chunk.length < 4) break;
+async function fetchForward(symbol, interval, startAt, endAt, maxChunks) {
+    const intervalMinutes = TIMEFRAME_TO_MINUTES[interval];
+    const intervalMs = intervalMinutes * 60 * 1000;
+    const chunkSpanMs = intervalMs * MAX_CANDLES_PER_REQUEST;
+    let cursorStart = new Date(startAt);
+    const limitEnd = new Date(endAt);
+    let merged = [];
+    let previousLatest = null;
 
-        const open = chunk[0].open;
-        const close = chunk[3].close;
-        const high = Math.max(...chunk.map((c) => c.high));
-        const low = Math.min(...chunk.map((c) => c.low));
-        const timestamp = chunk[0].timestamp;
-
-        h4Candles.push({ timestamp, open, high, low, close });
+    for (let chunkIndex = 1; chunkIndex <= maxChunks && cursorStart <= limitEnd; chunkIndex++) {
+        const chunkEnd = new Date(Math.min(cursorStart.getTime() + chunkSpanMs - intervalMs, limitEnd.getTime()));
+        logger.info(
+            `📡 [Forward ${chunkIndex}/${maxChunks}] ${symbol} ${interval} ${toApiDate(cursorStart)} -> ${toApiDate(chunkEnd)}`,
+        );
+        const candles = await fetchChunk(symbol, interval, cursorStart, chunkEnd);
+        if (!candles.length) {
+            logger.info(`ℹ️ [Forward] ${symbol} ${interval}: no newer candles in requested range. Stopping forward sync at chunk ${chunkIndex}.`);
+            break;
+        }
+        merged = mergeCandles(merged, candles);
+        const latest = new Date(candles[candles.length - 1].timestamp).getTime();
+        if (!Number.isFinite(latest) || (previousLatest !== null && latest <= previousLatest)) break;
+        previousLatest = latest;
+        cursorStart = new Date(latest + intervalMs);
+        await wait(REQUEST_DELAY_MS);
     }
-    return h4Candles;
+
+    return merged;
 }
 
-// === MAIN ===
+async function buildRowsWithIndicators(candles) {
+    if (!INCLUDE_INDICATORS) return candles;
+    const rows = [];
+    for (let i = 0; i < candles.length; i++) {
+        const candle = candles[i];
+        if (i + 1 < INDICATOR_WARMUP_BARS) {
+            rows.push({ ...candle });
+            continue;
+        }
+        const startIndex = Math.max(0, i - INDICATOR_LOOKBACK + 1);
+        const slice = candles.slice(startIndex, i + 1);
+        const indicators = (await calcIndicators(slice)) || {};
+        rows.push({ ...candle, ...indicators });
+        if ((i + 1) % 5000 === 0) {
+            logger.info(`🧮 Indicator progress ${i + 1}/${candles.length}`);
+        }
+    }
+    return rows;
+}
+
+function writeDatasetRows(filePath, rows) {
+    const ext = fileExt(filePath);
+    if (ext === ".jsonl") {
+        const payload = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+        fs.writeFileSync(filePath, payload);
+        return;
+    }
+    fs.writeFileSync(filePath, JSON.stringify(rows, null, 2));
+}
+
+function printConfig(symbols, timeframes) {
+    logger.info("===== Twelve Data Dataset Generation =====");
+    logger.info(`Output dir: ${OUTPUT_DIR}`);
+    logger.info(`File format: ${FILE_FORMAT}`);
+    logger.info(`Symbols: ${symbols.length}`);
+    logger.info(`Timeframes: ${Object.keys(timeframes).join(", ")}`);
+    logger.info(`Max candles/request: ${MAX_CANDLES_PER_REQUEST}`);
+    logger.info(`Request delay: ${REQUEST_DELAY_MS} ms`);
+    logger.info(`Backfill chunks/series: ${MAX_BACKFILL_CHUNKS_PER_SERIES}`);
+    logger.info(`Forward chunks/series: ${MAX_FORWARD_CHUNKS_PER_SERIES}`);
+    logger.info(`Backfill existing files: ${BACKFILL_EXISTING}`);
+    logger.info(`Convert only mode: ${CONVERT_ONLY}`);
+    logger.info(`Include indicators: ${INCLUDE_INDICATORS}`);
+    logger.info(`Dry run: ${DRY_RUN}`);
+    logger.info("==========================================");
+}
+
 async function generateDataset() {
-    if (!fs.existsSync("./data")) fs.mkdirSync("./data");
+    if (!DRY_RUN && !CONVERT_ONLY && !TWELVEDATA_API_KEY) {
+        throw new Error("Missing TWELVEDATA_API_KEY in environment (.env)");
+    }
+
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    const symbols = parseSymbols();
+    const timeframes = parseTimeframes();
+    printConfig(symbols, timeframes);
+
+    if (DRY_RUN) {
+        logger.info("DRY_RUN enabled. No API calls executed.");
+        return;
+    }
 
     const now = new Date();
-    const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
 
     for (const symbol of symbols) {
-        // We will fetch H1 data once to use for H4 aggregation if needed
-        let h1Candles = null;
-
-        for (const [tfName, interval] of Object.entries(timeframes)) {
+        for (const [timeframeName, interval] of Object.entries(timeframes)) {
             try {
-                let candles;
+                const { targetPath, fallbackPath } = resolveDatasetPaths(symbol, timeframeName);
+                const loaded = loadExistingCandles(targetPath, fallbackPath);
+                const existing = loaded.candles;
+                const loadedFromPath = loaded.loadedFromPath;
+                const migratingFormat = Boolean(loadedFromPath && loadedFromPath !== targetPath);
+                const intervalMinutes = TIMEFRAME_TO_MINUTES[interval];
+                const intervalMs = intervalMinutes * 60 * 1000;
 
-                let startDate;
-                if (tfName === "M1") {
-                    startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                } else if (tfName === "M5") {
-                    startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                } else if (tfName === "M15") {
-                    startDate = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-                } else {
-                    startDate = oneYearAgo;
-                }
+                let older = [];
+                let newer = [];
 
-                if (tfName === "H4") {
-                    // Fetch H1 data once if not already fetched
-                    if (!h1Candles) {
-                        h1Candles = await fetchTwelveDataCandles(symbol, timeframes.H1, startDate.toISOString().slice(0, 19), now.toISOString().slice(0, 19));
-                        logger.info(`✅ ${h1Candles.length} H1 candles fetched for ${symbol}`);
+                if (CONVERT_ONLY) {
+                    if (!existing.length) {
+                        logger.info(`⏭️ ${symbol} ${timeframeName}: no source file found to convert`);
+                        continue;
                     }
-                    // Aggregate H4 from H1
-                    candles = aggregateH4FromH1(h1Candles);
-                    logger.info(`✅ Aggregated ${candles.length} H4 candles for ${symbol}`);
-                } else {
-                    candles = await fetchTwelveDataCandles(symbol, interval, startDate.toISOString().slice(0, 19), now.toISOString().slice(0, 19));
-                    logger.info(`✅ ${candles.length} candles fetched for ${symbol} ${tfName}`);
-                }
-
-                const indicatorResults = [];
-                for (let i = 50; i < candles.length; i++) {
-                    const slice = candles.slice(i - 50, i + 1);
-                    const indicators = await calcIndicators(slice);
-                    indicatorResults.push({
-                        timestamp: candles[i].timestamp,
-                        open: candles[i].open,
-                        high: candles[i].high,
-                        low: candles[i].low,
-                        close: candles[i].close,
-                        ...indicators,
-                    });
-                }
-
-                const filePath = `./data/${symbol.replace("/", "")}_${tfName}.json`;
-
-                // Load existing file if exists
-                let existing = [];
-                if (fs.existsSync(filePath)) {
-                    try {
-                        existing = JSON.parse(fs.readFileSync(filePath, "utf8"));
-                    } catch (e) {
-                        logger.error(`⚠️ Failed to parse existing file: ${filePath}`);
+                    if (!migratingFormat) {
+                        logger.info(`⏭️ ${symbol} ${timeframeName}: already in target format (${FILE_FORMAT})`);
+                        continue;
                     }
+                    logger.info(`🔄 ${symbol} ${timeframeName}: converting ${path.basename(loadedFromPath)} -> ${path.basename(targetPath)}`);
+                } else if (existing.length) {
+                    const oldestTs = new Date(existing[0].timestamp);
+                    const latestTs = new Date(existing[existing.length - 1].timestamp);
+                    const olderEnd = new Date(oldestTs.getTime() - intervalMs);
+                    const newerStart = new Date(latestTs.getTime() + intervalMs);
+
+                    logger.info(
+                        `🔁 ${symbol} ${timeframeName}: existing candles=${existing.length}${migratingFormat ? ` (loaded from ${path.basename(loadedFromPath)})` : ""}`,
+                    );
+                    if (BACKFILL_EXISTING) {
+                        older = await fetchBackfill(symbol, interval, olderEnd, MAX_BACKFILL_CHUNKS_PER_SERIES);
+                    } else {
+                        logger.info(`⏭️ ${symbol} ${timeframeName}: skipping historical backfill for existing file`);
+                    }
+                    if (newerStart < now) {
+                        newer = await fetchForward(symbol, interval, newerStart, now, MAX_FORWARD_CHUNKS_PER_SERIES);
+                    } else {
+                        logger.info(`⏭️ ${symbol} ${timeframeName}: up to date (no forward gap)`);
+                    }
+                } else {
+                    logger.info(`🆕 ${symbol} ${timeframeName}: no existing file, starting full backfill`);
+                    older = await fetchBackfill(symbol, interval, now, MAX_BACKFILL_CHUNKS_PER_SERIES);
                 }
 
-                // Remove indicators, keep only raw candles for merging
-                const existingRaw = existing.map((c) => ({
-                    timestamp: c.timestamp,
-                    open: c.open,
-                    high: c.high,
-                    low: c.low,
-                    close: c.close,
-                }));
-
-                // Raw candles before indicator calculation
-                const newRaw = candles.map((c) => ({
-                    timestamp: c.timestamp,
-                    open: c.open,
-                    high: c.high,
-                    low: c.low,
-                    close: c.close,
-                }));
-
-                // Merge raw
-                const mergedRaw = mergeCandles(existingRaw, newRaw);
-
-                // Recalculate indicators for merged
-                const newIndicatorResults = [];
-                for (let i = 50; i < mergedRaw.length; i++) {
-                    const slice = mergedRaw.slice(i - 50, i + 1);
-                    const indicators = await calcIndicators(slice);
-                    newIndicatorResults.push({
-                        timestamp: mergedRaw[i].timestamp,
-                        open: mergedRaw[i].open,
-                        high: mergedRaw[i].high,
-                        low: mergedRaw[i].low,
-                        close: mergedRaw[i].close,
-                        ...indicators,
-                    });
+                if (existing.length && !older.length && !newer.length && !migratingFormat) {
+                    logger.info(`⏭️ ${symbol} ${timeframeName}: no new candles fetched, keeping existing file unchanged`);
+                    continue;
                 }
 
-                // Save final file
-                fs.writeFileSync(filePath, JSON.stringify(newIndicatorResults, null, 2));
-                logger.info(`💾 Updated dataset → ${filePath} (${newIndicatorResults.length} candles)`);
-            } catch (err) {
-                logger.error(`❌ Error processing ${symbol} ${tfName}: ${err.message}`);
+                const merged = mergeCandles(mergeCandles(existing, older), newer);
+                if (!merged.length) {
+                    logger.warn(`⚠️ No candles for ${symbol} ${timeframeName}`);
+                    continue;
+                }
+
+                const rows = await buildRowsWithIndicators(merged);
+                writeDatasetRows(targetPath, rows);
+                logger.info(`💾 ${symbol} ${timeframeName} -> ${targetPath} (${rows.length} rows)`);
+            } catch (error) {
+                logger.error(`❌ ${symbol} ${timeframeName}: ${error.message}`);
             }
         }
     }
 
-    logger.info("📊 Twelve Data dataset generation completed!");
+    logger.info("✅ Twelve Data dataset generation completed.");
 }
 
-generateDataset();
+generateDataset().catch((error) => {
+    logger.error(`Dataset generation failed: ${error.message}`);
+    process.exitCode = 1;
+});

@@ -73,14 +73,14 @@ export const SESSIONS = {
 
 export const RISK = {
     // Conservative defaults for small accounts; can be overridden via env later.
-    PER_TRADE: 0.005, // 0.5% risk per forex trade
-    CRYPTO_PER_TRADE: 0.004, // 0.4% risk per crypto trade
+    PER_TRADE: 0.05, // 5% risk per forex trade
+    CRYPTO_PER_TRADE: 0.04, // 4% risk per crypto trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     GUARDS: {
         MAX_DAILY_LOSS_PCT: 0.02, // stop new entries after -2% estimated realized day PnL
-        MAX_OPEN_RISK_PCT: 0.015, // cap estimated total open risk across all positions
+        MAX_OPEN_RISK_PCT: 0.25, // cap estimated total open risk across all positions
         MAX_LOSS_STREAK: 3, // consecutive losing closes before cooldown
-        LOSS_STREAK_COOLDOWN_MINUTES: 180,
+        LOSS_STREAK_COOLDOWN_MINUTES: 0, // disabled
         SUMMARY_CACHE_MS: 15000,
     },
     EXITS: {
@@ -154,8 +154,8 @@ export const STRATEGIES = {
             riskProfile: ["normal", "aggressive"].includes(String(ENV.CLWM_RISK_PROFILE || "").toLowerCase())
                 ? String(ENV.CLWM_RISK_PROFILE || "").toLowerCase()
                 : "normal",
-            riskPctNormal: 0.0035,
-            riskPctAggressive: 0.015,
+            riskPctNormal: 0.04,
+            riskPctAggressive: 0.04,
             dailyLossLimitPctNormal: 0.01,
             dailyLossLimitPctAggressive: 0.03,
             maxLeverageCrypto: 2.0,

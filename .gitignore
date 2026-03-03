@@ -3,6 +3,7 @@
 node_modules/
 client/dist/
 backtest/data/
+backtest/generated-dataset/
 backtest/signals/
 backtest/results/
 backtest/analysis/
