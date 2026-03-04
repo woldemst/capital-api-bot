@@ -1109,6 +1109,14 @@ export function startHubServer() {
         }
     });
 
+    server.on("error", (error) => {
+        if (error?.code === "EADDRINUSE") {
+            logger.warn(`[Hub] Port ${HUB_PORT} is already in use. Hub server startup skipped.`);
+            return;
+        }
+        logger.error("[Hub] Server error:", error);
+    });
+
     server.listen(HUB_PORT, () => {
         logger.info(`[Hub] API/UI listening on http://localhost:${HUB_PORT}`);
     });

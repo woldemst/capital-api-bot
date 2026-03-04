@@ -14,8 +14,8 @@ export const API = {
 
 // Trading Sessions (UTC times)
 const SESSION_SYMBOLS = {
-    LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP"],
-    NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD"],
+    LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+    NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
     SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
     TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
 };
@@ -77,7 +77,7 @@ export const RISK = {
     CRYPTO_PER_TRADE: 0.04, // 4% risk per crypto trade
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     GUARDS: {
-        MAX_DAILY_LOSS_PCT: 0.02, // stop new entries after -2% estimated realized day PnL
+        MAX_DAILY_LOSS_PCT: 0, // disabled: no daily-loss entry block
         MAX_OPEN_RISK_PCT: 0.25, // cap estimated total open risk across all positions
         MAX_LOSS_STREAK: 3, // consecutive losing closes before cooldown
         LOSS_STREAK_COOLDOWN_MINUTES: 0, // disabled

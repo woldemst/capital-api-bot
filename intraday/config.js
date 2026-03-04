@@ -1,6 +1,6 @@
 export const SESSION_SYMBOLS = {
-    LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP"],
-    NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD"],
+    LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
+    NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
     SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
     TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
 };
@@ -94,7 +94,94 @@ export const DEFAULT_INTRADAY_CONFIG = {
         },
         sameBarFillPriority: "STOP_FIRST",
     },
+    pairProfiles: {
+        JPY_MAJOR_SCALP: {
+            context: {
+                adxTrendMin: 35,
+            },
+            trigger: {
+                requireDisplacement: false,
+            },
+        },
+        CHF_MAJOR_SCALP: {
+            context: {
+                adxTrendMin: 35,
+            },
+            trigger: {
+                requireDisplacement: false,
+            },
+        },
+    },
+    pairProfileBySymbol: {
+        USDJPY: "JPY_MAJOR_SCALP",
+        USDCHF: "CHF_MAJOR_SCALP",
+    },
+    pairOverrides: {},
 };
+
+const NESTED_OBJECT_KEYS = ["guardrails", "intradayOnly", "context", "setup", "trigger", "risk", "management", "backtest", "news", "sessionsUtc"];
+
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function mergeIntradayConfig(baseConfig = {}, overrideConfig = {}) {
+    const base = isPlainObject(baseConfig) ? baseConfig : {};
+    const override = isPlainObject(overrideConfig) ? overrideConfig : {};
+
+    const merged = {
+        ...base,
+        ...override,
+    };
+
+    for (const key of NESTED_OBJECT_KEYS) {
+        if (!isPlainObject(base[key]) && !isPlainObject(override[key])) continue;
+        merged[key] = {
+            ...(isPlainObject(base[key]) ? base[key] : {}),
+            ...(isPlainObject(override[key]) ? override[key] : {}),
+        };
+    }
+
+    const basePairProfileBySymbol = isPlainObject(base.pairProfileBySymbol) ? base.pairProfileBySymbol : {};
+    const overridePairProfileBySymbol = isPlainObject(override.pairProfileBySymbol) ? override.pairProfileBySymbol : {};
+    merged.pairProfileBySymbol = {
+        ...basePairProfileBySymbol,
+        ...overridePairProfileBySymbol,
+    };
+
+    const basePairOverrides = isPlainObject(base.pairOverrides) ? base.pairOverrides : {};
+    const overridePairOverrides = isPlainObject(override.pairOverrides) ? override.pairOverrides : {};
+    merged.pairOverrides = {
+        ...basePairOverrides,
+        ...overridePairOverrides,
+    };
+
+    const basePairProfiles = isPlainObject(base.pairProfiles) ? base.pairProfiles : {};
+    const overridePairProfiles = isPlainObject(override.pairProfiles) ? override.pairProfiles : {};
+    const profileNames = new Set([...Object.keys(basePairProfiles), ...Object.keys(overridePairProfiles)]);
+    const mergedPairProfiles = {};
+    for (const profileName of profileNames) {
+        const baseProfile = isPlainObject(basePairProfiles[profileName]) ? basePairProfiles[profileName] : {};
+        const overrideProfile = isPlainObject(overridePairProfiles[profileName]) ? overridePairProfiles[profileName] : {};
+        mergedPairProfiles[profileName] = mergeIntradayConfig(baseProfile, overrideProfile);
+    }
+    merged.pairProfiles = mergedPairProfiles;
+
+    return merged;
+}
+
+export function resolveIntradayConfigForSymbol(config = DEFAULT_INTRADAY_CONFIG, symbol = "") {
+    const mergedBase = mergeIntradayConfig(DEFAULT_INTRADAY_CONFIG, config);
+    const upperSymbol = String(symbol || "").toUpperCase();
+    if (!upperSymbol) return mergedBase;
+
+    const profileNameRaw = mergedBase?.pairProfileBySymbol?.[upperSymbol];
+    const profileName = typeof profileNameRaw === "string" ? profileNameRaw.trim() : "";
+    const profileOverrides = profileName && isPlainObject(mergedBase?.pairProfiles?.[profileName]) ? mergedBase.pairProfiles[profileName] : {};
+    const symbolOverrides = isPlainObject(mergedBase?.pairOverrides?.[upperSymbol]) ? mergedBase.pairOverrides[upperSymbol] : {};
+
+    return mergeIntradayConfig(mergeIntradayConfig(mergedBase, profileOverrides), symbolOverrides);
+}
 
 export function isCryptoSymbol(symbol) {
     return CRYPTO_SYMBOLS.includes(String(symbol || "").toUpperCase());

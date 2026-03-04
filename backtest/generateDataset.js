@@ -146,6 +146,7 @@ function parseCandleRow(candle) {
     const ts = new Date(candle?.timestamp).toISOString();
     if (!ts) return null;
     const row = {
+        ...(candle || {}),
         timestamp: ts,
         open: toNumber(candle.open),
         high: toNumber(candle.high),
@@ -166,6 +167,17 @@ function mergeCandles(existing, incoming) {
     for (const candle of incoming || []) {
         const row = parseCandleRow(candle);
         if (!row) continue;
+        const current = map.get(row.timestamp);
+        if (
+            current &&
+            current.open === row.open &&
+            current.high === row.high &&
+            current.low === row.low &&
+            current.close === row.close
+        ) {
+            map.set(row.timestamp, { ...current, ...row });
+            continue;
+        }
         map.set(row.timestamp, row);
     }
     return [...map.values()]
@@ -354,22 +366,85 @@ async function fetchForward(symbol, interval, startAt, endAt, maxChunks) {
 
 async function buildRowsWithIndicators(candles) {
     if (!INCLUDE_INDICATORS) return candles;
-    const rows = [];
-    for (let i = 0; i < candles.length; i++) {
-        const candle = candles[i];
-        if (i + 1 < INDICATOR_WARMUP_BARS) {
-            rows.push({ ...candle });
-            continue;
+    const hasIndicators = (row) =>
+        row &&
+        Object.prototype.hasOwnProperty.call(row, "ema9") &&
+        Object.prototype.hasOwnProperty.call(row, "ema20") &&
+        Object.prototype.hasOwnProperty.call(row, "ema50") &&
+        Object.prototype.hasOwnProperty.call(row, "rsi") &&
+        Object.prototype.hasOwnProperty.call(row, "adx") &&
+        Object.prototype.hasOwnProperty.call(row, "macd") &&
+        Object.prototype.hasOwnProperty.call(row, "trend");
+
+    let firstMissingIndex = -1;
+    for (let i = INDICATOR_WARMUP_BARS - 1; i < candles.length; i++) {
+        if (!hasIndicators(candles[i])) {
+            firstMissingIndex = i;
+            break;
         }
+    }
+
+    if (firstMissingIndex === -1) {
+        return candles;
+    }
+
+    const recalcStartIndex = Math.max(0, firstMissingIndex - INDICATOR_LOOKBACK + 1);
+    const rows = candles.map((candle) => ({ ...candle }));
+    let processed = 0;
+    const totalToProcess = candles.length - recalcStartIndex;
+
+    for (let i = recalcStartIndex; i < candles.length; i++) {
+        if (i + 1 < INDICATOR_WARMUP_BARS) continue;
         const startIndex = Math.max(0, i - INDICATOR_LOOKBACK + 1);
         const slice = candles.slice(startIndex, i + 1);
         const indicators = (await calcIndicators(slice)) || {};
-        rows.push({ ...candle, ...indicators });
-        if ((i + 1) % 5000 === 0) {
-            logger.info(`🧮 Indicator progress ${i + 1}/${candles.length}`);
+        rows[i] = { ...rows[i], ...indicators };
+        processed += 1;
+        if (processed % 5000 === 0) {
+            logger.info(`🧮 Indicator progress ${processed}/${totalToProcess}`);
         }
     }
+
+    if (processed > 0 && processed % 5000 !== 0) {
+        logger.info(`🧮 Indicator progress ${processed}/${totalToProcess}`);
+    }
     return rows;
+}
+
+function sameCandleSeries(left, right) {
+    if ((left?.length || 0) !== (right?.length || 0)) return false;
+    for (let i = 0; i < left.length; i++) {
+        if (
+            left[i].timestamp !== right[i].timestamp ||
+            left[i].open !== right[i].open ||
+            left[i].high !== right[i].high ||
+            left[i].low !== right[i].low ||
+            left[i].close !== right[i].close
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function hasMissingIndicators(rows) {
+    if (!INCLUDE_INDICATORS) return false;
+    for (let i = INDICATOR_WARMUP_BARS - 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (
+            !row ||
+            !Object.prototype.hasOwnProperty.call(row, "ema9") ||
+            !Object.prototype.hasOwnProperty.call(row, "ema20") ||
+            !Object.prototype.hasOwnProperty.call(row, "ema50") ||
+            !Object.prototype.hasOwnProperty.call(row, "rsi") ||
+            !Object.prototype.hasOwnProperty.call(row, "adx") ||
+            !Object.prototype.hasOwnProperty.call(row, "macd") ||
+            !Object.prototype.hasOwnProperty.call(row, "trend")
+        ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function writeDatasetRows(filePath, rows) {
@@ -472,6 +547,11 @@ async function generateDataset() {
                 const merged = mergeCandles(mergeCandles(existing, older), newer);
                 if (!merged.length) {
                     logger.warn(`⚠️ No candles for ${symbol} ${timeframeName}`);
+                    continue;
+                }
+
+                if (!migratingFormat && sameCandleSeries(existing, merged) && !hasMissingIndicators(merged)) {
+                    logger.info(`⏭️ ${symbol} ${timeframeName}: candles unchanged and indicators already present, skipping write`);
                     continue;
                 }
 

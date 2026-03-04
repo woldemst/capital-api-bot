@@ -374,7 +374,7 @@ class TradingService {
 
         const todayEstimatedPnlPct = Number(period.estimatedPnlPct) || 0;
         const todayEstimatedLossPctAbs = Math.abs(Math.min(0, todayEstimatedPnlPct));
-        if (todayEstimatedLossPctAbs >= this.dailyLossLimitPct) {
+        if (this.dailyLossLimitPct > 0 && todayEstimatedLossPctAbs >= this.dailyLossLimitPct) {
             this.logGuardBlock(
                 "daily_loss_limit",
                 `[RiskGuard] Daily loss limit reached (${this.pctText(todayEstimatedLossPctAbs)} >= ${this.pctText(this.dailyLossLimitPct)}). Blocking new entries.`,

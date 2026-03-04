@@ -1,4 +1,4 @@
-import { DEFAULT_INTRADAY_CONFIG } from "./config.js";
+import { DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig, resolveIntradayConfigForSymbol } from "./config.js";
 import { evaluateGuardrails } from "./guardrails.js";
 import { ensureStateDay, getOpenPosition } from "./state.js";
 import { step1MarketTimeWindow } from "./step1MarketTimeWindow.js";
@@ -61,23 +61,23 @@ function buildMinuteSnapshotRecord({ strategyId, snapshot, decision }) {
 }
 
 export function createIntradaySevenStepEngine(userConfig = {}) {
-    const config = {
-        ...DEFAULT_INTRADAY_CONFIG,
-        ...userConfig,
-        guardrails: { ...DEFAULT_INTRADAY_CONFIG.guardrails, ...(userConfig.guardrails || {}) },
-        intradayOnly: { ...DEFAULT_INTRADAY_CONFIG.intradayOnly, ...(userConfig.intradayOnly || {}) },
-        context: { ...DEFAULT_INTRADAY_CONFIG.context, ...(userConfig.context || {}) },
-        setup: { ...DEFAULT_INTRADAY_CONFIG.setup, ...(userConfig.setup || {}) },
-        trigger: { ...DEFAULT_INTRADAY_CONFIG.trigger, ...(userConfig.trigger || {}) },
-        risk: { ...DEFAULT_INTRADAY_CONFIG.risk, ...(userConfig.risk || {}) },
-        management: { ...DEFAULT_INTRADAY_CONFIG.management, ...(userConfig.management || {}) },
-        backtest: { ...DEFAULT_INTRADAY_CONFIG.backtest, ...(userConfig.backtest || {}) },
-    };
+    const baseConfig = mergeIntradayConfig(DEFAULT_INTRADAY_CONFIG, userConfig);
+    const symbolConfigCache = new Map();
+
+    function getResolvedConfigForSymbol(symbol) {
+        const symbolKey = String(symbol || "").toUpperCase();
+        if (!symbolKey) return baseConfig;
+        if (symbolConfigCache.has(symbolKey)) return symbolConfigCache.get(symbolKey);
+        const resolvedConfig = resolveIntradayConfigForSymbol(baseConfig, symbolKey);
+        symbolConfigCache.set(symbolKey, resolvedConfig);
+        return resolvedConfig;
+    }
 
     function evaluateSnapshot({ snapshot, state }) {
         ensureStateDay(state, snapshot.timestamp || Date.now());
 
         const symbol = String(snapshot.symbol || "").toUpperCase();
+        const config = getResolvedConfigForSymbol(symbol);
         const step1 = step1MarketTimeWindow(
             {
                 nowUtc: snapshot.timestamp,
@@ -224,7 +224,8 @@ export function createIntradaySevenStepEngine(userConfig = {}) {
     }
 
     return {
-        config,
+        config: baseConfig,
+        getResolvedConfigForSymbol,
         evaluateSnapshot,
     };
 }
