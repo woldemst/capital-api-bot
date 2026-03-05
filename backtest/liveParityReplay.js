@@ -7,10 +7,14 @@ import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, regist
 import { RISK, SESSIONS } from "../config.js";
 
 const DATA_DIR = path.join(process.cwd(), "backtest", "generated-dataset");
-const TARGET_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"];
+const TARGET_SYMBOLS = (process.env.LIVE_PARITY_SYMBOLS || "EURUSD,GBPUSD,USDJPY,USDCHF")
+    .split(",")
+    .map((s) => String(s || "").trim().toUpperCase())
+    .filter(Boolean);
 const TARGET_TIMEFRAMES = ["M1", "M5", "M15", "H1"];
 
 const START_CAPITAL = 500;
+const DAYS_BACK = Number.isFinite(Number(process.env.LIVE_PARITY_DAYS)) ? Number(process.env.LIVE_PARITY_DAYS) : null;
 const MONTHS_BACK = Number.isFinite(Number(process.env.LIVE_PARITY_MONTHS_BACK)) ? Number(process.env.LIVE_PARITY_MONTHS_BACK) : 2;
 const PHASE1_RISK_PCT = Number.isFinite(Number(process.env.LIVE_PARITY_RISK_PCT_PHASE1))
     ? Number(process.env.LIVE_PARITY_RISK_PCT_PHASE1)
@@ -261,9 +265,14 @@ function renderTable(headers, rows) {
 async function run() {
     const now = new Date();
     const endMs = now.getTime();
-    const rangeStart = new Date(now);
-    rangeStart.setUTCMonth(rangeStart.getUTCMonth() - MONTHS_BACK);
-    const startMs = rangeStart.getTime();
+    let startMs;
+    if (Number.isFinite(DAYS_BACK) && DAYS_BACK > 0) {
+        startMs = endMs - DAYS_BACK * 24 * 60 * 60 * 1000;
+    } else {
+        const rangeStart = new Date(now);
+        rangeStart.setUTCMonth(rangeStart.getUTCMonth() - MONTHS_BACK);
+        startMs = rangeStart.getTime();
+    }
     const warmupStartMs = startMs - 3 * 24 * 60 * 60 * 1000;
 
     const loaded = await Promise.all(TARGET_SYMBOLS.map((s) => loadSymbolData(s, warmupStartMs, endMs)));
