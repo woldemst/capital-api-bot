@@ -1,5 +1,5 @@
 import { getOpenPositions, getHistorical } from "../api.js";
-import { CRYPTO_SYMBOLS, SESSIONS } from "../config.js";
+import { CRYPTO_SYMBOLS, SESSIONS, LIVE_SYMBOLS } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import tradingService from "../services/trading.js";
 import webSocketService from "../services/websocket.js";
@@ -9,12 +9,24 @@ import { tradeTracker } from "../utils/tradeLogger.js";
 import logger from "../utils/logger.js";
 import { priceLogger } from "../utils/priceLogger.js";
 
+const LIVE_SYMBOL_ALLOWLIST = new Set(
+    (Array.isArray(LIVE_SYMBOLS) ? LIVE_SYMBOLS : [])
+        .map((symbol) => String(symbol || "").trim().toUpperCase())
+        .filter(Boolean),
+);
+
+function isLiveSymbolEnabled(symbol) {
+    if (!LIVE_SYMBOL_ALLOWLIST.size) return true;
+    return LIVE_SYMBOL_ALLOWLIST.has(String(symbol || "").toUpperCase());
+}
+
 function getConfiguredForexSymbols() {
     const set = new Set();
     for (const [sessionName, session] of Object.entries(SESSIONS || {})) {
         if (String(sessionName).toUpperCase() === "CRYPTO") continue;
         for (const symbol of session?.SYMBOLS || []) {
-            if (symbol) set.add(String(symbol).toUpperCase());
+            const normalized = String(symbol || "").toUpperCase();
+            if (normalized && isLiveSymbolEnabled(normalized)) set.add(normalized);
         }
     }
     return [...set];
@@ -34,7 +46,9 @@ function isForexMarketOpenUtc(now = new Date()) {
 
 function getPriceLoggingSymbols(now = new Date()) {
     const forexSymbols = isForexMarketOpenUtc(now) ? getConfiguredForexSymbols() : [];
-    const cryptoSymbols = (CRYPTO_SYMBOLS || []).map((symbol) => String(symbol).toUpperCase());
+    const cryptoSymbols = (CRYPTO_SYMBOLS || [])
+        .map((symbol) => String(symbol || "").toUpperCase())
+        .filter((symbol) => isLiveSymbolEnabled(symbol));
     return [...new Set([...forexSymbols, ...cryptoSymbols])];
 }
 

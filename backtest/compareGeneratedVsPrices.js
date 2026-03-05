@@ -2,6 +2,7 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import readline from "readline";
+import { sanitizePriceSnapshotRows } from "./priceSnapshotSanity.js";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
 import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
@@ -16,6 +17,9 @@ const TARGET_SYMBOLS = (process.env.BT_COMPARE_SYMBOLS || "EURUSD,GBPUSD,USDJPY"
     .filter(Boolean);
 const LOOKBACK_DAYS = Number.isFinite(Number(process.env.BT_COMPARE_DAYS)) ? Number(process.env.BT_COMPARE_DAYS) : 3;
 const START_CAPITAL = Number.isFinite(Number(process.env.BT_COMPARE_START_CAPITAL)) ? Number(process.env.BT_COMPARE_START_CAPITAL) : 500;
+const MIN_VALID_PRICE_ROW_RATIO = Number.isFinite(Number(process.env.BT_COMPARE_MIN_VALID_ROW_RATIO))
+    ? Number(process.env.BT_COMPARE_MIN_VALID_ROW_RATIO)
+    : 0;
 
 const FOREX_RISK_PCT = Number(RISK?.PER_TRADE) || 0.05;
 const MAX_POSITIONS = Number(RISK?.MAX_POSITIONS) || 5;
@@ -396,7 +400,16 @@ async function readLastJsonlLine(filePath) {
     }
 }
 
-async function fileTimestampRange(filePath) {
+async function fileTimestampRange(filePath, { priceSanitySymbol = null } = {}) {
+    if (priceSanitySymbol) {
+        const rows = await loadJsonlRows(filePath, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, {
+            priceSanitySymbol,
+            quietSanityLogs: true,
+        });
+        if (!rows.length) return null;
+        return { firstTs: rows[0].tsMs, lastTs: rows[rows.length - 1].tsMs };
+    }
+
     const firstLine = await readFirstJsonlLine(filePath);
     const lastLine = await readLastJsonlLine(filePath);
     if (!firstLine || !lastLine) return null;
@@ -416,7 +429,7 @@ async function fileTimestampRange(filePath) {
     return { firstTs, lastTs };
 }
 
-async function loadJsonlRows(filePath, minTsMs, maxTsMs) {
+async function loadJsonlRows(filePath, minTsMs, maxTsMs, { priceSanitySymbol = null, quietSanityLogs = false } = {}) {
     const rows = [];
     if (!fs.existsSync(filePath)) return rows;
     const stream = fs.createReadStream(filePath, { encoding: "utf8" });
@@ -435,7 +448,23 @@ async function loadJsonlRows(filePath, minTsMs, maxTsMs) {
         if (tsMs > maxTsMs) break;
         rows.push({ ...row, tsMs });
     }
-    return rows;
+    if (!priceSanitySymbol) return rows;
+
+    const { validRows, stats } = sanitizePriceSnapshotRows(rows, {
+        symbol: priceSanitySymbol,
+        minValidRatio: MIN_VALID_PRICE_ROW_RATIO,
+    });
+    if (!quietSanityLogs && stats.dropped > 0) {
+        console.warn(
+            `[DataSanity] ${priceSanitySymbol}: dropped ${stats.dropped}/${stats.total} invalid price rows (${(stats.validRatio * 100).toFixed(2)}% valid).`,
+        );
+    }
+    if (!quietSanityLogs && stats.skipFile) {
+        console.warn(
+            `[DataSanity] ${priceSanitySymbol}: skipped for validation (valid ratio ${(stats.validRatio * 100).toFixed(2)}% < ${(MIN_VALID_PRICE_ROW_RATIO * 100).toFixed(2)}%).`,
+        );
+    }
+    return validRows;
 }
 
 function createSimulationContext() {
@@ -850,7 +879,7 @@ async function simulatePrices({ startMs, endMs, warmupStartMs }) {
     const rowsBySymbol = new Map();
     for (const symbol of TARGET_SYMBOLS) {
         const filePath = path.join(PRICES_DIR, `${symbol}.jsonl`);
-        const rows = await loadJsonlRows(filePath, warmupStartMs, endMs);
+        const rows = await loadJsonlRows(filePath, warmupStartMs, endMs, { priceSanitySymbol: symbol });
         rowsBySymbol.set(symbol, rows.map((r) => ({ ...r, symbol })));
     }
 
@@ -1204,7 +1233,7 @@ async function run() {
 
     for (const symbol of TARGET_SYMBOLS) {
         generatedRanges[symbol] = await fileTimestampRange(path.join(GENERATED_DIR, `${symbol}_M1.jsonl`));
-        pricesRanges[symbol] = await fileTimestampRange(path.join(PRICES_DIR, `${symbol}.jsonl`));
+        pricesRanges[symbol] = await fileTimestampRange(path.join(PRICES_DIR, `${symbol}.jsonl`), { priceSanitySymbol: symbol });
     }
 
     for (const symbol of TARGET_SYMBOLS) {

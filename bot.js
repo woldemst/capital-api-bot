@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, TRADING_WINDOWS, NEWS_GUARD } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, TRADING_WINDOWS, NEWS_GUARD, LIVE_SYMBOLS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
@@ -37,6 +37,11 @@ class TradingBot {
 
         this.openedBrockerDealIds = [];
         this.activeSymbols = [];
+        this.liveSymbolAllowlist = new Set(
+            (Array.isArray(LIVE_SYMBOLS) ? LIVE_SYMBOLS : [])
+                .map((symbol) => String(symbol || "").trim().toUpperCase())
+                .filter(Boolean),
+        );
 
         this.allowedTradingWindows = TRADING_WINDOWS.FOREX.map((window) => ({ ...window }));
         this.cryptoTradingWindows = TRADING_WINDOWS.CRYPTO.map((window) => ({ ...window }));
@@ -46,6 +51,12 @@ class TradingBot {
         this.rolloverBufferMinutes = 10;
         this.lastRolloverCloseKey = null;
         this.tokens = null;
+
+        if (this.liveSymbolAllowlist.size) {
+            logger.info(`[Bot] LIVE_SYMBOLS filter active (${this.liveSymbolAllowlist.size}): ${[...this.liveSymbolAllowlist].join(", ")}`);
+        } else {
+            logger.info("[Bot] LIVE_SYMBOLS filter inactive (all session symbols enabled).");
+        }
     }
 
     async initialize() {
@@ -263,6 +274,11 @@ class TradingBot {
         return CRYPTO_SYMBOLS.includes(symbol);
     }
 
+    isLiveSymbolEnabled(symbol) {
+        if (!this.liveSymbolAllowlist.size) return true;
+        return this.liveSymbolAllowlist.has(String(symbol || "").toUpperCase());
+    }
+
     getActiveSessionNames(now = new Date()) {
         const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
         const activeSessionNames = [];
@@ -300,13 +316,18 @@ class TradingBot {
 
         // Combine symbols from all active sessions, remove duplicates
         const combinedSet = new Set();
-        activeSessions.forEach((arr) => (arr || []).forEach((symbol) => combinedSet.add(symbol)));
+        activeSessions.forEach((arr) => (arr || []).forEach((symbol) => combinedSet.add(String(symbol || "").toUpperCase())));
         const sessionSymbols = [...combinedSet];
         const tradableSymbols = [];
         const blockedByReason = {};
         const blockedDetails = [];
 
         for (const symbol of sessionSymbols) {
+            if (!this.isLiveSymbolEnabled(symbol)) {
+                blockedByReason.not_in_live_symbols = (blockedByReason.not_in_live_symbols || 0) + 1;
+                blockedDetails.push(`${symbol}:not_in_live_symbols`);
+                continue;
+            }
             const checkContext = { now, currentMinutes, rejectReason: null, rejectDetail: null };
             if (await this.isTradingAllowed(symbol, checkContext)) {
                 tradableSymbols.push(symbol);
@@ -358,18 +379,16 @@ class TradingBot {
 
     async fetchAllCandles(symbol, timeframes, historyLength) {
         try {
-            const [d1Data, h4Data, h1Data, m15Data, m5Data, m1Data] = await Promise.all([
-                getHistorical(symbol, timeframes.D1, historyLength),
-                getHistorical(symbol, timeframes.H4, historyLength),
+            const [h1Data, m15Data, m5Data, m1Data] = await Promise.all([
                 getHistorical(symbol, timeframes.H1, historyLength),
                 getHistorical(symbol, timeframes.M15, historyLength),
                 getHistorical(symbol, timeframes.M5, historyLength),
                 getHistorical(symbol, timeframes.M1, historyLength),
             ]);
             logger.debug(
-                `[CandleFetch] ${symbol}: fetched ${timeframes.D1}, ${timeframes.H4}, ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`,
+                `[CandleFetch] ${symbol}: fetched ${timeframes.H1}, ${timeframes.M15}, ${timeframes.M5}, ${timeframes.M1}`,
             );
-            return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
+            return { h1Data, m15Data, m5Data, m1Data };
         } catch (error) {
             logger.error(`[CandleFetch] Error fetching candles for ${symbol}: ${error.message}`);
             return {};
@@ -381,33 +400,31 @@ class TradingBot {
         logger.info(`[Analyze] Processing ${symbol}`);
 
         const historyLength = this.getHistoryLengthForSymbol(symbol);
-        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, historyLength);
+        const { h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, historyLength);
 
-        if (!d1Data?.prices || !h4Data?.prices || !h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
+        if (!h1Data?.prices || !m15Data?.prices || !m5Data?.prices || !m1Data?.prices) {
             logger.warn(`[bot.js][analyzeSymbol] Missing candle data for ${symbol}, skipping analysis.`);
             return;
         }
 
-        this.storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data });
-        const { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles } = this.getCandleHistory(symbol);
+        this.storeCandleHistory(symbol, { h1Data, m15Data, m5Data, m1Data });
+        const { h1Candles, m15Candles, m5Candles, m1Candles } = this.getCandleHistory(symbol);
 
-        if (!d1Candles || !h4Candles || !h1Candles || !m15Candles || !m5Candles || !m1Candles) {
+        if (!h1Candles || !m15Candles || !m5Candles || !m1Candles) {
             logger.error(
-                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( D1: ${!!d1Candles}, H4: ${!!h4Candles}, H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`,
+                `[bot.js][analyzeSymbol] Incomplete candle data for ${symbol} ( H1: ${!!h1Candles}, M15: ${!!m15Candles}, M5: ${!!m5Candles}, M1: ${!!m1Candles} skipping analysis.`,
             );
             return;
         }
 
         const indicators = await this.buildIndicatorsSnapshot({
-            d1Candles,
-            h4Candles,
             h1Candles,
             m15Candles,
             m5Candles,
             m1Candles,
         });
 
-        const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
+        const candles = { h1Candles, m15Candles, m5Candles, m1Candles };
 
         // --- Fetch real-time bid/ask ---
         const latestM1Timestamp = m1Candles?.[m1Candles.length - 1]?.timestamp;
@@ -419,7 +436,7 @@ class TradingBot {
             return sessionSymbols.includes(symbol);
         });
         let newsBlocked = false;
-        if (!this.isCryptoSymbol(symbol)) {
+        if (NEWS_GUARD.ENABLED && !this.isCryptoSymbol(symbol)) {
             try {
                 const news = await getNewsStatus(symbol, {
                     now: new Date(timestamp),
@@ -531,11 +548,9 @@ class TradingBot {
         };
     }
 
-    storeCandleHistory(symbol, { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data }) {
+    storeCandleHistory(symbol, { h1Data, m15Data, m5Data, m1Data }) {
         const historyLimit = this.getHistoryLengthForSymbol(symbol);
         this.candleHistory[symbol] = {
-            D1: d1Data.prices.slice(-historyLimit) || [],
-            H4: h4Data.prices.slice(-historyLimit) || [],
             H1: h1Data.prices.slice(-historyLimit) || [],
             M15: m15Data.prices.slice(-historyLimit) || [],
             M5: m5Data.prices.slice(-historyLimit) || [],
@@ -546,8 +561,6 @@ class TradingBot {
     getCandleHistory(symbol) {
         const history = this.candleHistory[symbol] || {};
         return {
-            d1Candles: history.D1,
-            h4Candles: history.H4,
             h1Candles: history.H1,
             m15Candles: history.M15,
             m5Candles: history.M5,
@@ -555,10 +568,8 @@ class TradingBot {
         };
     }
 
-    async buildIndicatorsSnapshot({ d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles }) {
+    async buildIndicatorsSnapshot({ h1Candles, m15Candles, m5Candles, m1Candles }) {
         return {
-            d1: await calcIndicators(d1Candles),
-            h4: await calcIndicators(h4Candles),
             h1: await calcIndicators(h1Candles),
             m15: await calcIndicators(m15Candles),
             m5: await calcIndicators(m5Candles),
@@ -611,18 +622,24 @@ class TradingBot {
             return false;
         }
 
-        const news = await getNewsStatus(symbol, {
-            now,
-            includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS,
-            windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT,
-        });
+        if (NEWS_GUARD.ENABLED) {
+            try {
+                const news = await getNewsStatus(symbol, {
+                    now,
+                    includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS,
+                    windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT,
+                });
 
-        if (news.blocked) {
-            const titles = news.blockingEvents.map((e) => `${e.impact}:${e.country}:${e.title}`);
-            context.rejectReason = "news_blocked";
-            context.rejectDetail = titles.slice(0, 2).join(" | ");
-            logger.info(`[Bot][News] Trading blocked for ${symbol} until ${news.blockUntilUtc?.toISOString()}. Events: ${titles.join(" | ")}`);
-            return false;
+                if (news.blocked) {
+                    const titles = news.blockingEvents.map((e) => `${e.impact}:${e.country}:${e.title}`);
+                    context.rejectReason = "news_blocked";
+                    context.rejectDetail = titles.slice(0, 2).join(" | ");
+                    logger.info(`[Bot][News] Trading blocked for ${symbol} until ${news.blockUntilUtc?.toISOString()}. Events: ${titles.join(" | ")}`);
+                    return false;
+                }
+            } catch (error) {
+                logger.warn(`[Bot][News] News check failed for ${symbol}; fail-open applied: ${error.message}`);
+            }
         }
 
         return true;

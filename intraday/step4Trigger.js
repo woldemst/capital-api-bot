@@ -77,7 +77,10 @@ export function step4Trigger(input, config = DEFAULT_INTRADAY_CONFIG) {
     if (fvg.exists) triggerReasons.push("fvg_detected");
 
     const structureRequired = Boolean(params.requireStructureBreak);
-    const triggerOk = Boolean(displacementOk && (!structureRequired || structureBreakOk));
+    const fvgRequired = Boolean(params.requireFvg);
+    if (structureRequired && !structureBreakOk) triggerReasons.push("structure_break_required_not_found");
+    if (fvgRequired && !fvg.exists) triggerReasons.push("fvg_required_not_found");
+    const triggerOk = Boolean(displacementOk && (!structureRequired || structureBreakOk) && (!fvgRequired || fvg.exists));
 
     let triggerScore = 0;
     if (triggerOk) {
@@ -103,6 +106,8 @@ export function step4Trigger(input, config = DEFAULT_INTRADAY_CONFIG) {
             displacementOk,
             structureBreakOk,
             fvgDetected: fvg.exists,
+            structureRequired,
+            fvgRequired,
             m5Atr: atr,
             m5Body: currentBody,
         },

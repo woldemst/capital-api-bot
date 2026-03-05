@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { getHistorical, getMarketDetails } from "../api.js";
 import { calcIndicators } from "../indicators/indicators.js";
-import { ANALYSIS, SESSIONS, CRYPTO_SYMBOLS } from "../config.js";
+import { ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, NEWS_GUARD } from "../config.js";
 import logger from "./logger.js";
 
 const { TIMEFRAMES } = ANALYSIS;
@@ -174,10 +174,6 @@ class PriceLogger {
 
     async fetchAllCandles(symbol, timeframes, historyLength) {
         try {
-            const d1Data = await getHistorical(symbol, timeframes.D1, historyLength);
-            await this.sleep(this.requestDelayMs);
-            const h4Data = await getHistorical(symbol, timeframes.H4, historyLength);
-            await this.sleep(this.requestDelayMs);
             const h1Data = await getHistorical(symbol, timeframes.H1, historyLength);
             await this.sleep(this.requestDelayMs);
             const m15Data = await getHistorical(symbol, timeframes.M15, historyLength);
@@ -185,7 +181,7 @@ class PriceLogger {
             const m5Data = await getHistorical(symbol, timeframes.M5, historyLength);
             await this.sleep(this.requestDelayMs);
             const m1Data = await getHistorical(symbol, timeframes.M1, historyLength);
-            return { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data };
+            return { h1Data, m15Data, m5Data, m1Data };
         } catch (error) {
             logger.warn(`[PriceLogger] Candle fetch failed for ${symbol}: ${error.message}`);
             return {};
@@ -193,21 +189,17 @@ class PriceLogger {
     }
 
     async buildIndicatorsSnapshot(symbol) {
-        const { d1Data, h4Data, h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.historyLength);
-        const d1Candles = d1Data?.prices?.slice(-this.historyLength) || [];
-        const h4Candles = h4Data?.prices?.slice(-this.historyLength) || [];
+        const { h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.historyLength);
         const h1Candles = h1Data?.prices?.slice(-this.historyLength) || [];
         const m15Candles = m15Data?.prices?.slice(-this.historyLength) || [];
         const m5Candles = m5Data?.prices?.slice(-this.historyLength) || [];
         const m1Candles = m1Data?.prices?.slice(-this.historyLength) || [];
 
-        if (!d1Candles.length || !h4Candles.length || !h1Candles.length || !m15Candles.length || !m5Candles.length || !m1Candles.length) {
+        if (!h1Candles.length || !m15Candles.length || !m5Candles.length || !m1Candles.length) {
             return null;
         }
 
         const indicators = {
-            d1: await calcIndicators(d1Candles, symbol, TIMEFRAMES.D1),
-            h4: await calcIndicators(h4Candles, symbol, TIMEFRAMES.H4),
             h1: await calcIndicators(h1Candles, symbol, TIMEFRAMES.H1),
             m15: await calcIndicators(m15Candles, symbol, TIMEFRAMES.M15),
             m5: await calcIndicators(m5Candles, symbol, TIMEFRAMES.M5),
@@ -215,8 +207,6 @@ class PriceLogger {
         };
 
         const candles = {
-            d1: this.getLastClosedCandle(d1Candles),
-            h4: this.getLastClosedCandle(h4Candles),
             h1: this.getLastClosedCandle(h1Candles),
             m15: this.getLastClosedCandle(m15Candles),
             m5: this.getLastClosedCandle(m5Candles),
@@ -278,11 +268,18 @@ class PriceLogger {
             const referencePrice = mid !== null ? mid : m1Close;
             const sessions = this.getActiveSessionsUtc();
             let newsBlocked = false;
-            try {
-                const { isNewsTime } = await import("./newsChecker.js");
-                newsBlocked = await isNewsTime(symbol);
-            } catch (error) {
-                logger.warn(`[PriceLogger] News check failed for ${symbol}: ${error.message}`);
+            if (NEWS_GUARD.ENABLED) {
+                try {
+                    const { getNewsStatus } = await import("./newsChecker.js");
+                    const newsStatus = await getNewsStatus(symbol, {
+                        now: marketTimestamp ? new Date(marketTimestamp) : new Date(),
+                        includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS,
+                        windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT,
+                    });
+                    newsBlocked = Boolean(newsStatus?.blocked);
+                } catch (error) {
+                    logger.warn(`[PriceLogger] News check failed for ${symbol}: ${error.message}`);
+                }
             }
 
             const payload = {

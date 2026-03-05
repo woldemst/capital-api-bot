@@ -7,10 +7,31 @@ let sessionStartTime = Date.now();
 const HISTORICAL_CACHE_TTL_MS = 5000;
 const HISTORICAL_MAX_RETRIES = 3;
 const HISTORICAL_RETRY_BASE_MS = 350;
+const HISTORICAL_MIN_INTERVAL_MS = Number.isFinite(Number(process.env.HISTORICAL_MIN_INTERVAL_MS))
+    ? Number(process.env.HISTORICAL_MIN_INTERVAL_MS)
+    : 200;
 const historicalCache = new Map();
+let historicalQueueChain = Promise.resolve();
+let historicalNextAllowedTsMs = 0;
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function scheduleHistoricalRequest(taskFn) {
+    const run = async () => {
+        const now = Date.now();
+        const waitMs = Math.max(0, historicalNextAllowedTsMs - now);
+        if (waitMs > 0) {
+            await sleep(waitMs);
+        }
+        historicalNextAllowedTsMs = Date.now() + HISTORICAL_MIN_INTERVAL_MS;
+        return await taskFn();
+    };
+
+    const taskPromise = historicalQueueChain.then(run, run);
+    historicalQueueChain = taskPromise.catch(() => undefined);
+    return taskPromise;
 }
 
 function isValidDateParts(year, month, day) {
@@ -137,7 +158,7 @@ async function fetchHistoricalWithRetry(symbol, resolution, count) {
 
     for (let attempt = 1; attempt <= HISTORICAL_MAX_RETRIES; attempt += 1) {
         try {
-            const response = await axios.get(url, { headers: getHeaders(true) });
+            const response = await scheduleHistoricalRequest(() => axios.get(url, { headers: getHeaders(true) }));
             return {
                 prices: mapHistoricalPrices(response.data?.prices),
             };

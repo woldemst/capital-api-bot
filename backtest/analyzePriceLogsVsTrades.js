@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { sanitizePriceSnapshotRows } from "./priceSnapshotSanity.js";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
 import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
@@ -7,7 +8,16 @@ import { CRYPTO_SYMBOLS, RISK, SESSIONS } from "../config.js";
 
 const PRICES_DIR = path.join(process.cwd(), "backtest", "prices");
 const LOGS_DIR = path.join(process.cwd(), "backtest", "logs");
-const LOOKBACK_DAYS = 3;
+const LOOKBACK_DAYS = Number.isFinite(Number(process.env.BT_ANALYZE_DAYS)) ? Number(process.env.BT_ANALYZE_DAYS) : 3;
+const SYMBOL_FILTER = new Set(
+    String(process.env.BT_ANALYZE_SYMBOLS || "")
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean),
+);
+const MIN_VALID_PRICE_ROW_RATIO = Number.isFinite(Number(process.env.BT_ANALYZE_MIN_VALID_ROW_RATIO))
+    ? Number(process.env.BT_ANALYZE_MIN_VALID_ROW_RATIO)
+    : 0;
 
 const FOREX_RISK_PCT = Number(RISK?.PER_TRADE) || 0.05;
 const CRYPTO_RISK_PCT = Number(RISK?.CRYPTO_PER_TRADE) || 0.04;
@@ -367,13 +377,30 @@ function readPricesWindow() {
     let maxTs = 0;
     for (const file of files) {
         const symbol = file.replace(".jsonl", "").toUpperCase();
+        if (SYMBOL_FILTER.size && !SYMBOL_FILTER.has(symbol)) continue;
         const rows = loadJsonl(path.join(PRICES_DIR, file))
             .map((r) => ({ ...r, symbol: symbol, tsMs: Date.parse(String(r.timestamp || "")) }))
             .filter((r) => Number.isFinite(r.tsMs))
             .sort((a, b) => a.tsMs - b.tsMs);
         if (!rows.length) continue;
-        maxTs = Math.max(maxTs, rows[rows.length - 1].tsMs);
-        allBySymbol.set(symbol, rows);
+        const { validRows, stats } = sanitizePriceSnapshotRows(rows, {
+            symbol,
+            minValidRatio: MIN_VALID_PRICE_ROW_RATIO,
+        });
+        if (stats.dropped > 0) {
+            console.warn(
+                `[DataSanity] ${symbol}: dropped ${stats.dropped}/${stats.total} invalid price rows (${(stats.validRatio * 100).toFixed(2)}% valid).`,
+            );
+        }
+        if (stats.skipFile) {
+            console.warn(
+                `[DataSanity] ${symbol}: skipped for validation (valid ratio ${(stats.validRatio * 100).toFixed(2)}% < ${(MIN_VALID_PRICE_ROW_RATIO * 100).toFixed(2)}%).`,
+            );
+            continue;
+        }
+        if (!validRows.length) continue;
+        maxTs = Math.max(maxTs, validRows[validRows.length - 1].tsMs);
+        allBySymbol.set(symbol, validRows);
     }
     const startTs = maxTs - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
     const filtered = new Map();
@@ -389,6 +416,7 @@ function readActualTradesWindow(startTs, endTs) {
     const trades = [];
     for (const file of files) {
         const symbol = file.replace(".jsonl", "").toUpperCase();
+        if (SYMBOL_FILTER.size && !SYMBOL_FILTER.has(symbol)) continue;
         const rows = loadJsonl(path.join(LOGS_DIR, file));
         for (const t of rows) {
             const openedAtMs = Date.parse(String(t.openedAt || t.timestamp || ""));

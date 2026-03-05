@@ -1,9 +1,32 @@
-export const SESSION_SYMBOLS = {
+const ENV = process.env;
+
+function parseSymbolCsv(value) {
+    return String(value || "")
+        .split(",")
+        .map((s) => String(s || "").trim().toUpperCase())
+        .filter(Boolean);
+}
+
+const RAW_SESSION_SYMBOLS = {
     LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
     NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
     SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
     TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
 };
+
+const FOREX_SYMBOL_BLOCKLIST_DEFAULT = ["USDCHF"];
+const FOREX_SYMBOL_BLOCKLIST_RAW =
+    ENV.FOREX_SYMBOL_BLOCKLIST === undefined ? FOREX_SYMBOL_BLOCKLIST_DEFAULT.join(",") : ENV.FOREX_SYMBOL_BLOCKLIST;
+const FOREX_SYMBOL_BLOCKLIST = new Set(parseSymbolCsv(FOREX_SYMBOL_BLOCKLIST_RAW));
+
+export const SESSION_SYMBOLS = Object.fromEntries(
+    Object.entries(RAW_SESSION_SYMBOLS).map(([session, symbols]) => [
+        session,
+        (Array.isArray(symbols) ? symbols : [])
+            .map((symbol) => String(symbol || "").trim().toUpperCase())
+            .filter((symbol) => symbol && !FOREX_SYMBOL_BLOCKLIST.has(symbol)),
+    ]),
+);
 
 export const CRYPTO_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
 
@@ -63,6 +86,7 @@ export const DEFAULT_INTRADAY_CONFIG = {
         displacementAtrMultiplier: 0.9,
         requireDisplacement: true,
         requireStructureBreak: false,
+        requireFvg: true,
         useFvgBonus: true,
         invertSignal: false,
         invertSignalH1AdxMin: 0,

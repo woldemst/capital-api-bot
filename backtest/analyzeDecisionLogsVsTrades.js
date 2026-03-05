@@ -3,7 +3,13 @@ import path from "path";
 
 const DECISION_DIR = path.join(process.cwd(), "backtest", "decision-logs");
 const TRADE_LOG_DIR = path.join(process.cwd(), "backtest", "logs");
-const LOOKBACK_DAYS = 3;
+const LOOKBACK_DAYS = Number(process.env.BT_DECISION_DAYS || 3);
+const SYMBOL_FILTER = new Set(
+    String(process.env.BT_DECISION_SYMBOLS || "")
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean),
+);
 
 function loadJsonl(filePath) {
     if (!fs.existsSync(filePath)) return [];
@@ -62,7 +68,10 @@ function readDecisionWindow() {
     }
 
     const startTs = endTs - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-    const filtered = events.filter((e) => e.tsMs >= startTs && e.tsMs <= endTs).sort((a, b) => a.tsMs - b.tsMs);
+    const filtered = events
+        .filter((e) => e.tsMs >= startTs && e.tsMs <= endTs)
+        .filter((e) => !SYMBOL_FILTER.size || SYMBOL_FILTER.has(e.symbol))
+        .sort((a, b) => a.tsMs - b.tsMs);
     return { startTs, endTs, events: filtered };
 }
 
@@ -83,7 +92,9 @@ function readActualTradesWindow(startTs, endTs) {
             });
         }
     }
-    return trades.sort((a, b) => a.openedAtMs - b.openedAtMs);
+    return trades
+        .filter((t) => !SYMBOL_FILTER.size || SYMBOL_FILTER.has(t.symbol))
+        .sort((a, b) => a.openedAtMs - b.openedAtMs);
 }
 
 function main() {
@@ -179,4 +190,3 @@ function main() {
 }
 
 main();
-

@@ -3,6 +3,13 @@ import "dotenv/config";
 const ENV = process.env;
 const isTrue = (value) => ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 
+function parseSymbolCsv(value) {
+    return String(value || "")
+        .split(",")
+        .map((s) => String(s || "").trim().toUpperCase())
+        .filter(Boolean);
+}
+
 // API Configuration
 export const API = {
     KEY: ENV.API_KEY,
@@ -13,12 +20,24 @@ export const API = {
 };
 
 // Trading Sessions (UTC times)
-const SESSION_SYMBOLS = {
+const RAW_SESSION_SYMBOLS = {
     LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
     NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
     SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
     TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
 };
+const FOREX_SYMBOL_BLOCKLIST_DEFAULT = ["USDCHF"];
+const FOREX_SYMBOL_BLOCKLIST_RAW =
+    ENV.FOREX_SYMBOL_BLOCKLIST === undefined ? FOREX_SYMBOL_BLOCKLIST_DEFAULT.join(",") : ENV.FOREX_SYMBOL_BLOCKLIST;
+const FOREX_SYMBOL_BLOCKLIST = new Set(parseSymbolCsv(FOREX_SYMBOL_BLOCKLIST_RAW));
+const SESSION_SYMBOLS = Object.fromEntries(
+    Object.entries(RAW_SESSION_SYMBOLS).map(([session, symbols]) => [
+        session,
+        (Array.isArray(symbols) ? symbols : [])
+            .map((symbol) => String(symbol || "").trim().toUpperCase())
+            .filter((symbol) => symbol && !FOREX_SYMBOL_BLOCKLIST.has(symbol)),
+    ]),
+);
 // can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
 
 export const CRYPTO_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
@@ -36,12 +55,25 @@ export const TRADING_WINDOWS = {
 };
 
 export const NEWS_GUARD = {
+    ENABLED: isTrue(ENV.NEWS_GUARD_ENABLED),
     FOREX_ONLY: true,
     INCLUDE_IMPACTS: ["High"],
     WINDOWS_BY_IMPACT: {
         High: { preMinutes: 10, postMinutes: 3 },
     },
 };
+
+const DEFAULT_LIVE_SYMBOLS = [
+    ...new Set([
+        ...SESSION_SYMBOLS.LONDON,
+        ...SESSION_SYMBOLS.NY,
+        ...SESSION_SYMBOLS.SYDNEY,
+        ...SESSION_SYMBOLS.TOKYO,
+        ...CRYPTO_SYMBOLS,
+    ]),
+];
+
+export const LIVE_SYMBOLS = parseSymbolCsv(String(ENV.LIVE_SYMBOLS || DEFAULT_LIVE_SYMBOLS.join(",")));
 
 export const SESSIONS = {
     LONDON: {
