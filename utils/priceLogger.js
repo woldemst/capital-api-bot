@@ -14,6 +14,7 @@ const CANDLE_LAG_SANITY_MINUTES = {
     h1: { min: -90, max: 400 },
 };
 const MAX_M1_MID_DEVIATION_PIPS = 8;
+const FUTURE_TS_TOLERANCE_MS = 5 * 60 * 1000;
 
 function ensureLogDir() {
     if (!fs.existsSync(LOG_DIR)) {
@@ -253,16 +254,50 @@ class PriceLogger {
             // ignore file parsing issues; logger will continue with in-memory monotonic tracking
         }
 
+        if (Number.isFinite(lastTsMs) && lastTsMs > Date.now() + FUTURE_TS_TOLERANCE_MS) {
+            const rotated = this.rotateFutureTimestampLog({
+                symbol: symbolKey,
+                logPath,
+                futureTsMs: lastTsMs,
+            });
+            if (rotated) {
+                lastTsMs = null;
+            }
+        }
+
         this.lastWrittenTsMsBySymbol.set(symbolKey, lastTsMs);
         return lastTsMs;
     }
 
+    rotateFutureTimestampLog({ symbol, logPath, futureTsMs }) {
+        if (!logPath || !fs.existsSync(logPath)) return false;
+        const safeStamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const rotatedPath = `${logPath}.future-ts-${safeStamp}.bak`;
+        try {
+            fs.renameSync(logPath, rotatedPath);
+            logger.warn(
+                `[PriceLogger] Rotated ${symbol} log due to future tail timestamp ${new Date(futureTsMs).toISOString()} -> ${rotatedPath}`,
+            );
+            return true;
+        } catch (error) {
+            logger.warn(
+                `[PriceLogger] Failed to rotate ${symbol} log with future tail timestamp ${new Date(futureTsMs).toISOString()}: ${error.message}`,
+            );
+            return false;
+        }
+    }
+
     canAppendMonotonic(symbol, timestampValue) {
+        const symbolKey = String(symbol || "").toUpperCase();
         const tsMs = this.toTimestampMs(timestampValue);
         if (!Number.isFinite(tsMs)) {
             return { ok: false, tsMs: null, reason: "invalid_timestamp" };
         }
         const lastTsMs = this.getLastWrittenTimestampMs(symbol);
+        if (Number.isFinite(lastTsMs) && lastTsMs > Date.now() + FUTURE_TS_TOLERANCE_MS) {
+            this.lastWrittenTsMsBySymbol.set(symbolKey, null);
+            return { ok: true, tsMs, reason: "reset_future_tail_timestamp" };
+        }
         if (Number.isFinite(lastTsMs) && tsMs <= lastTsMs) {
             return {
                 ok: false,
