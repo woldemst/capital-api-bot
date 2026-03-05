@@ -45,6 +45,7 @@ class PriceLogger {
         this.historyLength = 200;
         this.requestDelayMs = 250;
         this.symbolDelayMs = 1000;
+        this.lastWrittenTsMsBySymbol = new Map();
     }
 
     sleep(ms) {
@@ -135,16 +136,39 @@ class PriceLogger {
         return best;
     }
 
+    normalizeHistoricalCandles(candles = []) {
+        if (!Array.isArray(candles) || candles.length === 0) return [];
+        const byTimestamp = new Map();
+        for (const candle of candles) {
+            const tsMs = this.toTimestampMs(candle?.timestamp ?? candle?.snapshotTimeUTC ?? candle?.snapshotTime ?? candle?.t);
+            const open = this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask ?? candle?.o);
+            const high = this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask ?? candle?.h);
+            const low = this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask ?? candle?.l);
+            const close = this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask ?? candle?.c);
+            if (!Number.isFinite(tsMs)) continue;
+            if (![open, high, low, close].every(Number.isFinite)) continue;
+            byTimestamp.set(tsMs, {
+                timestamp: new Date(tsMs).toISOString(),
+                timestampMs: tsMs,
+                open,
+                high,
+                low,
+                close,
+            });
+        }
+        return [...byTimestamp.values()].sort((a, b) => a.timestampMs - b.timestampMs);
+    }
+
     getLastClosedCandle(candles = []) {
         if (!Array.isArray(candles) || candles.length === 0) return null;
         // Use the penultimate candle as a safe "last closed" candidate.
         const candle = candles.length > 1 ? candles[candles.length - 2] : candles[candles.length - 1];
         return {
-            t: this.toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC),
-            o: this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask),
-            h: this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask),
-            l: this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask),
-            c: this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask),
+            t: this.toIsoTimestamp(candle?.timestamp ?? candle?.snapshotTime ?? candle?.snapshotTimeUTC ?? candle?.t),
+            o: this.toNumber(candle?.open ?? candle?.openPrice?.bid ?? candle?.openPrice?.ask ?? candle?.o),
+            h: this.toNumber(candle?.high ?? candle?.highPrice?.bid ?? candle?.highPrice?.ask ?? candle?.h),
+            l: this.toNumber(candle?.low ?? candle?.lowPrice?.bid ?? candle?.lowPrice?.ask ?? candle?.l),
+            c: this.toNumber(candle?.close ?? candle?.closePrice?.bid ?? candle?.closePrice?.ask ?? candle?.c),
         };
     }
 
@@ -152,8 +176,8 @@ class PriceLogger {
         return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
     }
 
-    getActiveSessionsUtc() {
-        const now = new Date();
+    getActiveSessionsUtc(at = new Date()) {
+        const now = at instanceof Date ? at : new Date(at);
         const hour = now.getUTCHours();
         const minute = now.getUTCMinutes();
         const currentMinutes = hour * 60 + minute;
@@ -170,6 +194,89 @@ class PriceLogger {
             if (active) sessions.push(name);
         }
         return sessions;
+    }
+
+    resolveSnapshotTimestamp({ marketTimestamp, candles }) {
+        const marketTsMs = this.toTimestampMs(marketTimestamp);
+        const m1TsMs = this.toTimestampMs(candles?.m1?.t);
+        const lagOk = (candidateTsMs) => {
+            if (!Number.isFinite(candidateTsMs) || !Number.isFinite(m1TsMs)) return false;
+            const lagMinutes = (candidateTsMs - m1TsMs) / 60000;
+            const bounds = CANDLE_LAG_SANITY_MINUTES.m1;
+            return lagMinutes >= bounds.min && lagMinutes <= bounds.max;
+        };
+
+        if (Number.isFinite(m1TsMs)) {
+            if (lagOk(marketTsMs)) {
+                return new Date(marketTsMs).toISOString();
+            }
+            // Handle APIs that may return local clock fields without timezone suffix.
+            const shiftedByHourCandidates = [marketTsMs - 60 * 60000, marketTsMs + 60 * 60000];
+            for (const shiftedTsMs of shiftedByHourCandidates) {
+                if (lagOk(shiftedTsMs)) {
+                    return new Date(shiftedTsMs).toISOString();
+                }
+            }
+            return new Date(m1TsMs).toISOString();
+        }
+
+        if (Number.isFinite(marketTsMs)) return new Date(marketTsMs).toISOString();
+        return new Date().toISOString();
+    }
+
+    getLastWrittenTimestampMs(symbol) {
+        const symbolKey = String(symbol || "").toUpperCase();
+        if (this.lastWrittenTsMsBySymbol.has(symbolKey)) {
+            return this.lastWrittenTsMsBySymbol.get(symbolKey);
+        }
+
+        let lastTsMs = null;
+        const logPath = getSymbolLogPath(symbol);
+        try {
+            if (fs.existsSync(logPath)) {
+                const content = fs.readFileSync(logPath, "utf8");
+                const lines = content.split(/\r?\n/).filter(Boolean);
+                for (let i = lines.length - 1; i >= 0; i -= 1) {
+                    try {
+                        const row = JSON.parse(lines[i]);
+                        const tsMs = this.toTimestampMs(row?.timestamp);
+                        if (Number.isFinite(tsMs)) {
+                            lastTsMs = tsMs;
+                            break;
+                        }
+                    } catch {
+                        // skip malformed line
+                    }
+                }
+            }
+        } catch {
+            // ignore file parsing issues; logger will continue with in-memory monotonic tracking
+        }
+
+        this.lastWrittenTsMsBySymbol.set(symbolKey, lastTsMs);
+        return lastTsMs;
+    }
+
+    canAppendMonotonic(symbol, timestampValue) {
+        const tsMs = this.toTimestampMs(timestampValue);
+        if (!Number.isFinite(tsMs)) {
+            return { ok: false, tsMs: null, reason: "invalid_timestamp" };
+        }
+        const lastTsMs = this.getLastWrittenTimestampMs(symbol);
+        if (Number.isFinite(lastTsMs) && tsMs <= lastTsMs) {
+            return {
+                ok: false,
+                tsMs,
+                reason: `non_monotonic current=${new Date(tsMs).toISOString()} last=${new Date(lastTsMs).toISOString()}`,
+            };
+        }
+        return { ok: true, tsMs, reason: "" };
+    }
+
+    markTimestampWritten(symbol, tsMs) {
+        if (!Number.isFinite(tsMs)) return;
+        const symbolKey = String(symbol || "").toUpperCase();
+        this.lastWrittenTsMsBySymbol.set(symbolKey, tsMs);
     }
 
     async fetchAllCandles(symbol, timeframes, historyLength) {
@@ -190,10 +297,10 @@ class PriceLogger {
 
     async buildIndicatorsSnapshot(symbol) {
         const { h1Data, m15Data, m5Data, m1Data } = await this.fetchAllCandles(symbol, TIMEFRAMES, this.historyLength);
-        const h1Candles = h1Data?.prices?.slice(-this.historyLength) || [];
-        const m15Candles = m15Data?.prices?.slice(-this.historyLength) || [];
-        const m5Candles = m5Data?.prices?.slice(-this.historyLength) || [];
-        const m1Candles = m1Data?.prices?.slice(-this.historyLength) || [];
+        const h1Candles = this.normalizeHistoricalCandles(h1Data?.prices?.slice(-this.historyLength) || []);
+        const m15Candles = this.normalizeHistoricalCandles(m15Data?.prices?.slice(-this.historyLength) || []);
+        const m5Candles = this.normalizeHistoricalCandles(m5Data?.prices?.slice(-this.historyLength) || []);
+        const m1Candles = this.normalizeHistoricalCandles(m1Data?.prices?.slice(-this.historyLength) || []);
 
         if (!h1Candles.length || !m15Candles.length || !m5Candles.length || !m1Candles.length) {
             return null;
@@ -266,13 +373,14 @@ class PriceLogger {
 
             const m1Close = this.toNumber(indicators?.m1?.lastClose ?? indicators?.m1?.close);
             const referencePrice = mid !== null ? mid : m1Close;
-            const sessions = this.getActiveSessionsUtc();
+            const resolvedTimestamp = this.resolveSnapshotTimestamp({ marketTimestamp, candles });
+            const sessions = this.getActiveSessionsUtc(resolvedTimestamp);
             let newsBlocked = false;
             if (NEWS_GUARD.ENABLED) {
                 try {
                     const { getNewsStatus } = await import("./newsChecker.js");
                     const newsStatus = await getNewsStatus(symbol, {
-                        now: marketTimestamp ? new Date(marketTimestamp) : new Date(),
+                        now: resolvedTimestamp ? new Date(resolvedTimestamp) : new Date(),
                         includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS,
                         windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT,
                     });
@@ -284,7 +392,8 @@ class PriceLogger {
 
             const payload = {
                 symbol,
-                timestamp: marketTimestamp || new Date().toISOString(),
+                timestamp: resolvedTimestamp,
+                marketTimestamp,
                 bid,
                 ask,
                 mid,
@@ -308,7 +417,14 @@ class PriceLogger {
                 return false;
             }
 
+            const monotonicCheck = this.canAppendMonotonic(symbol, payload.timestamp);
+            if (!monotonicCheck.ok) {
+                logger.warn(`[PriceLogger] Monotonicity check failed for ${symbol}: ${monotonicCheck.reason}`);
+                return false;
+            }
+
             appendLine(getSymbolLogPath(symbol), payload);
+            this.markTimestampWritten(symbol, monotonicCheck.tsMs);
             return true;
         } catch (error) {
             logger.warn(`[PriceLogger] Snapshot failed for ${symbol}: ${error.message}`);

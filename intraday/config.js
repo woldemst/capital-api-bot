@@ -7,6 +7,27 @@ function parseSymbolCsv(value) {
         .filter(Boolean);
 }
 
+function parseSymbolSessionFilter(value) {
+    const parsed = {};
+    const text = String(value || "").trim();
+    if (!text) return parsed;
+    const entries = text
+        .split(";")
+        .map((part) => String(part || "").trim())
+        .filter(Boolean);
+    for (const entry of entries) {
+        const [symbolRaw, sessionsRaw = ""] = entry.split(":");
+        const symbol = String(symbolRaw || "").trim().toUpperCase();
+        if (!symbol) continue;
+        const sessions = String(sessionsRaw || "")
+            .split(/[|,+/]/)
+            .map((x) => String(x || "").trim().toUpperCase())
+            .filter(Boolean);
+        parsed[symbol] = sessions;
+    }
+    return parsed;
+}
+
 const RAW_SESSION_SYMBOLS = {
     LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
     NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
@@ -29,6 +50,21 @@ export const SESSION_SYMBOLS = Object.fromEntries(
 );
 
 export const CRYPTO_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
+const DEFAULT_SYMBOL_SESSIONS = {
+    EURUSD: ["LONDON", "NY"],
+    GBPUSD: ["LONDON", "NY"],
+    USDJPY: ["TOKYO", "NY"],
+    USDCAD: ["NY"],
+    USDCHF: [],
+    AUDUSD: ["SYDNEY", "TOKYO"],
+};
+const SYMBOL_SESSION_FILTER_RAW =
+    ENV.FOREX_SYMBOL_SESSION_FILTER === undefined
+        ? Object.entries(DEFAULT_SYMBOL_SESSIONS)
+              .map(([symbol, sessions]) => `${symbol}:${sessions.join("|")}`)
+              .join(";")
+        : ENV.FOREX_SYMBOL_SESSION_FILTER;
+const SYMBOL_SESSION_FILTER = parseSymbolSessionFilter(SYMBOL_SESSION_FILTER_RAW);
 
 export const NEWS_MODE = {
     AVOID: "AVOID",
@@ -44,6 +80,7 @@ export const DEFAULT_INTRADAY_CONFIG = {
         SYDNEY: { start: "22:00", end: "07:00" },
         TOKYO: { start: "00:00", end: "09:00" },
     },
+    symbolSessions: SYMBOL_SESSION_FILTER,
     intradayOnly: {
         flatPositionsCutoffUtcForex: { hour: 20, minute: 55 },
         flatPositionsCutoffUtcCrypto: { hour: 23, minute: 55 },
@@ -143,7 +180,19 @@ export const DEFAULT_INTRADAY_CONFIG = {
     pairOverrides: {},
 };
 
-const NESTED_OBJECT_KEYS = ["guardrails", "intradayOnly", "context", "setup", "trigger", "risk", "management", "backtest", "news", "sessionsUtc"];
+const NESTED_OBJECT_KEYS = [
+    "guardrails",
+    "intradayOnly",
+    "context",
+    "setup",
+    "trigger",
+    "risk",
+    "management",
+    "backtest",
+    "news",
+    "sessionsUtc",
+    "symbolSessions",
+];
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);

@@ -52,6 +52,14 @@ export function allowedSymbolsBySession(session) {
     return [...(SESSION_SYMBOLS[key] || [])];
 }
 
+function preferredSessionsForSymbol(symbol, config = DEFAULT_INTRADAY_CONFIG) {
+    const key = String(symbol || "").toUpperCase();
+    if (!key) return null;
+    const sessions = config?.symbolSessions?.[key];
+    if (!Array.isArray(sessions)) return null;
+    return sessions.map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
+}
+
 function cutoffMinutes(cutoff) {
     const hour = Number(cutoff?.hour);
     const minute = Number(cutoff?.minute);
@@ -78,14 +86,23 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     const activeSessions = determineActiveSessions(nowUtc, config);
     const activeSession = determineActiveSession(nowUtc, config);
     const sessionForexSymbols = activeSession ? allowedSymbolsBySession(activeSession) : [];
+    const preferredSymbolSessions = assetClass === "forex" ? preferredSessionsForSymbol(symbol, config) : null;
+    const sessionAllowedBySymbolFilter =
+        assetClass === "forex"
+            ? !preferredSymbolSessions || (activeSession ? preferredSymbolSessions.includes(activeSession) : false)
+            : true;
     const allowedSymbols = [...new Set([...sessionForexSymbols, ...CRYPTO_SYMBOLS])];
-    const symbolAllowed = assetClass === "crypto" ? CRYPTO_SYMBOLS.includes(symbol) : sessionForexSymbols.includes(symbol);
+    const symbolAllowed =
+        assetClass === "crypto"
+            ? CRYPTO_SYMBOLS.includes(symbol)
+            : sessionForexSymbols.includes(symbol) && sessionAllowedBySymbolFilter;
     const forceFlatNow = isPastFlatPositionsCutoff(nowUtc, assetClass, config);
 
     const reasons = [];
     reasons.push(`session=${activeSession || "NONE"}`);
     if (activeSessions.length > 1) reasons.push(`overlap=${activeSessions.join("+")}`);
     if (!symbolAllowed) reasons.push("symbol_not_in_active_universe");
+    if (assetClass === "forex" && preferredSymbolSessions && !sessionAllowedBySymbolFilter) reasons.push("symbol_session_filtered");
     if (forceFlatNow) reasons.push("past_intraday_cutoff");
 
     const output = {
@@ -110,6 +127,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
             session: activeSession,
             activeSessions,
             symbolAllowed,
+            preferredSymbolSessions: preferredSymbolSessions || null,
             forceFlatNow,
             assetClass,
         },
@@ -117,4 +135,3 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
 
     return output;
 }
-

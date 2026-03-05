@@ -65,6 +65,7 @@ const FILTER_SESSIONS = String(process.env.LIVE_PARITY_FILTER_SESSIONS || "")
     .split(",")
     .map((x) => String(x || "").trim().toUpperCase())
     .filter(Boolean);
+const FILTER_SYMBOL_SESSIONS_RAW = String(process.env.LIVE_PARITY_FILTER_SYMBOL_SESSIONS || "").trim();
 const MIN_PATTERN_TRADES = Number.isFinite(Number(process.env.LIVE_PARITY_MIN_PATTERN_TRADES))
     ? Math.max(1, Number(process.env.LIVE_PARITY_MIN_PATTERN_TRADES))
     : 25;
@@ -213,6 +214,29 @@ function parseMinutes(hhmm) {
     if (!Number.isInteger(hh) || !Number.isInteger(mm)) return NaN;
     return hh * 60 + mm;
 }
+
+function parseSymbolSessionFilter(raw) {
+    const map = new Map();
+    const text = String(raw || "").trim();
+    if (!text) return map;
+    const entries = text
+        .split(";")
+        .map((part) => String(part || "").trim())
+        .filter(Boolean);
+    for (const entry of entries) {
+        const [symbolPart, sessionsPart = ""] = entry.split(":");
+        const symbol = String(symbolPart || "").trim().toUpperCase();
+        if (!symbol) continue;
+        const sessions = String(sessionsPart || "")
+            .split(/[|,+/]/)
+            .map((s) => String(s || "").trim().toUpperCase())
+            .filter(Boolean);
+        map.set(symbol, new Set(sessions));
+    }
+    return map;
+}
+
+const FILTER_SYMBOL_SESSIONS = parseSymbolSessionFilter(FILTER_SYMBOL_SESSIONS_RAW);
 
 function inSession(currentMinutes, startMinutes, endMinutes, { inclusiveEnd = false } = {}) {
     if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
@@ -518,6 +542,13 @@ function passesEntryFilters(entryContext) {
         return { allowed: false, reason: "session_filter" };
     }
 
+    if (FILTER_SYMBOL_SESSIONS.size) {
+        const allowedSessions = FILTER_SYMBOL_SESSIONS.get(String(entryContext.symbol || "").toUpperCase());
+        if (allowedSessions && !allowedSessions.has(String(entryContext.session || "").toUpperCase())) {
+            return { allowed: false, reason: "symbol_session_filter" };
+        }
+    }
+
     if (FILTER_REQUIRE_H1_M15_ALIGN) {
         const aligned = entryContext.h1Trend === entryContext.m15Trend && entryContext.sideAlignedH1 && entryContext.sideAlignedM15;
         if (!aligned) return { allowed: false, reason: "h1_m15_align_filter" };
@@ -659,6 +690,12 @@ function activeFilterSummary() {
     if (Number.isFinite(FILTER_MIN_M15_RSI)) active.push(`min_m15_rsi=${FILTER_MIN_M15_RSI}`);
     if (Number.isFinite(FILTER_MAX_M15_RSI)) active.push(`max_m15_rsi=${FILTER_MAX_M15_RSI}`);
     if (FILTER_SESSIONS.length) active.push(`sessions=${FILTER_SESSIONS.join(",")}`);
+    if (FILTER_SYMBOL_SESSIONS.size) {
+        const pairs = [...FILTER_SYMBOL_SESSIONS.entries()]
+            .map(([symbol, sessions]) => `${symbol}:${[...sessions].join("|")}`)
+            .sort((a, b) => a.localeCompare(b));
+        active.push(`symbol_sessions=${pairs.join(";")}`);
+    }
     return active.length ? active.join("; ") : "none";
 }
 
