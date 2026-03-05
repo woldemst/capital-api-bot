@@ -3,6 +3,7 @@ import { DEFAULT_INTRADAY_CONFIG } from "./config.js";
 export const STEP4_NAME = "TRIGGER_M5";
 
 function toNum(value) {
+    if (value === undefined || value === null || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 }
@@ -107,4 +108,3 @@ export function step4Trigger(input, config = DEFAULT_INTRADAY_CONFIG) {
         },
     };
 }
-

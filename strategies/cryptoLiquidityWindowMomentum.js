@@ -133,8 +133,15 @@ function parseCandleTimestamp(rawValue) {
     }
     const raw = String(rawValue).trim();
     if (!raw) return null;
-    const parsed = Date.parse(raw);
-    if (Number.isFinite(parsed)) return parsed;
+
+    // ISO-like timestamps without timezone should be interpreted as UTC.
+    const isoNoZone = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+    if (isoNoZone) {
+        const [, y, m, d, hh, mm, ss = "00", frac = ""] = isoNoZone;
+        const ms = frac ? Number(String(frac).slice(0, 3).padEnd(3, "0")) : 0;
+        const dt = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss), ms));
+        return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+    }
 
     const igUtc = raw.match(/^(\d{4})[/-](\d{2})[/-](\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
     if (igUtc) {
@@ -143,6 +150,9 @@ function parseCandleTimestamp(rawValue) {
         const ts = Date.parse(iso);
         return Number.isFinite(ts) ? ts : null;
     }
+
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
     return null;
 }
 

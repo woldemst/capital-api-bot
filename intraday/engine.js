@@ -9,6 +9,7 @@ import { step5EntryRisk } from "./step5EntryRisk.js";
 import { step6TradeManagement } from "./step6TradeManagement.js";
 
 function toNum(value) {
+    if (value === undefined || value === null || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 }

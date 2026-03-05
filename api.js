@@ -13,6 +13,52 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isValidDateParts(year, month, day) {
+    if (![year, month, day].every(Number.isInteger)) return false;
+    if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+    const dt = new Date(Date.UTC(year, month - 1, day));
+    return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+function toIsoUtcFromParts(year, month, day, hour, minute, second = 0) {
+    if (!isValidDateParts(year, month, day)) return null;
+    if (![hour, minute, second].every(Number.isInteger)) return null;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return null;
+    const dt = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    return Number.isFinite(dt.getTime()) ? dt.toISOString() : null;
+}
+
+function pickAmbiguousDateIso({ first, second, year, hour, minute, secondValue }) {
+    const asDmyIso = toIsoUtcFromParts(year, second, first, hour, minute, secondValue); // DD/MM/YYYY
+    const asMdyIso = toIsoUtcFromParts(year, first, second, hour, minute, secondValue); // MM/DD/YYYY
+    if (asDmyIso && !asMdyIso) return asDmyIso;
+    if (!asDmyIso && asMdyIso) return asMdyIso;
+    if (!asDmyIso && !asMdyIso) return null;
+
+    const asDmyMs = Date.parse(asDmyIso);
+    const asMdyMs = Date.parse(asMdyIso);
+    const nowMs = Date.now();
+    const maxFutureDriftMs = 36 * 60 * 60 * 1000;
+    const dmyTooFarFuture = Number.isFinite(asDmyMs) && asDmyMs - nowMs > maxFutureDriftMs;
+    const mdyTooFarFuture = Number.isFinite(asMdyMs) && asMdyMs - nowMs > maxFutureDriftMs;
+    if (dmyTooFarFuture !== mdyTooFarFuture) {
+        return dmyTooFarFuture ? asMdyIso : asDmyIso;
+    }
+
+    const dmyDist = Math.abs(asDmyMs - nowMs);
+    const mdyDist = Math.abs(asMdyMs - nowMs);
+    return dmyDist <= mdyDist ? asDmyIso : asMdyIso;
+}
+
+function parseIsoNoZoneAsUtc(raw) {
+    const isoNoZone = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+    if (!isoNoZone) return null;
+    const [, y, m, d, hh, mm, ss = "00", frac = ""] = isoNoZone;
+    const ms = frac ? Number(String(frac).slice(0, 3).padEnd(3, "0")) : 0;
+    const dt = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss), ms));
+    return Number.isFinite(dt.getTime()) ? dt.toISOString() : null;
+}
+
 function normalizeSnapshotTimestamp(value) {
     if (value === undefined || value === null || value === "") return null;
     if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
@@ -24,15 +70,47 @@ function normalizeSnapshotTimestamp(value) {
     const raw = String(value).trim();
     if (!raw) return null;
     if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+        // Important: ISO-like strings without timezone must be treated as UTC.
+        // JS Date would interpret them as local time and shift by timezone offset.
+        const hasExplicitZone = /(?:Z|[+\-]\d{2}:?\d{2})$/i.test(raw);
+        if (!hasExplicitZone) {
+            const isoUtc = parseIsoNoZoneAsUtc(raw);
+            if (isoUtc) return isoUtc;
+        }
         const d = new Date(raw);
         return Number.isFinite(d.getTime()) ? d.toISOString() : null;
     }
 
-    // IG usually returns "YYYY/MM/DD HH:mm:ss" or "YYYY-MM-DD HH:mm:ss" in UTC.
-    const igUtc = raw.match(/^(\d{4})[/-](\d{2})[/-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
-    if (igUtc) {
-        const [, y, m, d, hh, mm, ss = "00"] = igUtc;
-        return `${y}-${m}-${d}T${hh}:${mm}:${ss}Z`;
+    // IG often returns "YYYY/MM/DD HH:mm:ss" or "YYYY-MM-DD HH:mm:ss" in UTC.
+    const ymdUtc = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (ymdUtc) {
+        const [, y, m, d, hh, mm, ss = "00"] = ymdUtc;
+        const iso = toIsoUtcFromParts(Number(y), Number(m), Number(d), Number(hh), Number(mm), Number(ss));
+        if (iso) return iso;
+    }
+
+    // Some feeds return either "DD/MM/YYYY HH:mm:ss" or "MM/DD/YYYY HH:mm:ss".
+    // For ambiguous values (both first and second <= 12), select the candidate
+    // that is not implausibly in the future and otherwise the one closest to now.
+    const dmyOrMdyUtc = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (dmyOrMdyUtc) {
+        const [, firstRaw, secondRaw, yearRaw, hh, mm, ss = "00"] = dmyOrMdyUtc;
+        const first = Number(firstRaw);
+        const second = Number(secondRaw);
+        const year = Number(yearRaw);
+        const hour = Number(hh);
+        const minute = Number(mm);
+        const secondValue = Number(ss);
+
+        const iso = pickAmbiguousDateIso({
+            first,
+            second,
+            year,
+            hour,
+            minute,
+            secondValue,
+        });
+        if (iso) return iso;
     }
 
     // Final fallback for already-parseable date strings.

@@ -3,6 +3,7 @@ import { DEFAULT_INTRADAY_CONFIG } from "./config.js";
 export const STEP6_NAME = "TRADE_MANAGEMENT";
 
 function toNum(value) {
+    if (value === undefined || value === null || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 }
@@ -106,4 +107,3 @@ export function step6TradeManagement(input, config = DEFAULT_INTRADAY_CONFIG) {
         },
     };
 }
-

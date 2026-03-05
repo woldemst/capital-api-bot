@@ -3,6 +3,7 @@ import { DEFAULT_INTRADAY_CONFIG } from "./config.js";
 export const STEP2_NAME = "CONTEXT_REGIME";
 
 function toNum(value) {
+    if (value === undefined || value === null || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 }

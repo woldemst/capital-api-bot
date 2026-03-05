@@ -11,15 +11,21 @@ const TARGET_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"];
 const TARGET_TIMEFRAMES = ["M1", "M5", "M15", "H1"];
 
 const START_CAPITAL = 500;
-const MONTHS_BACK = 2;
-const FOREX_RISK_PCT = 0.05;
+const MONTHS_BACK = Number.isFinite(Number(process.env.LIVE_PARITY_MONTHS_BACK)) ? Number(process.env.LIVE_PARITY_MONTHS_BACK) : 2;
+const PHASE1_RISK_PCT = Number.isFinite(Number(process.env.LIVE_PARITY_RISK_PCT_PHASE1))
+    ? Number(process.env.LIVE_PARITY_RISK_PCT_PHASE1)
+    : 0.05;
+const PHASE2_RISK_PCT = Number.isFinite(Number(process.env.LIVE_PARITY_RISK_PCT_PHASE2)) ? Number(process.env.LIVE_PARITY_RISK_PCT_PHASE2) : null;
+const PHASE2_START_AFTER_MONTHS = Number.isFinite(Number(process.env.LIVE_PARITY_PHASE2_START_AFTER_MONTHS))
+    ? Number(process.env.LIVE_PARITY_PHASE2_START_AFTER_MONTHS)
+    : null;
 const MAX_POSITIONS = Number(RISK?.MAX_POSITIONS) || 5;
 const GUARDS = RISK?.GUARDS || {};
 const EXITS = RISK?.EXITS || {};
 const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0;
 const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT))
     ? Number(GUARDS.MAX_OPEN_RISK_PCT)
-    : Math.max(FOREX_RISK_PCT, Number(RISK?.CRYPTO_PER_TRADE) || FOREX_RISK_PCT) * 2;
+    : Math.max(PHASE1_RISK_PCT, Number(RISK?.CRYPTO_PER_TRADE) || PHASE1_RISK_PCT) * 2;
 const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
 const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
     ? Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES)
@@ -60,6 +66,10 @@ function pct(value) {
 function num(value, digits = 2) {
     if (!Number.isFinite(value)) return "n/a";
     return value.toFixed(digits);
+}
+
+function riskPctLabel(riskPct) {
+    return `${(Number(riskPct) * 100).toFixed(2)}%`;
 }
 
 function parseMinutes(hhmm) {
@@ -277,6 +287,24 @@ async function run() {
         throw new Error("No overlapping data in selected period.");
     }
 
+    let phase2StartMs = null;
+    const phase2Enabled = Number.isFinite(PHASE2_RISK_PCT) && Number.isFinite(PHASE2_START_AFTER_MONTHS) && PHASE2_START_AFTER_MONTHS >= 0;
+    if (phase2Enabled) {
+        const phase2Start = new Date(actualStartMs);
+        phase2Start.setUTCMonth(phase2Start.getUTCMonth() + PHASE2_START_AFTER_MONTHS);
+        phase2StartMs = phase2Start.getTime();
+    }
+
+    function riskPctForTs(tsMs) {
+        if (phase2Enabled && Number.isFinite(phase2StartMs) && tsMs >= phase2StartMs) return PHASE2_RISK_PCT;
+        return PHASE1_RISK_PCT;
+    }
+
+    function phaseKeyForTs(tsMs) {
+        if (phase2Enabled && Number.isFinite(phase2StartMs) && tsMs >= phase2StartMs) return `PHASE_2_${riskPctLabel(PHASE2_RISK_PCT)}`;
+        return `PHASE_1_${riskPctLabel(PHASE1_RISK_PCT)}`;
+    }
+
     const timelineSet = new Set();
     for (const symbol of TARGET_SYMBOLS) {
         for (const row of dataBySymbol.get(symbol).M1) {
@@ -291,7 +319,7 @@ async function run() {
         ...DEFAULT_INTRADAY_CONFIG,
         risk: {
             ...(DEFAULT_INTRADAY_CONFIG.risk || {}),
-            forexRiskPct: FOREX_RISK_PCT,
+            forexRiskPct: PHASE1_RISK_PCT,
         },
     });
     const state = createIntradayRuntimeState({ strategyId: "INTRADAY_7STEP_FOREX" });
@@ -312,6 +340,7 @@ async function run() {
     const pairStats = new Map();
     const weeklyStats = new Map();
     const weeklyPairStats = new Map();
+    const phaseStats = new Map();
     let lastRolloverCloseKey = null;
 
     function ensurePair(symbol) {
@@ -359,6 +388,23 @@ async function run() {
             });
         }
         return weeklyPairStats.get(key);
+    }
+
+    function ensurePhase(tsMs) {
+        const key = phaseKeyForTs(tsMs);
+        if (!phaseStats.has(key)) {
+            phaseStats.set(key, {
+                phase: key,
+                trades: 0,
+                wins: 0,
+                losses: 0,
+                netR: 0,
+                grossWinR: 0,
+                grossLossR: 0,
+                rawPnl: 0,
+            });
+        }
+        return phaseStats.get(key);
     }
 
     function syncStateOpenPositions() {
@@ -457,6 +503,18 @@ async function run() {
         } else if (r < 0) {
             weekPair.losses += 1;
             weekPair.grossLossR += Math.abs(r);
+        }
+
+        const phase = ensurePhase(pos.entryTsMs);
+        phase.trades += 1;
+        phase.netR += r;
+        phase.rawPnl += pnl;
+        if (r > 0) {
+            phase.wins += 1;
+            phase.grossWinR += r;
+        } else if (r < 0) {
+            phase.losses += 1;
+            phase.grossLossR += Math.abs(r);
         }
 
         openPositions.delete(symbol);
@@ -667,7 +725,7 @@ async function run() {
             if (openPositions.size >= MAX_POSITIONS) continue;
             if (openPositions.has(symbol)) continue;
 
-            const nextRiskPct = Number.isFinite(Number(plan.riskPct)) ? Number(plan.riskPct) : FOREX_RISK_PCT;
+            const nextRiskPct = riskPctForTs(tsMs);
             const guard = shouldBlockNewTrade(symbol, tsMs, nextRiskPct);
             if (guard.blocked) continue;
 
@@ -733,6 +791,7 @@ async function run() {
     const weekPairRows = [...weeklyPairStats.values()].sort((a, b) =>
         a.weekStartMs === b.weekStartMs ? a.symbol.localeCompare(b.symbol) : a.weekStartMs - b.weekStartMs,
     );
+    const phaseRows = [...phaseStats.values()];
 
     const overallTable = renderTable(
         ["Metric", "Value"],
@@ -748,6 +807,12 @@ async function run() {
             ["Profit Factor", num(pf, 4)],
             ["Max Drawdown", `${num(maxDdAbs)} EUR (${pct(maxDdPct)})`],
             ["Guards", `maxPos=${MAX_POSITIONS}, openRiskCap=${pct(MAX_OPEN_RISK_PCT)}, dailyLoss=${MAX_DAILY_LOSS_PCT > 0 ? pct(MAX_DAILY_LOSS_PCT) : "disabled"}`],
+            [
+                "Risk Plan",
+                phase2Enabled && Number.isFinite(phase2StartMs)
+                    ? `Phase1 ${riskPctLabel(PHASE1_RISK_PCT)} until ${new Date(phase2StartMs).toISOString()}, then Phase2 ${riskPctLabel(PHASE2_RISK_PCT)}`
+                    : `Fixed ${riskPctLabel(PHASE1_RISK_PCT)}`,
+            ],
             ["Live Filters", "sessions+weekend+rollover included, historical news unavailable in dataset"],
         ],
     );
@@ -802,8 +867,22 @@ async function run() {
         weeklyPairPivot.map((r) => [r.week, num(r.EURUSD), num(r.GBPUSD), num(r.USDJPY), num(r.USDCHF), num(r.total)]),
     );
 
-    console.log("\n=== LIVE PARITY REPLAY (2 MONTHS) ===");
+    const phaseTable = renderTable(
+        ["Phase", "Trades", "Winrate", "Net R", "PF", "Raw PnL EUR"],
+        phaseRows.map((r) => [
+            r.phase,
+            String(r.trades),
+            pct(r.trades ? r.wins / r.trades : null),
+            num(r.netR, 4),
+            num(r.grossLossR > 0 ? r.grossWinR / r.grossLossR : null, 4),
+            num(r.rawPnl),
+        ]),
+    );
+
+    console.log(`\n=== LIVE PARITY REPLAY (${MONTHS_BACK} MONTHS) ===`);
     console.log(overallTable);
+    console.log("\n=== BY RISK PHASE ===");
+    console.log(phaseTable);
     console.log("\n=== BY PAIR ===");
     console.log(pairTable);
     console.log("\n=== WEEKLY PORTFOLIO ===");

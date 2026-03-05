@@ -3,6 +3,7 @@ import { DEFAULT_INTRADAY_CONFIG } from "./config.js";
 export const STEP3_NAME = "SETUP_M15";
 
 function toNum(value) {
+    if (value === undefined || value === null || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 }

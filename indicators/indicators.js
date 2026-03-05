@@ -22,6 +22,7 @@ export async function calcIndicators(bars) {
     // Use closed candles only to avoid indicator drift from a still-forming live bar.
     const stableBars = bars.length > 1 ? bars.slice(0, -1) : bars;
     const toNum = (value) => {
+        if (value === undefined || value === null || value === "") return null;
         const num = typeof value === "number" ? value : Number(value);
         return Number.isFinite(num) ? num : null;
     };

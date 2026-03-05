@@ -1,6 +1,7 @@
 import { DEFAULT_INTRADAY_CONFIG, NEWS_MODE } from "./config.js";
 
 function toNum(value) {
+    if (value === undefined || value === null || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 }
@@ -75,4 +76,3 @@ export function evaluateGuardrails(input, config = DEFAULT_INTRADAY_CONFIG) {
         },
     };
 }
-

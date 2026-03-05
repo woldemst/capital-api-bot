@@ -140,6 +140,9 @@ class TradingBot {
                     if (typeof accountData.accounts[0].balance.available !== "undefined") {
                         tradingService.setAvailableMargin(accountData.accounts[0].balance.available);
                     }
+                    if (accountData.accounts[0].currency) {
+                        tradingService.setAccountCurrency(accountData.accounts[0].currency);
+                    }
 
                     return; // Success - exit the method
                 }
@@ -161,6 +164,79 @@ class TradingBot {
         const [hh, mm] = hhmm.split(":").map((p) => Number(p));
         if (!Number.isInteger(hh) || !Number.isInteger(mm)) return NaN;
         return hh * 60 + mm;
+    }
+
+    toTimestampMs(value) {
+        if (value === undefined || value === null || value === "") return null;
+        if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+        if (typeof value === "number") {
+            const dt = new Date(value);
+            return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+        }
+
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        const isoNoZone = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+        if (isoNoZone) {
+            const [, y, m, d, hh, mm, ss = "00", frac = ""] = isoNoZone;
+            const ms = frac ? Number(String(frac).slice(0, 3).padEnd(3, "0")) : 0;
+            const dt = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss), ms));
+            return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+        }
+
+        const ymdUtc = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+        if (ymdUtc) {
+            const [, y, m, d, hh, mm, ss = "00", frac = ""] = ymdUtc;
+            const ms = frac ? Number(String(frac).slice(0, 3).padEnd(3, "0")) : 0;
+            const dt = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss), ms));
+            return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+        }
+
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    toIsoTimestamp(value) {
+        const tsMs = this.toTimestampMs(value);
+        return Number.isFinite(tsMs) ? new Date(tsMs).toISOString() : null;
+    }
+
+    toTimestampMsLocalNoZone(value) {
+        if (value === undefined || value === null || value === "") return null;
+        if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+        if (typeof value === "number") {
+            const dt = new Date(value);
+            return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+        }
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        // Intentionally parse timezone-less values in local timezone for market update fields.
+        const localParsed = Date.parse(raw);
+        return Number.isFinite(localParsed) ? localParsed : null;
+    }
+
+    toIsoTimestampLocalNoZone(value) {
+        const tsMs = this.toTimestampMsLocalNoZone(value);
+        return Number.isFinite(tsMs) ? new Date(tsMs).toISOString() : null;
+    }
+
+    chooseTimestampClosestToReference(candidatesMs = [], referenceMs = null) {
+        const finite = [...new Set(candidatesMs.filter((v) => Number.isFinite(v)))];
+        if (!finite.length) return null;
+        if (!Number.isFinite(referenceMs)) return finite[0];
+        let best = finite[0];
+        let bestDistance = Math.abs(best - referenceMs);
+        for (let i = 1; i < finite.length; i += 1) {
+            const candidate = finite[i];
+            const distance = Math.abs(candidate - referenceMs);
+            if (distance < bestDistance) {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+        return best;
     }
 
     inSession(currentMinutes, startMinutes, endMinutes, { inclusiveEnd = false } = {}) {
@@ -334,13 +410,27 @@ class TradingBot {
         const candles = { d1Candles, h4Candles, h1Candles, m15Candles, m5Candles, m1Candles };
 
         // --- Fetch real-time bid/ask ---
-        const { bid, ask } = await this.getBidAsk(symbol);
-        const timestamp = new Date().toISOString();
+        const latestM1Timestamp = m1Candles?.[m1Candles.length - 1]?.timestamp;
+        const { bid, ask, timestamp: marketTimestamp } = await this.getBidAsk(symbol, latestM1Timestamp);
+        const timestamp = marketTimestamp || this.toIsoTimestamp(latestM1Timestamp) || new Date().toISOString();
         const activeSessions = this.getActiveSessionNames(new Date()).filter((sessionName) => {
             if (sessionName === "CRYPTO") return this.isCryptoSymbol(symbol);
             const sessionSymbols = SESSIONS?.[sessionName]?.SYMBOLS || [];
             return sessionSymbols.includes(symbol);
         });
+        let newsBlocked = false;
+        if (!this.isCryptoSymbol(symbol)) {
+            try {
+                const news = await getNewsStatus(symbol, {
+                    now: new Date(timestamp),
+                    includeImpacts: NEWS_GUARD.INCLUDE_IMPACTS,
+                    windowsByImpact: NEWS_GUARD.WINDOWS_BY_IMPACT,
+                });
+                newsBlocked = Boolean(news?.blocked);
+            } catch (error) {
+                logger.warn(`[Analyze] News check failed for ${symbol}: ${error.message}`);
+            }
+        }
 
         // Pass bid/ask to trading logic
         await tradingService.processPrice({
@@ -351,6 +441,7 @@ class TradingBot {
             ask,
             timestamp,
             sessions: activeSessions,
+            newsBlocked,
         });
     }
 
@@ -413,11 +504,30 @@ class TradingBot {
         return DEV.MODE ? DEV.INTERVAL : ANALYSIS_REPEAT_MS;
     }
 
-    async getBidAsk(symbol) {
+    async getBidAsk(symbol, referenceTimestamp = null) {
         const marketDetails = await getMarketDetails(symbol);
+        const snapshot = marketDetails?.snapshot || {};
+        const rawCandidates = [
+            snapshot?.updateTime,
+            snapshot?.updateTimeUTC,
+            snapshot?.timestamp,
+            snapshot?.snapshotTimeUTC,
+            snapshot?.snapshotTime,
+        ].filter((v) => v !== undefined && v !== null && v !== "");
+        const parsedCandidates = [];
+        for (const raw of rawCandidates) {
+            const asLocal = this.toTimestampMsLocalNoZone(raw);
+            const asUtc = this.toTimestampMs(raw);
+            if (Number.isFinite(asLocal)) parsedCandidates.push(asLocal);
+            if (Number.isFinite(asUtc)) parsedCandidates.push(asUtc);
+        }
+        const referenceMs = this.toTimestampMs(referenceTimestamp);
+        const selectedTsMs = this.chooseTimestampClosestToReference(parsedCandidates, referenceMs);
+        const marketTimestamp = Number.isFinite(selectedTsMs) ? new Date(selectedTsMs).toISOString() : null;
         return {
-            bid: marketDetails?.snapshot?.bid,
-            ask: marketDetails?.snapshot?.offer,
+            bid: snapshot?.bid,
+            ask: snapshot?.offer,
+            timestamp: marketTimestamp,
         };
     }
 

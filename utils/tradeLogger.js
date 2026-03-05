@@ -40,8 +40,32 @@ function compactCandles(snapshot) {
 
 function toIsoTimestamp(value) {
     if (value === undefined || value === null || value === "") return null;
-    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
-    const parsed = new Date(value);
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+    if (typeof value === "number") {
+        const d = new Date(value);
+        return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const isoNoZone = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+    if (isoNoZone) {
+        const [, y, m, d, hh, mm, ss = "00", frac = ""] = isoNoZone;
+        const ms = frac ? Number(String(frac).slice(0, 3).padEnd(3, "0")) : 0;
+        const utc = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss), ms));
+        return Number.isFinite(utc.getTime()) ? utc.toISOString() : null;
+    }
+
+    const ymdUtc = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+    if (ymdUtc) {
+        const [, y, m, d, hh, mm, ss = "00", frac = ""] = ymdUtc;
+        const ms = frac ? Number(String(frac).slice(0, 3).padEnd(3, "0")) : 0;
+        const utc = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss), ms));
+        return Number.isFinite(utc.getTime()) ? utc.toISOString() : null;
+    }
+
+    const parsed = new Date(raw);
     return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
@@ -432,6 +456,7 @@ export function logTradeOpen({
     riskMeta = null,
     strategyId = null,
     strategyMeta = null,
+    configHash = null,
 }) {
     const logPath = getSymbolLogPath(symbol);
     const compactOpening = compactIndicators(indicatorsOnOpening);
@@ -460,9 +485,16 @@ export function logTradeOpen({
         trailingStops: {
             updates: [],
         },
-        riskMeta: riskMeta && typeof riskMeta === "object" ? riskMeta : null,
+        riskMeta:
+            riskMeta && typeof riskMeta === "object"
+                ? {
+                      ...riskMeta,
+                      configHash: riskMeta?.configHash || configHash || strategyMeta?.configHash || null,
+                  }
+                : null,
         strategyId: strategyId ? String(strategyId) : null,
         strategyMeta: strategyMeta && typeof strategyMeta === "object" ? strategyMeta : null,
+        configHash: configHash ? String(configHash) : strategyMeta?.configHash || null,
     };
 
     appendLine(logPath, payload);
