@@ -59,6 +59,14 @@ const SNAPSHOT_CANDLE_LAG_BOUNDS_MINUTES = {
 const MAX_M1_MID_DEVIATION_PIPS = Number.isFinite(Number(GUARDS.MAX_M1_MID_DEVIATION_PIPS)) ? Number(GUARDS.MAX_M1_MID_DEVIATION_PIPS) : 8;
 const MARKET_DETAILS_CACHE_MS = 15000;
 const FX_RATE_CACHE_MS = 10000;
+const CLI_PANEL_WIDTH = 110;
+const ANSI = {
+    reset: "\u001b[0m",
+    cyan: "\u001b[36m",
+    brightCyan: "\u001b[96m",
+    dim: "\u001b[2m",
+    white: "\u001b[97m",
+};
 
 class TradingService {
     constructor() {
@@ -535,14 +543,232 @@ class TradingService {
         return bidNum ?? askNum ?? null;
     }
 
+    formatDiagnosticNumber(value, decimals = 4) {
+        const num = this.toNumber(value);
+        if (!Number.isFinite(num)) return "-";
+        return String(Number(num.toFixed(decimals)));
+    }
+
+    formatDiagnosticBoolean(value) {
+        if (value === true) return "yes";
+        if (value === false) return "no";
+        return "-";
+    }
+
+    formatDiagnosticList(values, separator = ",") {
+        if (!Array.isArray(values) || !values.length) return "-";
+        return values.map((value) => String(value)).filter(Boolean).join(separator);
+    }
+
+    formatDiagnosticReason(reason) {
+        const raw = String(reason || "").trim();
+        if (!raw) return "-";
+        const map = {
+            triggerConfirmed: "trigger_not_confirmed",
+            guardrails_or_trigger_not_ready: "waiting_for_trigger_or_guardrails",
+            symbol_not_in_active_universe: "symbol_not_in_session_universe",
+            symbol_session_filtered: "symbol_session_filtered",
+            hour_bucket_filtered: "hour_bucket_filtered",
+            no_setup: "no_setup",
+        };
+        const normalized = map[raw] || raw;
+        return normalized.replace(/_/g, " ");
+    }
+
+    formatDiagnosticReasons(values, separator = ", ") {
+        if (!Array.isArray(values) || !values.length) return "-";
+        return values
+            .map((value) => this.formatDiagnosticReason(value))
+            .filter((value) => value && value !== "-")
+            .join(separator);
+    }
+
+    formatDiagnosticTimestamp(value) {
+        return this.toIsoTimestamp(value) || "-";
+    }
+
+    supportsPrettyCli() {
+        if (String(process.env.NO_COLOR || "").trim() === "1") return false;
+        if (String(process.env.CI || "").trim() === "true") return false;
+        return Boolean(process.stdout?.isTTY);
+    }
+
+    colorize(text, color) {
+        if (!this.supportsPrettyCli()) return text;
+        const prefix = ANSI[color];
+        return prefix ? `${prefix}${text}${ANSI.reset}` : text;
+    }
+
+    truncateDiagnosticText(value, maxLength = 24) {
+        const text = String(value ?? "-");
+        if (text.length <= maxLength) return text;
+        return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+    }
+
+    padDiagnosticText(value, width, align = "left") {
+        const text = this.truncateDiagnosticText(value, width);
+        if (text.length >= width) return text;
+        return align === "right" ? text.padStart(width, " ") : text.padEnd(width, " ");
+    }
+
+    formatPanelKv(label, value, labelWidth = 8, valueWidth = 16) {
+        return `${this.padDiagnosticText(String(label || "").toUpperCase(), labelWidth)} ${this.padDiagnosticText(value, valueWidth)}`;
+    }
+
+    buildCliPanel(title, rows, width = CLI_PANEL_WIDTH) {
+        const innerWidth = Math.max(20, width - 4);
+        const topBorder = this.colorize(`+${"=".repeat(innerWidth + 2)}+`, "brightCyan");
+        const divider = this.colorize(`+${"-".repeat(innerWidth + 2)}+`, "cyan");
+        const renderLine = (content = "", color = "white") => {
+            const clipped = this.padDiagnosticText(content, innerWidth);
+            const tinted = this.colorize(clipped, color);
+            const border = this.colorize("|", "cyan");
+            return `${border} ${tinted} ${border}`;
+        };
+
+        const lines = [topBorder, renderLine(title, "brightCyan"), divider];
+        for (const row of rows) {
+            lines.push(renderLine(row, "white"));
+        }
+        lines.push(topBorder);
+        return lines.join("\n");
+    }
+
+    determineIntradayBlocker(decision) {
+        if (!decision || typeof decision !== "object") return "UNKNOWN";
+        if (!decision?.step1?.symbolAllowed || decision?.step1?.forceFlatNow) return "STEP1_MARKET_WINDOW";
+        if (decision?.step3?.setupType === "NONE") return "STEP3_SETUP";
+        if (!decision?.step4?.triggerOk) return "STEP4_TRIGGER";
+        if (!decision?.guardrails?.allowed) return "GUARDRAILS";
+        if (!decision?.step5?.valid) return "STEP5_RISK";
+        return "UNKNOWN";
+    }
+
+    buildIntradayDecisionDiagnosticLines(symbol, decision) {
+        const step1 = decision?.step1 || {};
+        const step2 = decision?.step2 || {};
+        const step3 = decision?.step3 || {};
+        const step4 = decision?.step4 || {};
+        const guardrails = decision?.guardrails || {};
+        const step5 = decision?.step5 || {};
+        const upperSymbol = String(symbol || decision?.symbol || "").toUpperCase() || "UNKNOWN";
+        const blocker = this.determineIntradayBlocker(decision);
+        const activeSessions = this.formatDiagnosticList(step1.activeSessions, "+");
+        const preferredSessions = this.formatDiagnosticList(step1.logFields?.preferredSymbolSessions, "+");
+        const contextReasons = this.formatDiagnosticReasons(
+            Array.isArray(step2.contextReasons)
+                ? step2.contextReasons.filter((reason) => !String(reason).startsWith("ema_set="))
+                : [],
+        );
+        const step1Reasons = this.formatDiagnosticReasons(
+            Array.isArray(step1.step1Reasons)
+                ? step1.step1Reasons.filter((reason) => !String(reason).startsWith("session=") && !String(reason).startsWith("overlap="))
+                : [],
+        );
+        const row1 = [
+            this.formatPanelKv("symbol", upperSymbol, 7, 10),
+            this.formatPanelKv("blocker", blocker, 8, 18),
+            this.formatPanelKv("session", step1.activeSession || "-", 8, 10),
+            this.formatPanelKv("regime", step2.regimeType || "-", 7, 10),
+            this.formatPanelKv("adx", this.formatDiagnosticNumber(step2.logFields?.h1Adx, 2), 4, 6),
+        ].join(" | ");
+        const row2 = [
+            this.formatPanelKv("active", activeSessions, 7, 14),
+            this.formatPanelKv("pref", preferredSessions, 5, 14),
+            this.formatPanelKv("hour", step1.hourBucketUtc || "-", 5, 8),
+            this.formatPanelKv("allow", this.formatDiagnosticBoolean(step1.symbolAllowed), 6, 4),
+            this.formatPanelKv("cutoff", this.formatDiagnosticBoolean(step1.forceFlatNow), 7, 4),
+        ].join(" | ");
+        const row3 = [
+            this.formatPanelKv("setup", step3.setupType || "-", 6, 14),
+            this.formatPanelKv("side", step3.side || "-", 5, 6),
+            this.formatPanelKv("rsi", this.formatDiagnosticNumber(step3.logFields?.m15Rsi, 2), 4, 8),
+            this.formatPanelKv("bbpb", this.formatDiagnosticNumber(step3.logFields?.m15BbPb, 3), 5, 8),
+            this.formatPanelKv("score", this.formatDiagnosticNumber(step3.setupScore, 2), 6, 6),
+        ].join(" | ");
+
+        let row4 = [
+            this.formatPanelKv("next", blocker === "STEP3_SETUP" ? "wait_step3" : blocker === "STEP4_TRIGGER" ? "wait_trigger" : blocker === "GUARDRAILS" ? "guard_block" : blocker === "STEP5_RISK" ? "risk_block" : "review", 5, 14),
+            this.formatPanelKv("trigger", this.formatDiagnosticBoolean(step4.triggerOk), 8, 4),
+            this.formatPanelKv("guard", this.formatDiagnosticBoolean(guardrails.allowed), 6, 4),
+            this.formatPanelKv("risk", this.formatDiagnosticBoolean(step5.valid), 5, 4),
+            this.formatPanelKv("vol", step2.volatilityRegime || "-", 4, 8),
+        ].join(" | ");
+
+        let row5 = `notes   ${this.truncateDiagnosticText(contextReasons !== "-" ? contextReasons : step1Reasons, 92)}`;
+        if (blocker === "STEP4_TRIGGER" || blocker === "GUARDRAILS" || blocker === "STEP5_RISK") {
+            row4 = [
+                this.formatPanelKv("trigger", this.formatDiagnosticBoolean(step4.triggerOk), 8, 4),
+                this.formatPanelKv("disp", this.formatDiagnosticBoolean(step4.logFields?.displacementOk), 6, 4),
+                this.formatPanelKv("struct", this.formatDiagnosticBoolean(step4.logFields?.structureBreakOk), 8, 4),
+                this.formatPanelKv("fvg", this.formatDiagnosticBoolean(step4.logFields?.fvgDetected), 5, 4),
+                this.formatPanelKv("m5atr", this.formatDiagnosticNumber(step4.logFields?.m5Atr, 6), 7, 10),
+            ].join(" | ");
+            row5 = `notes   ${this.truncateDiagnosticText(this.formatDiagnosticReasons(step4.triggerReasons), 92)}`;
+        }
+        if (blocker === "GUARDRAILS" || blocker === "STEP5_RISK") {
+            row5 = `guard   ${this.truncateDiagnosticText(`blocks=${this.formatDiagnosticReasons(guardrails.blockReasons)} | daily=${this.formatDiagnosticNumber(guardrails.logFields?.dailyTradeCount, 0)} | long=${this.formatDiagnosticNumber(guardrails.logFields?.clientLongPct, 3)} | short=${this.formatDiagnosticNumber(guardrails.logFields?.clientShortPct, 3)}`, 92)}`;
+        }
+        if (blocker === "STEP5_RISK" || step5.valid) {
+            row5 = `risk    ${this.truncateDiagnosticText(`pct=${this.formatDiagnosticNumber(step5.logFields?.riskPct, 4)} | amt=${this.formatDiagnosticNumber(step5.logFields?.riskAmount, 2)} | stop=${this.formatDiagnosticNumber(step5.logFields?.stopDistance, 6)} | rr=${this.formatDiagnosticNumber(step5.logFields?.rr, 2)} | notes=${this.formatDiagnosticReasons(step5.planReasons)}`, 92)}`;
+        }
+
+        const panel = this.buildCliPanel(`TRON SIGNAL // ${upperSymbol} // ${blocker}`, [row1, row2, row3, row4, row5]);
+        return [panel];
+    }
+
+    buildSnapshotValidationDiagnostic(snapshot, validation) {
+        const details = validation?.details || {};
+        const lagMinutes = details?.lagMinutes || {};
+        const lagTimestamps = details?.lagTimestamps || {};
+        const lagSummary = Object.keys(lagMinutes).length
+            ? Object.entries(lagMinutes)
+                  .map(
+                      ([tf, lag]) =>
+                          `${tf}:${this.formatDiagnosticNumber(lag, 2)}m@${this.formatDiagnosticTimestamp(lagTimestamps?.[tf])}`,
+                  )
+                  .join(",")
+            : "-";
+
+        return [
+            `ts=${this.formatDiagnosticTimestamp(snapshot?.timestamp)}`,
+            `marketTs=${this.formatDiagnosticTimestamp(snapshot?.marketTimestamp)}`,
+            `bid=${this.formatDiagnosticNumber(snapshot?.bid, 6)}`,
+            `ask=${this.formatDiagnosticNumber(snapshot?.ask, 6)}`,
+            `mid=${this.formatDiagnosticNumber(snapshot?.mid, 6)}`,
+            `spread=${this.formatDiagnosticNumber(snapshot?.spread, 6)}`,
+            `lagOffsetMin=${this.formatDiagnosticNumber(details?.lagOffsetMinutes, 0)}`,
+            `lagCheckTs=${this.formatDiagnosticTimestamp(details?.lagCheckTimestamp)}`,
+            `lags=${lagSummary}`,
+            `m1Ref=${this.formatDiagnosticNumber(details?.m1ReferenceClose, 6)}@${this.formatDiagnosticTimestamp(details?.m1ReferenceTimestamp)}`,
+            `driftPips=${this.formatDiagnosticNumber(details?.m1DriftPips, 2)}`,
+            `issues=${this.formatDiagnosticList(validation?.issues)}`,
+        ].join(" | ");
+    }
+
     validateIntradaySnapshot({ symbol, snapshot, isCrypto = false }) {
         const issues = [];
+        const details = {
+            snapshotTimestamp: this.toIsoTimestamp(snapshot?.timestamp),
+            marketTimestamp: this.toIsoTimestamp(snapshot?.marketTimestamp),
+            lagOffsetMinutes: 0,
+            lagCheckTimestamp: null,
+            lagMinutes: {},
+            lagTimestamps: {},
+            m1ReferenceTimestamp: null,
+            m1ReferenceClose: null,
+            m1DriftPips: null,
+        };
         const tsMs = this.toTimestampMs(snapshot?.timestamp);
         if (!Number.isFinite(tsMs)) issues.push("invalid_snapshot_timestamp");
 
         const bid = this.toNumber(snapshot?.bid);
         const ask = this.toNumber(snapshot?.ask);
         const mid = this.toNumber(snapshot?.mid);
+        details.bid = bid;
+        details.ask = ask;
+        details.mid = mid;
+        details.spread = this.toNumber(snapshot?.spread);
         if (!isCrypto) {
             if (!Number.isFinite(bid) || !Number.isFinite(ask)) {
                 issues.push("invalid_bid_ask");
@@ -554,38 +780,48 @@ class TradingService {
 
         const evaluateLagIssues = (anchorTsMs) => {
             const lagIssues = [];
+            const lagMinutesByTf = {};
+            const lagTimestamps = {};
             for (const [tf, bounds] of Object.entries(SNAPSHOT_CANDLE_LAG_BOUNDS_MINUTES)) {
                 const bar = snapshot?.bars?.[tf];
                 const barTsMs = this.toTimestampMs(bar?.t);
                 if (!Number.isFinite(barTsMs)) {
                     lagIssues.push(`${tf}_bar_time_invalid`);
+                    lagTimestamps[tf] = this.toIsoTimestamp(bar?.t);
                     continue;
                 }
                 const lagMinutes = (anchorTsMs - barTsMs) / 60000;
-                if (lagMinutes < bounds.min || lagMinutes > bounds.max) {
-                    lagIssues.push(`${tf}_bar_lag_${lagMinutes.toFixed(2)}m`);
+                lagTimestamps[tf] = this.toIsoTimestamp(bar?.t);
+                lagMinutesByTf[tf] = Number(lagMinutes.toFixed(2));
+                if (lagMinutesByTf[tf] < bounds.min || lagMinutesByTf[tf] > bounds.max) {
+                    lagIssues.push(`${tf}_bar_lag_${lagMinutesByTf[tf].toFixed(2)}m`);
                 }
             }
-            return lagIssues;
+            return { lagIssues, lagMinutes: lagMinutesByTf, lagTimestamps };
         };
 
         if (Number.isFinite(tsMs)) {
-            let lagIssues = evaluateLagIssues(tsMs);
+            let lagDiagnostics = evaluateLagIssues(tsMs);
+            details.lagCheckTimestamp = this.toIsoTimestamp(tsMs);
 
             // Auto-correct recurring timezone offsets (e.g. +/-60m) when that
             // fully resolves all timeframe lag checks.
-            if (lagIssues.length) {
+            if (lagDiagnostics.lagIssues.length) {
                 const offsetCandidates = [-60, 60, -120, 120, -180, 180];
                 for (const offsetMinutes of offsetCandidates) {
                     const shifted = tsMs + offsetMinutes * 60000;
-                    const shiftedIssues = evaluateLagIssues(shifted);
-                    if (!shiftedIssues.length) {
-                        lagIssues = shiftedIssues;
+                    const shiftedDiagnostics = evaluateLagIssues(shifted);
+                    if (!shiftedDiagnostics.lagIssues.length) {
+                        lagDiagnostics = shiftedDiagnostics;
+                        details.lagOffsetMinutes = offsetMinutes;
+                        details.lagCheckTimestamp = this.toIsoTimestamp(shifted);
                         break;
                     }
                 }
             }
-            issues.push(...lagIssues);
+            details.lagMinutes = lagDiagnostics.lagMinutes;
+            details.lagTimestamps = lagDiagnostics.lagTimestamps;
+            issues.push(...lagDiagnostics.lagIssues);
         }
 
         const m1ReferenceBarCandidates = [snapshot?.latestBars?.m1, snapshot?.bars?.m1]
@@ -609,9 +845,12 @@ class TradingService {
             snapshot?.indicators?.m1?.close,
             snapshot?.indicators?.m1?.lastClose,
         );
+        details.m1ReferenceTimestamp = this.toIsoTimestamp(m1ReferenceBar?.tsMs);
+        details.m1ReferenceClose = Number.isFinite(m1Close) ? m1Close : null;
         if (!isCrypto && Number.isFinite(mid) && Number.isFinite(m1Close)) {
             const pipValue = this.getPipValue(symbol);
             const driftPips = pipValue > 0 ? Math.abs(mid - m1Close) / pipValue : null;
+            details.m1DriftPips = Number.isFinite(driftPips) ? Number(driftPips.toFixed(2)) : null;
             if (Number.isFinite(driftPips) && driftPips > MAX_M1_MID_DEVIATION_PIPS) {
                 issues.push(`m1_mid_drift_${driftPips.toFixed(2)}pip`);
             }
@@ -620,6 +859,7 @@ class TradingService {
         return {
             ok: issues.length === 0,
             issues,
+            details,
         };
     }
 
@@ -1138,6 +1378,7 @@ class TradingService {
             if (!snapshotValidation.ok) {
                 const reason = `snapshot_invalid:${snapshotValidation.issues.join("|")}`;
                 logger.warn(`[ProcessPrice] ${upperSymbol} blocked: ${reason}`);
+                logger.debug(`[SnapshotDiag] ${upperSymbol} | ${this.buildSnapshotValidationDiagnostic(snapshot, snapshotValidation)}`);
                 this.safeLogStrategyDecision({
                     ...decisionContext,
                     phase: "entry_gate",
@@ -1147,6 +1388,7 @@ class TradingService {
                     snapshot,
                     metadata: {
                         issues: snapshotValidation.issues,
+                        snapshotValidation: snapshotValidation.details,
                     },
                 });
                 return;
@@ -1180,7 +1422,16 @@ class TradingService {
             });
 
             if (!signal || !orderPlan) {
-                logger.debug(`[Signal] ${upperSymbol}: no intraday signal (${reason})`);
+                const blocker = this.determineIntradayBlocker(decision);
+                const diagnosticLines = this.buildIntradayDecisionDiagnosticLines(upperSymbol, decision);
+                logger.debug(
+                    `[Signal] ${upperSymbol}: no intraday signal | blocker=${blocker} | session=${decision?.step1?.activeSession || "-"} | regime=${decision?.step2?.regimeType || "-"} | adx=${this.formatDiagnosticNumber(decision?.step2?.logFields?.h1Adx, 2)} | setup=${decision?.step3?.setupType || "-"} | trigger=${this.formatDiagnosticBoolean(decision?.step4?.triggerOk)}`,
+                );
+                if (!logger.isDashboardEnabled?.()) {
+                    for (const line of diagnosticLines) {
+                        logger.debug(line);
+                    }
+                }
                 this.safeLogStrategyDecision({
                     ...decisionContext,
                     phase: "evaluate",
@@ -1190,9 +1441,17 @@ class TradingService {
                     side: null,
                     snapshot,
                     decision: {
+                        step1: decision?.step1 || null,
+                        step2: decision?.step2 || null,
+                        step3: decision?.step3 || null,
+                        step4: decision?.step4 || null,
                         reasons: decision?.reasons || [],
                         guardrails: decision?.guardrails || null,
                         step5: decision?.step5 || null,
+                    },
+                    metadata: {
+                        blocker,
+                        diagnostics: diagnosticLines,
                     },
                 });
                 return;
