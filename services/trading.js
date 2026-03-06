@@ -22,6 +22,7 @@ import {
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
 import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
+import { step1MarketTimeWindow } from "../intraday/step1MarketTimeWindow.js";
 import {
     CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID,
     evaluateCryptoLiquidityWindowMomentum,
@@ -587,7 +588,27 @@ class TradingService {
             issues.push(...lagIssues);
         }
 
-        const m1Close = this.firstNumber(snapshot?.bars?.m1?.c, snapshot?.indicators?.m1?.close, snapshot?.indicators?.m1?.lastClose);
+        const m1ReferenceBarCandidates = [snapshot?.latestBars?.m1, snapshot?.bars?.m1]
+            .filter((bar) => bar && typeof bar === "object")
+            .map((bar) => ({
+                close: this.toNumber(bar?.c ?? bar?.close),
+                tsMs: this.toTimestampMs(bar?.t ?? bar?.timestamp),
+            }))
+            .filter((bar) => Number.isFinite(bar.close));
+        const m1ReferenceBar =
+            Number.isFinite(tsMs) && m1ReferenceBarCandidates.length
+                ? [...m1ReferenceBarCandidates].sort((a, b) => {
+                      const aDistance = Number.isFinite(a.tsMs) ? Math.abs(tsMs - a.tsMs) : Number.POSITIVE_INFINITY;
+                      const bDistance = Number.isFinite(b.tsMs) ? Math.abs(tsMs - b.tsMs) : Number.POSITIVE_INFINITY;
+                      return aDistance - bDistance;
+                  })[0]
+                : null;
+        const m1Close = this.firstNumber(
+            m1ReferenceBar?.close,
+            snapshot?.bars?.m1?.c,
+            snapshot?.indicators?.m1?.close,
+            snapshot?.indicators?.m1?.lastClose,
+        );
         if (!isCrypto && Number.isFinite(mid) && Number.isFinite(m1Close)) {
             const pipValue = this.getPipValue(symbol);
             const driftPips = pipValue > 0 ? Math.abs(mid - m1Close) / pipValue : null;
@@ -630,6 +651,23 @@ class TradingService {
 
     shouldAlwaysEvaluateCryptoSymbol(symbol) {
         return this.isCryptoLiquidityWindowMomentumSymbol(symbol);
+    }
+
+    shouldEvaluateForexSymbolNow(symbol, now = new Date()) {
+        const upperSymbol = String(symbol || "").toUpperCase();
+        if (!upperSymbol || this.isCryptoSymbol(upperSymbol)) return true;
+        const config =
+            this.intradayForexEngine && typeof this.intradayForexEngine.getResolvedConfigForSymbol === "function"
+                ? this.intradayForexEngine.getResolvedConfigForSymbol(upperSymbol) || this.intradayForexConfig
+                : this.intradayForexConfig;
+        const step1 = step1MarketTimeWindow(
+            {
+                nowUtc: now,
+                symbol: upperSymbol,
+            },
+            config,
+        );
+        return Boolean(step1?.symbolAllowed) && !Boolean(step1?.forceFlatNow);
     }
 
     shouldUseCryptoLiquidityWindowMomentumForOpenDeal(dealId, symbol) {
@@ -1048,6 +1086,10 @@ class TradingService {
                 if (!Array.isArray(arr) || arr.length <= backFromEnd) return null;
                 return normalizeBar(arr[arr.length - 1 - backFromEnd]);
             };
+            const toLatestBar = (arr) => {
+                if (!Array.isArray(arr) || !arr.length) return null;
+                return normalizeBar(arr[arr.length - 1]);
+            };
             const snapshot = {
                 symbol: upperSymbol,
                 timestamp: signalTimestamp,
@@ -1070,6 +1112,12 @@ class TradingService {
                     m15: toClosedBar(candles?.m15Candles, 1),
                     m5: toClosedBar(candles?.m5Candles, 1),
                     m1: toClosedBar(candles?.m1Candles, 1),
+                },
+                latestBars: {
+                    h1: toLatestBar(candles?.h1Candles),
+                    m15: toLatestBar(candles?.m15Candles),
+                    m5: toLatestBar(candles?.m5Candles),
+                    m1: toLatestBar(candles?.m1Candles),
                 },
                 prevBars: {
                     m15: toClosedBar(candles?.m15Candles, 2),

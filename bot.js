@@ -644,6 +644,11 @@ class TradingBot {
             }
         }
 
+        if (typeof tradingService.shouldEvaluateForexSymbolNow === "function" && !tradingService.shouldEvaluateForexSymbolNow(symbol, now)) {
+            context.rejectReason = "strategy_session_filter";
+            return false;
+        }
+
         return true;
     }
 
