@@ -67,6 +67,20 @@ function cutoffMinutes(cutoff) {
     return hour * 60 + minute;
 }
 
+function utcHourBucket(nowUtc) {
+    const date = toUtcDate(nowUtc);
+    const hour = date.getUTCHours();
+    if (hour < 6) return "00-05";
+    if (hour < 12) return "06-11";
+    if (hour < 18) return "12-17";
+    return "18-23";
+}
+
+function normalizedBucketList(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map((bucket) => String(bucket || "").trim()).filter(Boolean);
+}
+
 export function isPastFlatPositionsCutoff(nowUtc, assetClass, config = DEFAULT_INTRADAY_CONFIG) {
     const date = toUtcDate(nowUtc);
     const currentMin = minutesOfDayUtc(date);
@@ -83,10 +97,16 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     const nowUtc = toUtcDate(input?.nowUtc || Date.now());
     const symbol = String(input?.symbol || "").toUpperCase();
     const assetClass = assetClassOfSymbol(symbol);
+    const hourBucket = utcHourBucket(nowUtc);
     const activeSessions = determineActiveSessions(nowUtc, config);
     const activeSession = determineActiveSession(nowUtc, config);
     const sessionForexSymbols = activeSession ? allowedSymbolsBySession(activeSession) : [];
     const preferredSymbolSessions = assetClass === "forex" ? preferredSessionsForSymbol(symbol, config) : null;
+    const allowedHourBuckets = normalizedBucketList(config?.schedule?.allowedUtcHourBuckets);
+    const blockedHourBuckets = normalizedBucketList(config?.schedule?.blockedUtcHourBuckets);
+    const hourAllowed =
+        (!allowedHourBuckets.length || allowedHourBuckets.includes(hourBucket)) &&
+        !blockedHourBuckets.includes(hourBucket);
     const sessionAllowedBySymbolFilter =
         assetClass === "forex"
             ? !preferredSymbolSessions || (activeSession ? preferredSymbolSessions.includes(activeSession) : false)
@@ -95,7 +115,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     const symbolAllowed =
         assetClass === "crypto"
             ? CRYPTO_SYMBOLS.includes(symbol)
-            : sessionForexSymbols.includes(symbol) && sessionAllowedBySymbolFilter;
+            : sessionForexSymbols.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed;
     const forceFlatNow = isPastFlatPositionsCutoff(nowUtc, assetClass, config);
 
     const reasons = [];
@@ -103,6 +123,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     if (activeSessions.length > 1) reasons.push(`overlap=${activeSessions.join("+")}`);
     if (!symbolAllowed) reasons.push("symbol_not_in_active_universe");
     if (assetClass === "forex" && preferredSymbolSessions && !sessionAllowedBySymbolFilter) reasons.push("symbol_session_filtered");
+    if (!hourAllowed) reasons.push("hour_bucket_filtered");
     if (forceFlatNow) reasons.push("past_intraday_cutoff");
 
     const output = {
@@ -118,6 +139,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
         symbolAllowed,
         intradayOnly: true,
         forceFlatNow,
+        hourBucketUtc: hourBucket,
         flatCutoffUtc:
             assetClass === "crypto"
                 ? config.intradayOnly?.flatPositionsCutoffUtcCrypto || null
@@ -128,6 +150,9 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
             activeSessions,
             symbolAllowed,
             preferredSymbolSessions: preferredSymbolSessions || null,
+            hourBucketUtc: hourBucket,
+            allowedHourBuckets: allowedHourBuckets.length ? allowedHourBuckets : null,
+            blockedHourBuckets: blockedHourBuckets.length ? blockedHourBuckets : null,
             forceFlatNow,
             assetClass,
         },

@@ -1,5 +1,5 @@
 import { getOpenPositions, getHistorical } from "../api.js";
-import { CRYPTO_SYMBOLS, SESSIONS, LIVE_SYMBOLS } from "../config.js";
+import { CRYPTO_SYMBOLS, SESSIONS, LIVE_SYMBOLS, PRICE_LOGGER as PRICE_LOGGER_CONFIG } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import tradingService from "../services/trading.js";
 import webSocketService from "../services/websocket.js";
@@ -262,6 +262,11 @@ function getDateKeyInTimeZone(timeZone, date = new Date()) {
 }
 
 export function startPriceMonitor(bot) {
+    if (!PRICE_LOGGER_CONFIG?.ENABLED) {
+        logger.info("[PriceMonitor] Disabled (PRICE_LOGGER_ENABLED is false).");
+        if (bot.priceMonitorInterval) clearInterval(bot.priceMonitorInterval);
+        return;
+    }
     const interval = (60 - new Date().getUTCSeconds()) * 1000 - new Date().getUTCMilliseconds() + 1000;
     logger.info(`[PriceMonitor] Starting (every 1 minute) after ${interval}ms at ${new Date().toISOString()}`);
     if (bot.priceMonitorInterval) clearInterval(bot.priceMonitorInterval);

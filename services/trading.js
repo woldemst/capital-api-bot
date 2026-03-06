@@ -522,6 +522,11 @@ class TradingService {
         return Number.isFinite(tsMs) ? tsMs : null;
     }
 
+    toIsoTimestamp(value) {
+        const tsMs = this.toTimestampMs(value);
+        return Number.isFinite(tsMs) ? new Date(tsMs).toISOString() : null;
+    }
+
     getMidPrice(bid, ask) {
         const bidNum = this.toNumber(bid);
         const askNum = this.toNumber(ask);
@@ -937,7 +942,7 @@ class TradingService {
     // ============================================================
     //                   MAIN PRICE LOOP
     // ============================================================
-    async processPrice({ symbol, indicators, candles = null, bid, ask, timestamp, sessions = [], newsBlocked = false }) {
+    async processPrice({ symbol, indicators, candles = null, bid, ask, timestamp, marketTimestamp = null, sessions = [], newsBlocked = false }) {
         const upperSymbol = String(symbol || "").toUpperCase();
         const signalTimestamp = timestamp || new Date().toISOString();
         try {
@@ -1046,13 +1051,21 @@ class TradingService {
             const snapshot = {
                 symbol: upperSymbol,
                 timestamp: signalTimestamp,
+                marketTimestamp: this.toIsoTimestamp(marketTimestamp),
                 bid: bidNum,
                 ask: askNum,
                 mid: midNum,
                 spread,
+                price: midNum,
                 sessions: Array.isArray(sessions) ? sessions : [],
                 indicators: indicators || {},
                 bars: {
+                    h1: toClosedBar(candles?.h1Candles, 1),
+                    m15: toClosedBar(candles?.m15Candles, 1),
+                    m5: toClosedBar(candles?.m5Candles, 1),
+                    m1: toClosedBar(candles?.m1Candles, 1),
+                },
+                candles: {
                     h1: toClosedBar(candles?.h1Candles, 1),
                     m15: toClosedBar(candles?.m15Candles, 1),
                     m5: toClosedBar(candles?.m5Candles, 1),

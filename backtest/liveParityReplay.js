@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
+import { DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import { RISK, SESSIONS } from "../config.js";
 
@@ -81,6 +81,8 @@ const LEVERAGE_FX_MAJOR = Number.isFinite(Number(process.env.LIVE_PARITY_LEVERAG
 const LEVERAGE_FX_NON_MAJOR = Number.isFinite(Number(process.env.LIVE_PARITY_LEVERAGE_FX_NON_MAJOR))
     ? Number(process.env.LIVE_PARITY_LEVERAGE_FX_NON_MAJOR)
     : 20;
+const CONFIG_OVERRIDE_JSON_RAW = String(process.env.LIVE_PARITY_CONFIG_OVERRIDE_JSON || "").trim();
+const CONFIG_OVERRIDE_FILE = String(process.env.LIVE_PARITY_CONFIG_OVERRIDE_FILE || "").trim();
 
 const ROLLOVER_TIMEZONE = "America/New_York";
 const ROLLOVER_HOUR = 17;
@@ -104,6 +106,19 @@ function parseTimestamp(raw) {
     if (!raw) return null;
     const tsMs = Date.parse(String(raw));
     return Number.isFinite(tsMs) ? tsMs : null;
+}
+
+function parseConfigOverrides() {
+    if (CONFIG_OVERRIDE_JSON_RAW) {
+        return JSON.parse(CONFIG_OVERRIDE_JSON_RAW);
+    }
+    if (CONFIG_OVERRIDE_FILE) {
+        const filePath = path.isAbsolute(CONFIG_OVERRIDE_FILE)
+            ? CONFIG_OVERRIDE_FILE
+            : path.join(process.cwd(), CONFIG_OVERRIDE_FILE);
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    }
+    return {};
 }
 
 function utcDayKey(tsMs) {
@@ -236,7 +251,28 @@ function parseSymbolSessionFilter(raw) {
     return map;
 }
 
-const FILTER_SYMBOL_SESSIONS = parseSymbolSessionFilter(FILTER_SYMBOL_SESSIONS_RAW);
+function symbolSessionFilterFromConfig(config = DEFAULT_INTRADAY_CONFIG) {
+    const source = config?.symbolSessions;
+    const map = new Map();
+    if (!source || typeof source !== "object") return map;
+
+    for (const [symbol, rawSessions] of Object.entries(source)) {
+        const key = String(symbol || "").trim().toUpperCase();
+        if (!key) continue;
+        const sessions = Array.isArray(rawSessions)
+            ? rawSessions
+                  .map((session) => String(session || "").trim().toUpperCase())
+                  .filter(Boolean)
+            : [];
+        map.set(key, new Set(sessions));
+    }
+
+    return map;
+}
+
+const FILTER_SYMBOL_SESSIONS = FILTER_SYMBOL_SESSIONS_RAW
+    ? parseSymbolSessionFilter(FILTER_SYMBOL_SESSIONS_RAW)
+    : symbolSessionFilterFromConfig(DEFAULT_INTRADAY_CONFIG);
 
 function inSession(currentMinutes, startMinutes, endMinutes, { inclusiveEnd = false } = {}) {
     if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
@@ -782,13 +818,14 @@ async function run() {
     const timeline = [...timelineSet].sort((a, b) => a - b);
     if (!timeline.length) throw new Error("Empty timeline in selected period.");
 
-    const engine = createIntradaySevenStepEngine({
-        ...DEFAULT_INTRADAY_CONFIG,
-        risk: {
-            ...(DEFAULT_INTRADAY_CONFIG.risk || {}),
-            forexRiskPct: PHASE1_RISK_PCT,
-        },
-    });
+    const configOverrides = parseConfigOverrides();
+    const engine = createIntradaySevenStepEngine(
+        mergeIntradayConfig(configOverrides, {
+            risk: {
+                forexRiskPct: PHASE1_RISK_PCT,
+            },
+        }),
+    );
     const state = createIntradayRuntimeState({ strategyId: "INTRADAY_7STEP_FOREX" });
 
     const pointers = {};
@@ -1218,7 +1255,7 @@ async function run() {
                 continue;
             }
 
-            const targetRiskPct = riskPctForTs(tsMs);
+            const phaseRiskPct = riskPctForTs(tsMs);
 
             const side = String(plan.side || "").toUpperCase();
             const plannedEntryPrice = toNum(plan.entryPrice);
@@ -1226,7 +1263,13 @@ async function run() {
             const tp = toNum(plan.tp);
             const plannedSize = toNum(plan.size);
             const plannedRiskAmount = toNum(plan.riskAmount);
-            // Enforce replay risk regime from equity (compounding), independent from step5 static config riskPct.
+            // Respect symbol-specific step5 sizing, then scale it by the active replay phase multiplier.
+            const plannedRiskPct = equity > 0 && Number.isFinite(plannedRiskAmount) ? plannedRiskAmount / equity : null;
+            let targetRiskPct = phaseRiskPct;
+            if (Number.isFinite(plannedRiskPct) && plannedRiskPct > 0) {
+                const phaseScale = PHASE1_RISK_PCT > 0 ? phaseRiskPct / PHASE1_RISK_PCT : 1;
+                targetRiskPct = plannedRiskPct * phaseScale;
+            }
             const targetRiskAmount = equity * targetRiskPct;
             let size = plannedSize;
             if (Number.isFinite(plannedSize) && Number.isFinite(plannedRiskAmount) && plannedRiskAmount > 0) {
@@ -1521,6 +1564,7 @@ async function run() {
             maxOpenRiskPct: MAX_OPEN_RISK_PCT,
             filters: activeFilterSummary(),
             minPatternTrades: MIN_PATTERN_TRADES,
+            configOverrides: Object.keys(configOverrides || {}).length ? configOverrides : null,
         },
         summary: {
             rangeStartIso: new Date(actualStartMs).toISOString(),

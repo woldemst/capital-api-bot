@@ -430,7 +430,8 @@ class TradingBot {
         const latestM1Timestamp = m1Candles?.[m1Candles.length - 1]?.timestamp;
         const { bid, ask, timestamp: marketTimestamp } = await this.getBidAsk(symbol, latestM1Timestamp);
         const timestamp = marketTimestamp || this.toIsoTimestamp(latestM1Timestamp) || new Date().toISOString();
-        const activeSessions = this.getActiveSessionNames(new Date()).filter((sessionName) => {
+        const sessionAnchor = new Date(timestamp);
+        const activeSessions = this.getActiveSessionNames(Number.isFinite(sessionAnchor.getTime()) ? sessionAnchor : new Date()).filter((sessionName) => {
             if (sessionName === "CRYPTO") return this.isCryptoSymbol(symbol);
             const sessionSymbols = SESSIONS?.[sessionName]?.SYMBOLS || [];
             return sessionSymbols.includes(symbol);
@@ -457,6 +458,7 @@ class TradingBot {
             bid,
             ask,
             timestamp,
+            marketTimestamp: marketTimestamp || null,
             sessions: activeSessions,
             newsBlocked,
         });

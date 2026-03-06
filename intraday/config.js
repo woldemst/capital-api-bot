@@ -31,8 +31,8 @@ function parseSymbolSessionFilter(value) {
 const RAW_SESSION_SYMBOLS = {
     LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
     NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
-    SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
-    TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY"],
+    SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
+    TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
 };
 
 const FOREX_SYMBOL_BLOCKLIST_DEFAULT = ["USDCHF"];
@@ -57,6 +57,44 @@ const DEFAULT_SYMBOL_SESSIONS = {
     USDCAD: ["NY"],
     USDCHF: [],
     AUDUSD: ["SYDNEY", "TOKYO"],
+    NZDUSD: ["SYDNEY", "TOKYO"],
+};
+const DEFAULT_PAIR_OVERRIDES = {
+    EURUSD: {
+        context: {
+            adxTrendMin: 25,
+        },
+        setup: {
+            maxH1AdxForTrendSetup: 55,
+        },
+    },
+    GBPUSD: {
+        context: {
+            adxTrendMin: 25,
+        },
+        setup: {
+            maxH1AdxForTrendSetup: 50,
+        },
+    },
+    USDJPY: {
+        risk: {
+            forexRiskPct: 0.02,
+        },
+        schedule: {
+            blockedUtcHourBuckets: ["18-23"],
+        },
+    },
+    USDCAD: {},
+    USDCHF: {},
+    AUDUSD: {},
+    NZDUSD: {
+        risk: {
+            forexRiskPct: 0.02,
+        },
+        trigger: {
+            requireStructureBreak: true,
+        },
+    },
 };
 const SYMBOL_SESSION_FILTER_RAW =
     ENV.FOREX_SYMBOL_SESSION_FILTER === undefined
@@ -86,6 +124,7 @@ export const DEFAULT_INTRADAY_CONFIG = {
         flatPositionsCutoffUtcCrypto: { hour: 23, minute: 55 },
         cryptoDayBoundaryExit: true,
     },
+    schedule: {},
     guardrails: {
         maxTradesPerDay: 15,
         blockDuplicateSymbolEntries: true,
@@ -177,12 +216,13 @@ export const DEFAULT_INTRADAY_CONFIG = {
         USDJPY: "JPY_MAJOR_SCALP",
         USDCHF: "CHF_MAJOR_SCALP",
     },
-    pairOverrides: {},
+    pairOverrides: DEFAULT_PAIR_OVERRIDES,
 };
 
 const NESTED_OBJECT_KEYS = [
     "guardrails",
     "intradayOnly",
+    "schedule",
     "context",
     "setup",
     "trigger",

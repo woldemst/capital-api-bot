@@ -63,6 +63,10 @@ export const NEWS_GUARD = {
     },
 };
 
+export const PRICE_LOGGER = {
+    ENABLED: isTrue(ENV.PRICE_LOGGER_ENABLED),
+};
+
 const DEFAULT_LIVE_SYMBOLS = [
     ...new Set([
         ...SESSION_SYMBOLS.LONDON,
