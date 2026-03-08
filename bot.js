@@ -285,6 +285,7 @@ class TradingBot {
 
         for (const [name, session] of Object.entries(SESSIONS)) {
             if (name === "CRYPTO") {
+                if (!Array.isArray(CRYPTO_SYMBOLS) || CRYPTO_SYMBOLS.length === 0) continue;
                 activeSessionNames.push(name);
                 continue;
             }
@@ -668,17 +669,52 @@ startHubServer();
 
 const bot = new TradingBot();
 
-const hasAlwaysOnCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.length > 0;
-const now = new Date();
-const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
-if ((day === 0 || day === 6) && !hasAlwaysOnCrypto) {
-    logger.info("[Bot] It's the weekend. Bot will not start until Monday.");
-} else {
-    if ((day === 0 || day === 6) && hasAlwaysOnCrypto) {
-        logger.info("[Bot] Weekend detected, but CRYPTO symbols are configured. Starting bot.");
+function computeNextForexOpenDelayMs(from = new Date()) {
+    const nowUtc = from instanceof Date ? from : new Date(from);
+    const day = nowUtc.getUTCDay();
+    const minutes = nowUtc.getUTCHours() * 60 + nowUtc.getUTCMinutes();
+    const sundayOpenMinutes = 22 * 60;
+
+    let daysUntilSunday = (7 - day) % 7;
+    if (day === 0 && minutes < sundayOpenMinutes) {
+        daysUntilSunday = 0;
+    } else if (day === 0 && minutes >= sundayOpenMinutes) {
+        daysUntilSunday = 7;
     }
+
+    const nextOpen = new Date(nowUtc.getTime());
+    nextOpen.setUTCHours(22, 0, 0, 0);
+    nextOpen.setUTCDate(nextOpen.getUTCDate() + daysUntilSunday);
+
+    return Math.max(0, nextOpen.getTime() - nowUtc.getTime());
+}
+
+function startBot() {
     bot.initialize().catch((error) => {
         logger.error("[bot.js] Bot initialization failed:", error);
         process.exit(1);
     });
+}
+
+const hasAlwaysOnCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.length > 0;
+const now = new Date();
+const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
+const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+const forexSundayOpenMinutes = 22 * 60;
+const forexWeekendClosed = day === 6 || (day === 0 && currentMinutes < forexSundayOpenMinutes);
+
+if (forexWeekendClosed && !hasAlwaysOnCrypto) {
+    const delayMs = computeNextForexOpenDelayMs(now);
+    logger.info(`[Bot] Forex weekend is still closed. Scheduling start at Sunday 22:00 UTC in ${Math.round(delayMs / 60000)} minutes.`);
+    setTimeout(() => {
+        logger.info("[Bot] Scheduled Forex market open reached. Starting bot.");
+        startBot();
+    }, delayMs);
+} else {
+    if (forexWeekendClosed && hasAlwaysOnCrypto) {
+        logger.info("[Bot] Forex weekend is closed, but CRYPTO symbols are configured. Starting bot.");
+    } else if (day === 0 && !forexWeekendClosed) {
+        logger.info("[Bot] Forex market is open again for the new week. Starting bot.");
+    }
+    startBot();
 }

@@ -2,13 +2,19 @@ import fs from "fs";
 import path from "path";
 import { sanitizePriceSnapshotRows } from "./priceSnapshotSanity.js";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
+import { DEFAULT_CRYPTO_INTRADAY_CONFIG, DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import { CRYPTO_SYMBOLS, RISK, SESSIONS } from "../config.js";
 
 const PRICES_DIR = path.join(process.cwd(), "backtest", "prices");
 const LOGS_DIR = path.join(process.cwd(), "backtest", "logs");
 const LOOKBACK_DAYS = Number.isFinite(Number(process.env.BT_ANALYZE_DAYS)) ? Number(process.env.BT_ANALYZE_DAYS) : 3;
+const EXPLICIT_START_TS = Number.isFinite(Date.parse(String(process.env.BT_ANALYZE_START || "")))
+    ? Date.parse(String(process.env.BT_ANALYZE_START))
+    : null;
+const EXPLICIT_END_TS = Number.isFinite(Date.parse(String(process.env.BT_ANALYZE_END || "")))
+    ? Date.parse(String(process.env.BT_ANALYZE_END))
+    : null;
 const SYMBOL_FILTER = new Set(
     String(process.env.BT_ANALYZE_SYMBOLS || "")
         .split(",")
@@ -50,36 +56,10 @@ const intradayForexConfig = {
     backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
 };
 
-const intradayCryptoConfig = {
-    ...DEFAULT_INTRADAY_CONFIG,
+const intradayCryptoConfig = mergeIntradayConfig(DEFAULT_INTRADAY_CONFIG, {
+    ...DEFAULT_CRYPTO_INTRADAY_CONFIG,
     strategyId: "INTRADAY_7STEP_CRYPTO",
-    context: {
-        ...(DEFAULT_INTRADAY_CONFIG.context || {}),
-        adxTrendMin: 18,
-        adxRangeMax: 18,
-    },
-    setup: {
-        ...(DEFAULT_INTRADAY_CONFIG.setup || {}),
-        trendPullbackZonePct: 0.0023,
-        trendRsiMin: 38,
-        trendRsiMax: 62,
-        rangeBbPbLow: 0.2,
-        rangeBbPbHigh: 0.8,
-        rangeRsiLow: 40,
-        rangeRsiHigh: 60,
-    },
-    trigger: {
-        ...(DEFAULT_INTRADAY_CONFIG.trigger || {}),
-        displacementAtrMultiplier: 1.0,
-        requireStructureBreak: false,
-    },
-    risk: { ...(DEFAULT_INTRADAY_CONFIG.risk || {}) },
-    guardrails: {
-        ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}),
-        allowRangeContrarian: true,
-    },
-    backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
-};
+});
 
 function toNum(value) {
     const n = Number(value);
@@ -375,6 +355,7 @@ function readPricesWindow() {
     const files = fs.readdirSync(PRICES_DIR).filter((f) => f.endsWith(".jsonl")).sort();
     const allBySymbol = new Map();
     let maxTs = 0;
+    let minTs = Number.POSITIVE_INFINITY;
     for (const file of files) {
         const symbol = file.replace(".jsonl", "").toUpperCase();
         if (SYMBOL_FILTER.size && !SYMBOL_FILTER.has(symbol)) continue;
@@ -392,6 +373,12 @@ function readPricesWindow() {
                 `[DataSanity] ${symbol}: dropped ${stats.dropped}/${stats.total} invalid price rows (${(stats.validRatio * 100).toFixed(2)}% valid).`,
             );
         }
+        if (stats.repaired > 0) {
+            const repairedSummary = (stats.repairedFields || [])
+                .map((item) => `${item.field}=${item.count}`)
+                .join(", ");
+            console.warn(`[DataSanity] ${symbol}: repaired ${stats.repaired} rows (${repairedSummary || "timestamps"}).`);
+        }
         if (stats.skipFile) {
             console.warn(
                 `[DataSanity] ${symbol}: skipped for validation (valid ratio ${(stats.validRatio * 100).toFixed(2)}% < ${(MIN_VALID_PRICE_ROW_RATIO * 100).toFixed(2)}%).`,
@@ -399,16 +386,28 @@ function readPricesWindow() {
             continue;
         }
         if (!validRows.length) continue;
+        minTs = Math.min(minTs, validRows[0].tsMs);
         maxTs = Math.max(maxTs, validRows[validRows.length - 1].tsMs);
         allBySymbol.set(symbol, validRows);
     }
-    const startTs = maxTs - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(maxTs)) {
+        return { startTs: null, endTs: null, bySymbol: new Map() };
+    }
+    const startTs =
+        EXPLICIT_START_TS !== null
+            ? EXPLICIT_START_TS
+            : maxTs - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+    const endTs = EXPLICIT_END_TS !== null ? EXPLICIT_END_TS : maxTs;
+    const normalizedStartTs = Number.isFinite(startTs) ? startTs : minTs;
+    const normalizedEndTs = Number.isFinite(endTs) ? endTs : maxTs;
+    const windowStartTs = Math.min(normalizedStartTs, normalizedEndTs);
+    const windowEndTs = Math.max(normalizedStartTs, normalizedEndTs);
     const filtered = new Map();
     for (const [symbol, rows] of allBySymbol.entries()) {
-        const inRange = rows.filter((r) => r.tsMs >= startTs && r.tsMs <= maxTs);
+        const inRange = rows.filter((r) => r.tsMs >= windowStartTs && r.tsMs <= windowEndTs);
         if (inRange.length) filtered.set(symbol, inRange);
     }
-    return { startTs, endTs: maxTs, bySymbol: filtered };
+    return { startTs: windowStartTs, endTs: windowEndTs, bySymbol: filtered };
 }
 
 function readActualTradesWindow(startTs, endTs) {
@@ -832,6 +831,7 @@ function main() {
     const replayOnlyBySymbol = countBy(replayOnly, (x) => x.symbol);
     const actualOnlyBySymbol = countBy(actualOnly, (x) => x.symbol);
     const actualBySymbol = countBy(actualEntries, (x) => x.symbol);
+    const actualWindowDays = (endTs - startTs) / (24 * 60 * 60 * 1000);
 
     console.log("=== WINDOW ===");
     console.log(`${new Date(startTs).toISOString()} -> ${new Date(endTs).toISOString()}`);
@@ -946,7 +946,7 @@ function main() {
     console.log(
         JSON.stringify(
             {
-                windowDays: LOOKBACK_DAYS,
+                windowDays: actualWindowDays,
                 note: "Short sample; evaluate as diagnostics, not robust expectancy.",
                 dailyLossGuardEnabled: MAX_DAILY_LOSS_PCT > 0,
                 openRiskCapPct: MAX_OPEN_RISK_PCT,

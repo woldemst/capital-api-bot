@@ -101,20 +101,17 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     const activeSessions = determineActiveSessions(nowUtc, config);
     const activeSession = determineActiveSession(nowUtc, config);
     const sessionForexSymbols = activeSession ? allowedSymbolsBySession(activeSession) : [];
-    const preferredSymbolSessions = assetClass === "forex" ? preferredSessionsForSymbol(symbol, config) : null;
+    const preferredSymbolSessions = preferredSessionsForSymbol(symbol, config);
     const allowedHourBuckets = normalizedBucketList(config?.schedule?.allowedUtcHourBuckets);
     const blockedHourBuckets = normalizedBucketList(config?.schedule?.blockedUtcHourBuckets);
     const hourAllowed =
         (!allowedHourBuckets.length || allowedHourBuckets.includes(hourBucket)) &&
         !blockedHourBuckets.includes(hourBucket);
-    const sessionAllowedBySymbolFilter =
-        assetClass === "forex"
-            ? !preferredSymbolSessions || (activeSession ? preferredSymbolSessions.includes(activeSession) : false)
-            : true;
+    const sessionAllowedBySymbolFilter = !preferredSymbolSessions || (activeSession ? preferredSymbolSessions.includes(activeSession) : false);
     const allowedSymbols = [...new Set([...sessionForexSymbols, ...CRYPTO_SYMBOLS])];
     const symbolAllowed =
         assetClass === "crypto"
-            ? CRYPTO_SYMBOLS.includes(symbol)
+            ? CRYPTO_SYMBOLS.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed
             : sessionForexSymbols.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed;
     const forceFlatNow = isPastFlatPositionsCutoff(nowUtc, assetClass, config);
 
@@ -122,7 +119,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     reasons.push(`session=${activeSession || "NONE"}`);
     if (activeSessions.length > 1) reasons.push(`overlap=${activeSessions.join("+")}`);
     if (!symbolAllowed) reasons.push("symbol_not_in_active_universe");
-    if (assetClass === "forex" && preferredSymbolSessions && !sessionAllowedBySymbolFilter) reasons.push("symbol_session_filtered");
+    if (preferredSymbolSessions && !sessionAllowedBySymbolFilter) reasons.push("symbol_session_filtered");
     if (!hourAllowed) reasons.push("hour_bucket_filtered");
     if (forceFlatNow) reasons.push("past_intraday_cutoff");
 

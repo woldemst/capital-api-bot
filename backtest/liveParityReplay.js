@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
+import { DEFAULT_CRYPTO_INTRADAY_CONFIG, DEFAULT_INTRADAY_CONFIG, assetClassOfSymbol, mergeIntradayConfig } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import { RISK, SESSIONS } from "../config.js";
 
@@ -14,6 +14,7 @@ const TARGET_SYMBOLS_FROM_ENV = String(process.env.LIVE_PARITY_SYMBOLS || "")
 const TARGET_TIMEFRAMES = ["M1", "M5", "M15", "H1"];
 
 const START_CAPITAL = Number.isFinite(Number(process.env.LIVE_PARITY_START_CAPITAL)) ? Number(process.env.LIVE_PARITY_START_CAPITAL) : 500;
+const COMPOUND_RISK = envBool(process.env.LIVE_PARITY_COMPOUND_RISK, true);
 const DAYS_BACK = Number.isFinite(Number(process.env.LIVE_PARITY_DAYS)) ? Number(process.env.LIVE_PARITY_DAYS) : null;
 const MONTHS_BACK = Number.isFinite(Number(process.env.LIVE_PARITY_MONTHS_BACK)) ? Number(process.env.LIVE_PARITY_MONTHS_BACK) : 2;
 const RANGE_START_FROM_ENV = String(process.env.LIVE_PARITY_FROM || "").trim();
@@ -25,6 +26,7 @@ const PHASE2_RISK_PCT = Number.isFinite(Number(process.env.LIVE_PARITY_RISK_PCT_
 const PHASE2_START_AFTER_MONTHS = Number.isFinite(Number(process.env.LIVE_PARITY_PHASE2_START_AFTER_MONTHS))
     ? Number(process.env.LIVE_PARITY_PHASE2_START_AFTER_MONTHS)
     : null;
+const RISK_PHASES_JSON_RAW = String(process.env.LIVE_PARITY_RISK_PHASES_JSON || "").trim();
 const COST_MODEL_ENABLED = String(process.env.LIVE_PARITY_COST_MODEL || "").toLowerCase() === "true";
 const SPREAD_PIPS = Number.isFinite(Number(process.env.LIVE_PARITY_SPREAD_PIPS)) ? Number(process.env.LIVE_PARITY_SPREAD_PIPS) : 1.2;
 const SLIPPAGE_PIPS_PER_FILL = Number.isFinite(Number(process.env.LIVE_PARITY_SLIPPAGE_PIPS_PER_FILL))
@@ -70,16 +72,23 @@ const MIN_PATTERN_TRADES = Number.isFinite(Number(process.env.LIVE_PARITY_MIN_PA
     ? Math.max(1, Number(process.env.LIVE_PARITY_MIN_PATTERN_TRADES))
     : 25;
 const REPORT_JSON_PATH = String(process.env.LIVE_PARITY_REPORT_PATH || "").trim();
-const ENFORCE_MARGIN = envBool(process.env.LIVE_PARITY_ENFORCE_MARGIN, false);
+const ENFORCE_MARGIN = envBool(
+    process.env.LIVE_PARITY_ENFORCE_MARGIN ?? process.env.LIVE_PARITY_MARGIN_MODEL,
+    false,
+);
 const MARGIN_UTILIZATION = Number.isFinite(Number(process.env.LIVE_PARITY_MARGIN_UTILIZATION))
     ? Math.min(1, Math.max(0.1, Number(process.env.LIVE_PARITY_MARGIN_UTILIZATION)))
     : 0.95;
 const ACCOUNT_CURRENCY = String(process.env.LIVE_PARITY_ACCOUNT_CURRENCY || "EUR").trim().toUpperCase();
-const LEVERAGE_FX_MAJOR = Number.isFinite(Number(process.env.LIVE_PARITY_LEVERAGE_FX_MAJOR))
-    ? Number(process.env.LIVE_PARITY_LEVERAGE_FX_MAJOR)
+const LEVERAGE_FX_MAJOR = Number.isFinite(
+    Number(process.env.LIVE_PARITY_LEVERAGE_FX_MAJOR ?? process.env.LIVE_PARITY_MAJOR_FX_LEVERAGE),
+)
+    ? Number(process.env.LIVE_PARITY_LEVERAGE_FX_MAJOR ?? process.env.LIVE_PARITY_MAJOR_FX_LEVERAGE)
     : 30;
-const LEVERAGE_FX_NON_MAJOR = Number.isFinite(Number(process.env.LIVE_PARITY_LEVERAGE_FX_NON_MAJOR))
-    ? Number(process.env.LIVE_PARITY_LEVERAGE_FX_NON_MAJOR)
+const LEVERAGE_FX_NON_MAJOR = Number.isFinite(
+    Number(process.env.LIVE_PARITY_LEVERAGE_FX_NON_MAJOR ?? process.env.LIVE_PARITY_NON_MAJOR_FX_LEVERAGE),
+)
+    ? Number(process.env.LIVE_PARITY_LEVERAGE_FX_NON_MAJOR ?? process.env.LIVE_PARITY_NON_MAJOR_FX_LEVERAGE)
     : 20;
 const CONFIG_OVERRIDE_JSON_RAW = String(process.env.LIVE_PARITY_CONFIG_OVERRIDE_JSON || "").trim();
 const CONFIG_OVERRIDE_FILE = String(process.env.LIVE_PARITY_CONFIG_OVERRIDE_FILE || "").trim();
@@ -119,6 +128,94 @@ function parseConfigOverrides() {
         return JSON.parse(fs.readFileSync(filePath, "utf8"));
     }
     return {};
+}
+
+function addUtcMonths(tsMs, monthsToAdd) {
+    const d = new Date(tsMs);
+    d.setUTCMonth(d.getUTCMonth() + monthsToAdd);
+    return d.getTime();
+}
+
+function buildRiskPhases(actualStartMs) {
+    if (RISK_PHASES_JSON_RAW) {
+        const parsed = JSON.parse(RISK_PHASES_JSON_RAW);
+        if (!Array.isArray(parsed) || !parsed.length) {
+            throw new Error("LIVE_PARITY_RISK_PHASES_JSON must be a non-empty array.");
+        }
+        const phases = [];
+        let cursorMs = actualStartMs;
+        for (let i = 0; i < parsed.length; i += 1) {
+            const raw = parsed[i] || {};
+            const riskPct = Number(raw.riskPct);
+            if (!(Number.isFinite(riskPct) && riskPct > 0)) {
+                throw new Error(`Invalid riskPct in LIVE_PARITY_RISK_PHASES_JSON at index ${i}.`);
+            }
+            const months = raw.months === undefined || raw.months === null || raw.months === "" ? null : Number(raw.months);
+            const endMs = Number.isFinite(months) && months > 0 ? addUtcMonths(cursorMs, months) : Number.POSITIVE_INFINITY;
+            phases.push({
+                index: i + 1,
+                key: `PHASE_${i + 1}_${riskPctLabel(riskPct)}`,
+                riskPct,
+                startMs: cursorMs,
+                endMs,
+            });
+            cursorMs = endMs;
+        }
+        return phases;
+    }
+
+    const phase2Enabled = Number.isFinite(PHASE2_RISK_PCT) && Number.isFinite(PHASE2_START_AFTER_MONTHS) && PHASE2_START_AFTER_MONTHS >= 0;
+    if (!phase2Enabled) {
+        return [
+            {
+                index: 1,
+                key: `PHASE_1_${riskPctLabel(PHASE1_RISK_PCT)}`,
+                riskPct: PHASE1_RISK_PCT,
+                startMs: actualStartMs,
+                endMs: Number.POSITIVE_INFINITY,
+            },
+        ];
+    }
+
+    const phase2StartMs = addUtcMonths(actualStartMs, PHASE2_START_AFTER_MONTHS);
+    return [
+        {
+            index: 1,
+            key: `PHASE_1_${riskPctLabel(PHASE1_RISK_PCT)}`,
+            riskPct: PHASE1_RISK_PCT,
+            startMs: actualStartMs,
+            endMs: phase2StartMs,
+        },
+        {
+            index: 2,
+            key: `PHASE_2_${riskPctLabel(PHASE2_RISK_PCT)}`,
+            riskPct: PHASE2_RISK_PCT,
+            startMs: phase2StartMs,
+            endMs: Number.POSITIVE_INFINITY,
+        },
+    ];
+}
+
+function describeRiskPlan(phases) {
+    return phases
+        .map((phase) => {
+            const startIso = new Date(phase.startMs).toISOString();
+            const endIso = Number.isFinite(phase.endMs) ? new Date(phase.endMs).toISOString() : "end";
+            return `${phase.key} ${startIso} -> ${endIso}`;
+        })
+        .join("; ");
+}
+
+function cryptoPairOverridesForSymbols(symbols = []) {
+    const overrides = {};
+    for (const rawSymbol of Array.isArray(symbols) ? symbols : []) {
+        const symbol = String(rawSymbol || "").trim().toUpperCase();
+        if (!symbol || assetClassOfSymbol(symbol) !== "crypto") continue;
+        overrides[symbol] = mergeIntradayConfig(DEFAULT_CRYPTO_INTRADAY_CONFIG, {
+            strategyId: DEFAULT_CRYPTO_INTRADAY_CONFIG.strategyId,
+        });
+    }
+    return overrides;
 }
 
 function utcDayKey(tsMs) {
@@ -405,7 +502,8 @@ async function loadJsonlRows(filePath, minTsMs, maxTsMs) {
         const tsMs = Date.parse(String(row.timestamp || ""));
         if (!Number.isFinite(tsMs)) continue;
         if (tsMs < minTsMs) continue;
-        if (tsMs > maxTsMs) break;
+        // Some generated files are not strictly monotonic; keep scanning instead of breaking early.
+        if (tsMs > maxTsMs) continue;
         rows.push({ ...row, tsMs });
     }
     return rows;
@@ -790,22 +888,21 @@ async function run() {
         throw new Error("No overlapping data in selected period.");
     }
 
-    let phase2StartMs = null;
-    const phase2Enabled = Number.isFinite(PHASE2_RISK_PCT) && Number.isFinite(PHASE2_START_AFTER_MONTHS) && PHASE2_START_AFTER_MONTHS >= 0;
-    if (phase2Enabled) {
-        const phase2Start = new Date(actualStartMs);
-        phase2Start.setUTCMonth(phase2Start.getUTCMonth() + PHASE2_START_AFTER_MONTHS);
-        phase2StartMs = phase2Start.getTime();
-    }
+    const riskPhases = buildRiskPhases(actualStartMs);
+    const primaryRiskPct = Number(riskPhases[0]?.riskPct) || PHASE1_RISK_PCT;
 
     function riskPctForTs(tsMs) {
-        if (phase2Enabled && Number.isFinite(phase2StartMs) && tsMs >= phase2StartMs) return PHASE2_RISK_PCT;
-        return PHASE1_RISK_PCT;
+        for (const phase of riskPhases) {
+            if (tsMs >= phase.startMs && tsMs < phase.endMs) return phase.riskPct;
+        }
+        return Number(riskPhases[riskPhases.length - 1]?.riskPct) || primaryRiskPct;
     }
 
     function phaseKeyForTs(tsMs) {
-        if (phase2Enabled && Number.isFinite(phase2StartMs) && tsMs >= phase2StartMs) return `PHASE_2_${riskPctLabel(PHASE2_RISK_PCT)}`;
-        return `PHASE_1_${riskPctLabel(PHASE1_RISK_PCT)}`;
+        for (const phase of riskPhases) {
+            if (tsMs >= phase.startMs && tsMs < phase.endMs) return phase.key;
+        }
+        return String(riskPhases[riskPhases.length - 1]?.key || `PHASE_1_${riskPctLabel(primaryRiskPct)}`);
     }
 
     const timelineSet = new Set();
@@ -819,10 +916,16 @@ async function run() {
     if (!timeline.length) throw new Error("Empty timeline in selected period.");
 
     const configOverrides = parseConfigOverrides();
+    const replayConfigBase = mergeIntradayConfig(
+        {
+            pairOverrides: cryptoPairOverridesForSymbols(targetSymbols),
+        },
+        configOverrides,
+    );
     const engine = createIntradaySevenStepEngine(
-        mergeIntradayConfig(configOverrides, {
+        mergeIntradayConfig(replayConfigBase, {
             risk: {
-                forexRiskPct: PHASE1_RISK_PCT,
+                forexRiskPct: primaryRiskPct,
             },
         }),
     );
@@ -1264,13 +1367,14 @@ async function run() {
             const plannedSize = toNum(plan.size);
             const plannedRiskAmount = toNum(plan.riskAmount);
             // Respect symbol-specific step5 sizing, then scale it by the active replay phase multiplier.
+            const riskSizingEquity = COMPOUND_RISK ? equity : START_CAPITAL;
             const plannedRiskPct = equity > 0 && Number.isFinite(plannedRiskAmount) ? plannedRiskAmount / equity : null;
             let targetRiskPct = phaseRiskPct;
             if (Number.isFinite(plannedRiskPct) && plannedRiskPct > 0) {
-                const phaseScale = PHASE1_RISK_PCT > 0 ? phaseRiskPct / PHASE1_RISK_PCT : 1;
+                const phaseScale = primaryRiskPct > 0 ? phaseRiskPct / primaryRiskPct : 1;
                 targetRiskPct = plannedRiskPct * phaseScale;
             }
-            const targetRiskAmount = equity * targetRiskPct;
+            const targetRiskAmount = riskSizingEquity * targetRiskPct;
             let size = plannedSize;
             if (Number.isFinite(plannedSize) && Number.isFinite(plannedRiskAmount) && plannedRiskAmount > 0) {
                 size = plannedSize * (targetRiskAmount / plannedRiskAmount);
@@ -1406,10 +1510,9 @@ async function run() {
             ],
             [
                 "Risk Plan",
-                phase2Enabled && Number.isFinite(phase2StartMs)
-                    ? `Phase1 ${riskPctLabel(PHASE1_RISK_PCT)} until ${new Date(phase2StartMs).toISOString()}, then Phase2 ${riskPctLabel(PHASE2_RISK_PCT)}`
-                    : `Fixed ${riskPctLabel(PHASE1_RISK_PCT)}`,
+                describeRiskPlan(riskPhases),
             ],
+            ["Risk Sizing", COMPOUND_RISK ? "compounding" : `fixed_start_capital(${num(START_CAPITAL)} EUR)`],
             ["Entry Filters", activeFilterSummary()],
             ["Entry Filter Blocks", String(blockedFilterRows.reduce((sum, [, count]) => sum + count, 0))],
             ["Live Filters", "sessions+weekend+rollover included, historical news unavailable in dataset"],
@@ -1552,6 +1655,7 @@ async function run() {
             phase1RiskPct: PHASE1_RISK_PCT,
             phase2RiskPct: PHASE2_RISK_PCT,
             phase2StartAfterMonths: PHASE2_START_AFTER_MONTHS,
+            riskPhases,
             costModelEnabled: COST_MODEL_ENABLED,
             spreadPips: SPREAD_PIPS,
             slippagePipsPerFill: SLIPPAGE_PIPS_PER_FILL,
@@ -1562,6 +1666,7 @@ async function run() {
             leverageFxNonMajor: LEVERAGE_FX_NON_MAJOR,
             maxPositions: MAX_POSITIONS,
             maxOpenRiskPct: MAX_OPEN_RISK_PCT,
+            compoundRisk: COMPOUND_RISK,
             filters: activeFilterSummary(),
             minPatternTrades: MIN_PATTERN_TRADES,
             configOverrides: Object.keys(configOverrides || {}).length ? configOverrides : null,

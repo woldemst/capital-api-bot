@@ -2,6 +2,15 @@ import { ATR, EMA } from "technicalindicators";
 
 export const CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID = "CRYPTO_LIQUIDITY_WINDOW_MOMENTUM";
 export const CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_TIMEZONE = "Europe/Berlin";
+const WEEKDAY_INDEX = {
+    SUN: 0,
+    MON: 1,
+    TUE: 2,
+    WED: 3,
+    THU: 4,
+    FRI: 5,
+    SAT: 6,
+};
 
 function toNum(value) {
     if (value === undefined || value === null || value === "") return null;
@@ -24,6 +33,20 @@ function round(value, decimals = 8) {
     const n = Number(value);
     if (!Number.isFinite(n)) return null;
     return Number(n.toFixed(decimals));
+}
+
+function mergeObjects(baseValue, overrideValue) {
+    const base = baseValue && typeof baseValue === "object" && !Array.isArray(baseValue) ? baseValue : {};
+    const override = overrideValue && typeof overrideValue === "object" && !Array.isArray(overrideValue) ? overrideValue : {};
+    const out = { ...base };
+    for (const [key, value] of Object.entries(override)) {
+        if (value && typeof value === "object" && !Array.isArray(value) && out[key] && typeof out[key] === "object" && !Array.isArray(out[key])) {
+            out[key] = mergeObjects(out[key], value);
+        } else {
+            out[key] = value;
+        }
+    }
+    return out;
 }
 
 function median(values) {
@@ -81,6 +104,17 @@ function getZonedParts(timestamp, timeZone = CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_TI
     const second = Number(pick("second"));
     if (![year, month, day, hour, minute, second].every(Number.isFinite)) return null;
     return { year, month, day, hour, minute, second };
+}
+
+export function getWeekdayInTimeZone(timestamp, timeZone = CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_TIMEZONE) {
+    const d = safeDate(timestamp);
+    if (!d) return null;
+    const weekday = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        weekday: "short",
+    }).format(d);
+    const upper = String(weekday || "").slice(0, 3).toUpperCase();
+    return Number.isInteger(WEEKDAY_INDEX[upper]) ? WEEKDAY_INDEX[upper] : null;
 }
 
 export function getMinutesInTimeZone(timestamp, timeZone = CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_TIMEZONE) {
@@ -629,7 +663,8 @@ export function evaluateCryptoLiquidityWindowMomentum({
     const now = safeDate(timestamp);
     const nowTsMs = now?.getTime?.() ?? null;
     const tz = config?.timezone || CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_TIMEZONE;
-    const windowCfg = config?.window || {};
+    const symbolOverride = config?.perSymbolOverrides?.[upperSymbol] || {};
+    const windowCfg = mergeObjects(config?.window, symbolOverride?.window);
     const windowGate = evaluateLiquidityWindowGate({
         timestamp: nowTsMs,
         timeZone: tz,
@@ -644,12 +679,34 @@ export function evaluateCryptoLiquidityWindowMomentum({
 
     const m5Closes = m5Bars.map((b) => b.c).filter(Number.isFinite);
     const h1Closes = h1Bars.map((b) => b.c).filter(Number.isFinite);
-    const signalCfg = config?.signal || {};
-    const dataCfg = config?.data || {};
-    const jumpCfg = config?.jump || {};
-    const entryCfg = config?.entry || {};
+    const signalCfg = mergeObjects(config?.signal, symbolOverride?.signal);
+    const dataCfg = mergeObjects(config?.data, symbolOverride?.data);
+    const jumpCfg = mergeObjects(config?.jump, symbolOverride?.jump);
+    const entryCfg = mergeObjects(config?.entry, symbolOverride?.entry);
+    const filterCfg = mergeObjects(config?.filters, symbolOverride?.filters);
     const symbolCfg = resolveSymbolConfig(config || {}, upperSymbol);
-    const riskProfile = activeRiskProfile(config || {});
+    const riskProfile = activeRiskProfile({
+        ...config,
+        risk: mergeObjects(config?.risk, symbolOverride?.risk),
+    });
+    const allowedSidesRaw = Array.isArray(filterCfg.allowedSides) ? filterCfg.allowedSides : [];
+    const allowedSides = allowedSidesRaw.length
+        ? new Set(allowedSidesRaw.map((side) => normalizeSide(side)).filter(Boolean))
+        : null;
+    const weekdayNow = getWeekdayInTimeZone(nowTsMs, tz);
+    const allowedWeekdaysRaw = Array.isArray(filterCfg.allowedWeekdays) ? filterCfg.allowedWeekdays : [];
+    const allowedWeekdays = allowedWeekdaysRaw.length
+        ? new Set(
+              allowedWeekdaysRaw
+                  .map((value) => {
+                      if (Number.isInteger(value)) return value;
+                      const upper = String(value || "").trim().slice(0, 3).toUpperCase();
+                      return Number.isInteger(WEEKDAY_INDEX[upper]) ? WEEKDAY_INDEX[upper] : null;
+                  })
+                  .filter(Number.isInteger),
+          )
+        : null;
+
     const lastM5 = m5Bars.length ? m5Bars[m5Bars.length - 1] : null;
     const lastH1 = h1Bars.length ? h1Bars[h1Bars.length - 1] : null;
     const fallbackClose = lastM5?.c ?? null;
@@ -694,8 +751,12 @@ export function evaluateCryptoLiquidityWindowMomentum({
         ? true
         : Number.isFinite(h1Slope) && Number.isFinite(h1Close) && Number.isFinite(h1Ema50) && h1Slope < 0 && h1Close < h1Ema50;
 
-    const longSignal = longSignalBase && volumeGatePassed && trendFilterLongPassed;
-    const shortSignal = shortSignalBase && volumeGatePassed && trendFilterShortPassed;
+    const sideGateLongPassed = !allowedSides || allowedSides.has("LONG");
+    const sideGateShortPassed = !allowedSides || allowedSides.has("SHORT");
+    const weekdayGatePassed = !allowedWeekdays || allowedWeekdays.has(weekdayNow);
+
+    const longSignal = longSignalBase && volumeGatePassed && trendFilterLongPassed && sideGateLongPassed;
+    const shortSignal = shortSignalBase && volumeGatePassed && trendFilterShortPassed && sideGateShortPassed;
 
     const bidNum = toNum(bid);
     const askNum = toNum(ask);
@@ -781,6 +842,7 @@ export function evaluateCryptoLiquidityWindowMomentum({
             dataGatePassed,
             dataGate5mPassed,
             dataGate1hPassed,
+            weekdayGatePassed,
             dailyLossLimitHit,
             spreadGatePassed,
             jumpGatePassed: !jump.jumpDetected,
@@ -789,6 +851,11 @@ export function evaluateCryptoLiquidityWindowMomentum({
             totalTradeCapPassed: tradesTodayTotal < maxTradesPerDay,
             newClosedBarReady,
             externalEntryAllowed: entryContext?.externalEntryAllowed !== false,
+        },
+        filters: {
+            allowedSides: allowedSides ? [...allowedSides] : ["LONG", "SHORT"],
+            allowedWeekdays: allowedWeekdays ? [...allowedWeekdays] : null,
+            weekdayNow,
         },
     };
 
@@ -867,6 +934,7 @@ export function evaluateCryptoLiquidityWindowMomentum({
 
     if (!windowGate.withinWindow) return buildNoTrade(result, decisionLog, "outside_liquidity_window");
     if (!dataGatePassed) return buildNoTrade(result, decisionLog, "insufficient_candles");
+    if (!weekdayGatePassed) return buildNoTrade(result, decisionLog, "outside_allowed_weekdays");
     if (dailyLossLimitHit) return buildNoTrade(result, decisionLog, "daily_loss_limit_hit");
     if (!spreadGatePassed) return buildNoTrade(result, decisionLog, "spread_too_wide");
     if (jump.jumpDetected) return buildNoTrade(result, decisionLog, "jump_cooldown_active");

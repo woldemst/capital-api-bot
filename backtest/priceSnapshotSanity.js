@@ -1,3 +1,5 @@
+import { CRYPTO_SYMBOLS } from "../config.js";
+
 const CANDLE_LAG_SANITY_MINUTES = {
     m1: { min: -3, max: 20 },
     m5: { min: -10, max: 40 },
@@ -6,6 +8,12 @@ const CANDLE_LAG_SANITY_MINUTES = {
 };
 
 const MAX_M1_MID_DEVIATION_PIPS = 8;
+const TF_CLOSE_TARGET_LAG_MINUTES = {
+    m1: 1.5,
+    m5: 7.5,
+    m15: 22.5,
+    h1: 90,
+};
 
 function toNumber(value) {
     if (value === null || value === undefined || value === "") return null;
@@ -21,12 +29,143 @@ function toTimestampMs(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
+function cloneRow(row) {
+    if (!row || typeof row !== "object") return row;
+    return JSON.parse(JSON.stringify(row));
+}
+
+function swapMonthDayIso(value) {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(T.+)$/);
+    if (!match) return null;
+    const [, year, month, day, rest] = match;
+    const monthNum = Number(month);
+    const dayNum = Number(day);
+    if (!Number.isInteger(monthNum) || !Number.isInteger(dayNum)) return null;
+    if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 12) return null;
+    return `${year}-${day}-${month}${rest}`;
+}
+
+function floorToTimeframeBoundary(tsMs, tf) {
+    const date = new Date(tsMs);
+    if (!Number.isFinite(date.getTime())) return null;
+    date.setUTCSeconds(0, 0);
+    if (tf === "m1") return date.getTime();
+    if (tf === "m5") {
+        date.setUTCMinutes(Math.floor(date.getUTCMinutes() / 5) * 5, 0, 0);
+        return date.getTime();
+    }
+    if (tf === "m15") {
+        date.setUTCMinutes(Math.floor(date.getUTCMinutes() / 15) * 15, 0, 0);
+        return date.getTime();
+    }
+    if (tf === "h1") {
+        date.setUTCMinutes(0, 0, 0);
+        return date.getTime();
+    }
+    return null;
+}
+
+function inferClosedCandleTimestamp(snapshotTs, tf) {
+    const boundaryTs = floorToTimeframeBoundary(snapshotTs, tf);
+    if (!Number.isFinite(boundaryTs)) return null;
+    const tfMinutes = tf === "m1" ? 1 : tf === "m5" ? 5 : tf === "m15" ? 15 : tf === "h1" ? 60 : null;
+    if (!Number.isFinite(tfMinutes)) return null;
+    return boundaryTs - tfMinutes * 60 * 1000;
+}
+
+function scoreLagCandidate(candidateTs, snapshotTs, tf) {
+    if (!Number.isFinite(candidateTs) || !Number.isFinite(snapshotTs)) return Number.POSITIVE_INFINITY;
+    const bounds = CANDLE_LAG_SANITY_MINUTES[tf];
+    if (!bounds) return Number.POSITIVE_INFINITY;
+    const lagMinutes = (snapshotTs - candidateTs) / 60000;
+    if (lagMinutes < bounds.min || lagMinutes > bounds.max) return Number.POSITIVE_INFINITY;
+    const targetLag = TF_CLOSE_TARGET_LAG_MINUTES[tf] ?? 0;
+    return Math.abs(lagMinutes - targetLag);
+}
+
+function pickBestTimestampCandidate(candidates, snapshotTs, tf) {
+    let bestTs = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const candidateTs of candidates) {
+        const score = scoreLagCandidate(candidateTs, snapshotTs, tf);
+        if (score < bestScore) {
+            bestScore = score;
+            bestTs = candidateTs;
+        }
+    }
+    return Number.isFinite(bestTs) ? bestTs : null;
+}
+
+export function repairPriceSnapshotRow(row) {
+    const snapshotTs = Number.isFinite(row?.tsMs) ? row.tsMs : toTimestampMs(row?.timestamp);
+    if (!Number.isFinite(snapshotTs) || !row || typeof row !== "object") {
+        return { row, repaired: false, repairedFields: [] };
+    }
+
+    const repairedRow = cloneRow(row);
+    const repairedFields = [];
+    const candles = repairedRow?.candles;
+    if (!candles || typeof candles !== "object") {
+        return { row: repairedRow, repaired: false, repairedFields };
+    }
+
+    for (const tf of Object.keys(CANDLE_LAG_SANITY_MINUTES)) {
+        const candle = candles?.[tf];
+        if (!candle || typeof candle !== "object") continue;
+        const rawValue = candle?.t;
+        const candidates = new Set();
+        const directTs = toTimestampMs(rawValue);
+        if (Number.isFinite(directTs)) {
+            candidates.add(directTs);
+            candidates.add(directTs - 60 * 60000);
+            candidates.add(directTs + 60 * 60000);
+            candidates.add(directTs - 24 * 60 * 60000);
+            candidates.add(directTs + 24 * 60 * 60000);
+        }
+
+        const swappedIso = swapMonthDayIso(rawValue);
+        const swappedTs = toTimestampMs(swappedIso);
+        if (Number.isFinite(swappedTs)) {
+            candidates.add(swappedTs);
+            candidates.add(swappedTs - 60 * 60000);
+            candidates.add(swappedTs + 60 * 60000);
+            candidates.add(swappedTs - 24 * 60 * 60000);
+            candidates.add(swappedTs + 24 * 60 * 60000);
+        }
+
+        const inferredTs = inferClosedCandleTimestamp(snapshotTs, tf);
+        if (Number.isFinite(inferredTs)) {
+            candidates.add(inferredTs);
+            candidates.add(inferredTs - 60 * 60000);
+            candidates.add(inferredTs + 60 * 60000);
+        }
+
+        const bestTs = pickBestTimestampCandidate(candidates, snapshotTs, tf);
+        if (!Number.isFinite(bestTs)) continue;
+
+        const currentTs = toTimestampMs(rawValue);
+        if (!Number.isFinite(currentTs) || currentTs !== bestTs) {
+            repairedRow.candles[tf].t = new Date(bestTs).toISOString();
+            repairedFields.push(tf);
+        }
+    }
+
+    return {
+        row: repairedRow,
+        repaired: repairedFields.length > 0,
+        repairedFields,
+    };
+}
+
 function getPipValue(symbol) {
     return String(symbol || "").toUpperCase().includes("JPY") ? 0.01 : 0.0001;
 }
 
 function isForexLikeSymbol(symbol) {
-    return /^[A-Z]{6}$/.test(String(symbol || "").toUpperCase());
+    const upper = String(symbol || "").toUpperCase();
+    if ((CRYPTO_SYMBOLS || []).map((s) => String(s).toUpperCase()).includes(upper)) return false;
+    return /^[A-Z]{6}$/.test(upper);
 }
 
 export function evaluatePriceSnapshotSanity(row, { symbol = "" } = {}) {
@@ -79,14 +218,24 @@ export function sanitizePriceSnapshotRows(rows = [], { symbol = "", minValidRati
     const validRows = [];
     const droppedRows = [];
     const droppedByCode = new Map();
+    let repaired = 0;
+    const repairedFields = new Map();
 
     for (const row of rows) {
-        const sanity = evaluatePriceSnapshotSanity(row, { symbol });
+        const repairedResult = repairPriceSnapshotRow(row);
+        const candidateRow = repairedResult.row;
+        if (repairedResult.repaired) {
+            repaired += 1;
+            for (const field of repairedResult.repairedFields) {
+                repairedFields.set(field, (repairedFields.get(field) || 0) + 1);
+            }
+        }
+        const sanity = evaluatePriceSnapshotSanity(candidateRow, { symbol });
         if (sanity.ok) {
-            validRows.push(row);
+            validRows.push(candidateRow);
             continue;
         }
-        droppedRows.push({ row, reason: sanity.reason, code: sanity.code || "invalid" });
+        droppedRows.push({ row: candidateRow, reason: sanity.reason, code: sanity.code || "invalid" });
         const codeKey = sanity.code || "invalid";
         droppedByCode.set(codeKey, (droppedByCode.get(codeKey) || 0) + 1);
     }
@@ -109,6 +258,10 @@ export function sanitizePriceSnapshotRows(rows = [], { symbol = "", minValidRati
             droppedByCode: [...droppedByCode.entries()]
                 .sort((a, b) => b[1] - a[1])
                 .map(([code, count]) => ({ code, count })),
+            repaired,
+            repairedFields: [...repairedFields.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([field, count]) => ({ field, count })),
         },
     };
 }

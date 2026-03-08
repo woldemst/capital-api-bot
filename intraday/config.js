@@ -29,10 +29,10 @@ function parseSymbolSessionFilter(value) {
 }
 
 const RAW_SESSION_SYMBOLS = {
-    LONDON: ["EURJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "USDCHF"],
-    NY: ["USDJPY", "EURJPY", "EURUSD", "GBPUSD", "USDCAD", "USDCHF"],
+    LONDON: ["EURJPY", "GBPJPY", "CHFJPY", "USDJPY", "EURUSD", "GBPUSD", "EURGBP", "EURCHF", "GBPCHF", "USDCHF"],
+    NY: ["USDJPY", "EURJPY", "GBPJPY", "CADJPY", "CHFJPY", "EURUSD", "GBPUSD", "USDCAD", "EURCHF", "GBPCHF", "USDCHF"],
     SYDNEY: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
-    TOKYO: ["EURJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
+    TOKYO: ["EURJPY", "GBPJPY", "CADJPY", "CHFJPY", "USDJPY", "AUDUSD", "AUDJPY", "NZDUSD", "NZDJPY"],
 };
 
 const FOREX_SYMBOL_BLOCKLIST_DEFAULT = ["USDCHF"];
@@ -49,10 +49,11 @@ export const SESSION_SYMBOLS = Object.fromEntries(
     ]),
 );
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
+export const CRYPTO_SYMBOLS = [];
 const DEFAULT_SYMBOL_SESSIONS = {
     EURUSD: ["LONDON", "NY"],
     GBPUSD: ["LONDON", "NY"],
+    EURCHF: ["LONDON", "NY"],
     USDJPY: ["TOKYO", "NY"],
     USDCAD: ["NY"],
     USDCHF: [],
@@ -76,6 +77,7 @@ const DEFAULT_PAIR_OVERRIDES = {
             maxH1AdxForTrendSetup: 50,
         },
     },
+    EURCHF: {},
     USDJPY: {
         risk: {
             forexRiskPct: 0.02,
@@ -107,6 +109,33 @@ const SYMBOL_SESSION_FILTER = parseSymbolSessionFilter(SYMBOL_SESSION_FILTER_RAW
 export const NEWS_MODE = {
     AVOID: "AVOID",
     TRADE: "TRADE",
+};
+
+export const DEFAULT_CRYPTO_INTRADAY_CONFIG = {
+    strategyId: "INTRADAY_7STEP_CRYPTO",
+    context: {
+        adxTrendMin: 18,
+        adxRangeMax: 18,
+    },
+    setup: {
+        trendPullbackZonePct: 0.0023,
+        maxH1AdxForTrendSetup: 45,
+        trendRsiMin: 38,
+        trendRsiMax: 62,
+        rangeBbPbLow: 0.2,
+        rangeBbPbHigh: 0.8,
+        rangeRsiLow: 40,
+        rangeRsiHigh: 60,
+    },
+    trigger: {
+        displacementAtrMultiplier: 1.0,
+        requireStructureBreak: false,
+        requireFvg: true,
+        useFvgBonus: true,
+    },
+    guardrails: {
+        allowRangeContrarian: true,
+    },
 };
 
 export const DEFAULT_INTRADAY_CONFIG = {

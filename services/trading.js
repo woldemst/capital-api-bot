@@ -20,7 +20,7 @@ import {
     getTradeEntry,
 } from "../utils/tradeLogger.js";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
+import { DEFAULT_CRYPTO_INTRADAY_CONFIG, DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import { step1MarketTimeWindow } from "../intraday/step1MarketTimeWindow.js";
 import {
@@ -96,36 +96,10 @@ class TradingService {
             guardrails: { ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}) },
             backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
         };
-        this.intradayCryptoConfig = {
-            ...DEFAULT_INTRADAY_CONFIG,
+        this.intradayCryptoConfig = mergeIntradayConfig(DEFAULT_INTRADAY_CONFIG, {
+            ...DEFAULT_CRYPTO_INTRADAY_CONFIG,
             strategyId: INTRADAY_CRYPTO_STRATEGY_ID,
-            context: {
-                ...(DEFAULT_INTRADAY_CONFIG.context || {}),
-                adxTrendMin: 18,
-                adxRangeMax: 18,
-            },
-            setup: {
-                ...(DEFAULT_INTRADAY_CONFIG.setup || {}),
-                trendPullbackZonePct: 0.0023,
-                trendRsiMin: 38,
-                trendRsiMax: 62,
-                rangeBbPbLow: 0.2,
-                rangeBbPbHigh: 0.8,
-                rangeRsiLow: 40,
-                rangeRsiHigh: 60,
-            },
-            trigger: {
-                ...(DEFAULT_INTRADAY_CONFIG.trigger || {}),
-                displacementAtrMultiplier: 1.0,
-                requireStructureBreak: false,
-            },
-            risk: { ...(DEFAULT_INTRADAY_CONFIG.risk || {}) },
-            guardrails: {
-                ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}),
-                allowRangeContrarian: true,
-            },
-            backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
-        };
+        });
         this.intradayForexEngine = createIntradaySevenStepEngine(this.intradayForexConfig);
         this.intradayCryptoEngine = createIntradaySevenStepEngine(this.intradayCryptoConfig);
         this.intradayForexState = createIntradayRuntimeState({ strategyId: INTRADAY_FOREX_STRATEGY_ID });

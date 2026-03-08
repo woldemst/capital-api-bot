@@ -40,18 +40,13 @@ const SESSION_SYMBOLS = Object.fromEntries(
 );
 // can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
 
-export const CRYPTO_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
+export const CRYPTO_SYMBOLS = [];
 export const TRADING_WINDOWS = {
     FOREX: [
         // 22:00-12:59 UTC
         { start: 22 * 60, end: 12 * 60 + 59 },
     ],
-    CRYPTO: [
-        // 02:00-05:59 UTC
-        { start: 2 * 60, end: 5 * 60 + 59 },
-        // 08:00-16:59 UTC
-        { start: 8 * 60, end: 16 * 60 + 59 },
-    ],
+    CRYPTO: [],
 };
 
 export const NEWS_GUARD = {
@@ -67,15 +62,7 @@ export const PRICE_LOGGER = {
     ENABLED: isTrue(ENV.PRICE_LOGGER_ENABLED),
 };
 
-const DEFAULT_LIVE_SYMBOLS = [
-    ...new Set([
-        ...SESSION_SYMBOLS.LONDON,
-        ...SESSION_SYMBOLS.NY,
-        ...SESSION_SYMBOLS.SYDNEY,
-        ...SESSION_SYMBOLS.TOKYO,
-        ...CRYPTO_SYMBOLS,
-    ]),
-];
+const DEFAULT_LIVE_SYMBOLS = ["AUDUSD", "EURUSD", "GBPUSD", "USDCAD", "USDJPY"];
 
 export const LIVE_SYMBOLS = parseSymbolCsv(String(ENV.LIVE_SYMBOLS || DEFAULT_LIVE_SYMBOLS.join(",")));
 
@@ -128,19 +115,17 @@ export const RISK = {
     },
 };
 
-const CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_SYMBOLS = ["BTCUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ETHUSD"];
+const CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_SYMBOLS = [];
 
 export const STRATEGY_SELECTION = {
     FOREX_PRIMARY: ENV.FOREX_PRIMARY_STRATEGY || "INTRADAY_7STEP_V1",
-    CRYPTO_PRIMARY: ENV.CRYPTO_PRIMARY_STRATEGY || ENV.CRYPTO_STRATEGY_NAME || "INTRADAY_7STEP_V1",
+    CRYPTO_PRIMARY: ENV.CRYPTO_PRIMARY_STRATEGY || ENV.CRYPTO_STRATEGY_NAME || "DISABLED",
 };
 
 export const STRATEGIES = {
     CRYPTO_LIQUIDITY_WINDOW_MOMENTUM: {
         id: "CRYPTO_LIQUIDITY_WINDOW_MOMENTUM",
-        enabled:
-            isTrue(ENV.ENABLE_CRYPTO_LIQUIDITY_WINDOW_MOMENTUM) ||
-            String(STRATEGY_SELECTION.CRYPTO_PRIMARY).toUpperCase() === "CRYPTO_LIQUIDITY_WINDOW_MOMENTUM",
+        enabled: false,
         symbols: CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_SYMBOLS,
         timezone: "Europe/Berlin",
         window: {
@@ -202,12 +187,20 @@ export const STRATEGIES = {
                 jumpThresholdPct: 0.009,
                 stopAtrMult: 1.0,
                 minStopPct: 0.0025,
+                filters: {
+                    allowedSides: ["LONG"],
+                    allowedWeekdays: ["SUN"],
+                },
             },
             ETHUSD: {
                 maxSpreadPct: 0.0008,
                 jumpThresholdPct: 0.009,
                 stopAtrMult: 1.0,
                 minStopPct: 0.0025,
+                filters: {
+                    allowedSides: ["LONG"],
+                    allowedWeekdays: ["SUN"],
+                },
             },
             SOLUSD: {
                 maxSpreadPct: 0.0012,
@@ -257,7 +250,7 @@ const EMA = {
 // Technical Analysis Configuration
 export const ANALYSIS = {
     TIMEFRAMES,
-    SYMBOLS: ["EURJPY", "USDJPY", "BTCUSD", "SOLUSD", "ETHUSD", "DOGEUSD", "XRPUSD"],
+    SYMBOLS: ["AUDUSD", "EURUSD", "GBPUSD", "USDCAD", "USDJPY"],
     EMA,
 };
 
