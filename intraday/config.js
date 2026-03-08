@@ -146,6 +146,7 @@ export const DEFAULT_INTRADAY_CONFIG = {
     symbolSessions: SYMBOL_SESSION_FILTER,
     intradayOnly: {
         flatPositionsCutoffUtcForex: { hour: 20, minute: 55 },
+        flatPositionsCutoffWindowMinutesForex: 65,
         flatPositionsCutoffUtcCrypto: { hour: 23, minute: 55 },
         cryptoDayBoundaryExit: true,
     },

@@ -84,12 +84,16 @@ function normalizedBucketList(value) {
 export function isPastFlatPositionsCutoff(nowUtc, assetClass, config = DEFAULT_INTRADAY_CONFIG) {
     const date = toUtcDate(nowUtc);
     const currentMin = minutesOfDayUtc(date);
-    const selected =
-        assetClass === "crypto"
-            ? config.intradayOnly?.flatPositionsCutoffUtcCrypto
-            : config.intradayOnly?.flatPositionsCutoffUtcForex;
+    const intradayOnly = config.intradayOnly || {};
+    const selected = assetClass === "crypto" ? intradayOnly.flatPositionsCutoffUtcCrypto : intradayOnly.flatPositionsCutoffUtcForex;
     const cutoffMin = cutoffMinutes(selected);
     if (!Number.isFinite(cutoffMin)) return false;
+    if (assetClass === "forex") {
+        const windowMinutes = Number(intradayOnly.flatPositionsCutoffWindowMinutesForex || 65);
+        if (!Number.isFinite(windowMinutes) || windowMinutes <= 0) return currentMin >= cutoffMin;
+        const windowEndMin = (cutoffMin + windowMinutes) % 1440;
+        return inWindow(currentMin, cutoffMin, windowEndMin);
+    }
     return currentMin >= cutoffMin;
 }
 
