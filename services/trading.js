@@ -106,9 +106,7 @@ class TradingService {
         this.intradayCryptoState = createIntradayRuntimeState({ strategyId: INTRADAY_CRYPTO_STRATEGY_ID });
         this.cryptoLwmConfigHash = computeConfigHash(CRYPTO_LWM_CONFIG);
 
-        logger.info(
-            `[Strategy] ForexPrimary=${FOREX_PRIMARY_STRATEGY_NAME} CryptoPrimary=${CRYPTO_PRIMARY_STRATEGY_NAME} IntradayDefault=${INTRADAY_DEFAULT_STRATEGY_ID}`,
-        );
+        logger.info(`[Strategy] ForexPrimary=${FOREX_PRIMARY_STRATEGY_NAME} IntradayDefault=${INTRADAY_DEFAULT_STRATEGY_ID} Mode=FOREX_ONLY`);
     }
 
     setAccountBalance(balance) {

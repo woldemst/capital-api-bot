@@ -147,6 +147,7 @@ export const DEFAULT_INTRADAY_CONFIG = {
         SYDNEY: { start: "22:00", end: "07:00" },
         TOKYO: { start: "00:00", end: "09:00" },
     },
+    sessionSymbols: SESSION_SYMBOLS,
     symbolSessions: SYMBOL_SESSION_FILTER,
     intradayOnly: {
         flatPositionsCutoffUtcForex: { hour: 20, minute: 55 },

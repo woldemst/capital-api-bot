@@ -100,7 +100,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     const hourBucket = utcHourBucket(nowUtc);
     const activeSessions = determineActiveSessions(nowUtc, config);
     const activeSession = determineActiveSession(nowUtc, config);
-    const sessionForexSymbols = activeSession ? allowedSymbolsBySession(activeSession) : [];
+    const sessionAllowedSymbols = activeSession ? allowedSymbolsBySession(activeSession) : [];
     const preferredSymbolSessions = preferredSessionsForSymbol(symbol, config);
     const allowedHourBuckets = normalizedBucketList(config?.schedule?.allowedUtcHourBuckets);
     const blockedHourBuckets = normalizedBucketList(config?.schedule?.blockedUtcHourBuckets);
@@ -108,11 +108,11 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
         (!allowedHourBuckets.length || allowedHourBuckets.includes(hourBucket)) &&
         !blockedHourBuckets.includes(hourBucket);
     const sessionAllowedBySymbolFilter = !preferredSymbolSessions || (activeSession ? preferredSymbolSessions.includes(activeSession) : false);
-    const allowedSymbols = [...new Set([...sessionForexSymbols, ...CRYPTO_SYMBOLS])];
+    const allowedSymbols = [...new Set([...sessionAllowedSymbols, ...CRYPTO_SYMBOLS])];
     const symbolAllowed =
         assetClass === "crypto"
             ? CRYPTO_SYMBOLS.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed
-            : sessionForexSymbols.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed;
+            : sessionAllowedSymbols.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed;
     const forceFlatNow = isPastFlatPositionsCutoff(nowUtc, assetClass, config);
 
     const reasons = [];
@@ -131,7 +131,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
         assetClass,
         activeSessions,
         activeSession,
-        sessionAllowedSymbols: sessionForexSymbols,
+        sessionAllowedSymbols,
         allowedSymbols,
         symbolAllowed,
         intradayOnly: true,

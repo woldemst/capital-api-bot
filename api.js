@@ -7,6 +7,9 @@ let sessionStartTime = Date.now();
 const HISTORICAL_CACHE_TTL_MS = 5000;
 const HISTORICAL_MAX_RETRIES = 3;
 const HISTORICAL_RETRY_BASE_MS = 350;
+const API_MAX_RETRIES = Number.isFinite(Number(process.env.API_MAX_RETRIES)) ? Number(process.env.API_MAX_RETRIES) : 3;
+const API_RETRY_BASE_MS = Number.isFinite(Number(process.env.API_RETRY_BASE_MS)) ? Number(process.env.API_RETRY_BASE_MS) : 500;
+const API_RETRY_JITTER_MS = Number.isFinite(Number(process.env.API_RETRY_JITTER_MS)) ? Number(process.env.API_RETRY_JITTER_MS) : 150;
 const HISTORICAL_MIN_INTERVAL_MS = Number.isFinite(Number(process.env.HISTORICAL_MIN_INTERVAL_MS))
     ? Number(process.env.HISTORICAL_MIN_INTERVAL_MS)
     : 200;
@@ -16,6 +19,72 @@ let historicalNextAllowedTsMs = 0;
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isSessionError(error) {
+    const status = error?.response?.status;
+    const errorCode = error?.response?.data?.errorCode || "";
+    return (
+        status === 401 ||
+        status === 403 ||
+        errorCode === "error.invalid.session.token" ||
+        (typeof errorCode === "string" && errorCode.toLowerCase().includes("session"))
+    );
+}
+
+function isRetryableHttpStatus(status) {
+    return status === 429 || (status >= 500 && status < 600);
+}
+
+function getRetryAfterMs(error) {
+    const raw = error?.response?.headers?.["retry-after"];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed * 1000 : null;
+}
+
+function computeRetryDelayMs(error, attempt, baseMs, jitterMs) {
+    const retryAfterMs = getRetryAfterMs(error);
+    const expBackoffMs = baseMs * 2 ** Math.max(attempt - 1, 0);
+    const randomJitterMs = Math.floor(Math.random() * Math.max(jitterMs, 0));
+    return Math.max(retryAfterMs || 0, expBackoffMs + randomJitterMs);
+}
+
+async function withApiRetry(
+    fn,
+    {
+        label = "request",
+        maxRetries = API_MAX_RETRIES,
+        refreshOnSession = true,
+        retryHttpStatus = true,
+    } = {},
+) {
+    let sessionRefreshAttempted = false;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+        try {
+            return await fn();
+        } catch (error) {
+            const status = error?.response?.status;
+            const hasNextAttempt = attempt < maxRetries;
+
+            if (refreshOnSession && !sessionRefreshAttempted && isSessionError(error)) {
+                sessionRefreshAttempted = true;
+                logger.warn(`[API] ${label} session error detected. Refreshing session and retrying...`);
+                await refreshSession({ force: true });
+                continue;
+            }
+
+            if (retryHttpStatus && isRetryableHttpStatus(status) && hasNextAttempt) {
+                const waitMs = computeRetryDelayMs(error, attempt, API_RETRY_BASE_MS, API_RETRY_JITTER_MS);
+                logger.warn(`[API] ${label} retry ${attempt}/${maxRetries - 1} after ${status}. Waiting ${waitMs}ms.`);
+                await sleep(waitMs);
+                continue;
+            }
+
+            throw error;
+        }
+    }
 }
 
 function scheduleHistoricalRequest(taskFn) {
@@ -164,16 +233,12 @@ async function fetchHistoricalWithRetry(symbol, resolution, count) {
             };
         } catch (error) {
             const status = error?.response?.status;
-            const retryAfterHeader = error?.response?.headers?.["retry-after"];
             const retryable = status === 429 || (status >= 500 && status < 600);
             const hasNextAttempt = attempt < HISTORICAL_MAX_RETRIES;
 
             if (!retryable || !hasNextAttempt) throw error;
 
-            const retryAfterMs = Number.isFinite(Number(retryAfterHeader)) ? Number(retryAfterHeader) * 1000 : null;
-            const expBackoffMs = HISTORICAL_RETRY_BASE_MS * 2 ** (attempt - 1);
-            const jitterMs = Math.floor(Math.random() * 120);
-            const waitMs = Math.max(retryAfterMs || 0, expBackoffMs + jitterMs);
+            const waitMs = computeRetryDelayMs(error, attempt, HISTORICAL_RETRY_BASE_MS, 120);
             logger.warn(
                 `[API] getHistorical retry ${attempt}/${HISTORICAL_MAX_RETRIES - 1} for ${symbol} ${resolution} after ${status}. Waiting ${waitMs}ms.`,
             );
@@ -195,21 +260,26 @@ export const getHeaders = (includeContentType = false) => {
 
 export const startSession = async () => {
     try {
-        const response = await axios.post(
-            `${API.BASE_URL}/session`,
-            {
-                identifier: API.IDENTIFIER,
-                password: API.PASSWORD,
-                encryptedPassword: false,
-            },
-            {
-                headers: getHeaders(true),
-            }
+        const response = await withApiRetry(
+            () =>
+                axios.post(
+                    `${API.BASE_URL}/session`,
+                    {
+                        identifier: API.IDENTIFIER,
+                        password: API.PASSWORD,
+                        encryptedPassword: false,
+                    },
+                    {
+                        headers: getHeaders(true),
+                    },
+                ),
+            { label: "startSession", refreshOnSession: false },
         );
 
         logger.info("Session started");
         cst = response.headers["cst"];
         xsecurity = response.headers["x-security-token"];
+        sessionStartTime = Date.now();
 
         if (!cst || !xsecurity) {
             logger.warn("Session tokens not received in response headers");
@@ -229,7 +299,9 @@ export const startSession = async () => {
 
 export const pingSession = async () => {
     try {
-        const response = await axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() });
+        const response = await withApiRetry(() => axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() }), {
+            label: "pingSession",
+        });
         const status = response?.data?.status || "OK";
         logger.info(`[API] Ping OK (${status})`);
     } catch (error) {
@@ -238,10 +310,13 @@ export const pingSession = async () => {
     }
 };
 
-export const refreshSession = async () => {
-    if (Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
+export const refreshSession = async ({ force = false } = {}) => {
+    if (!force && Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
     try {
-        const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
+        const response = await withApiRetry(() => axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() }), {
+            label: "refreshSession",
+            refreshOnSession: false,
+        });
         cst = response.headers["cst"];
         xsecurity = response.headers["x-security-token"];
         sessionStartTime = Date.now();
@@ -254,59 +329,41 @@ export const refreshSession = async () => {
 
 export const getSessionDetails = async () => {
     try {
-        const response = await axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() });
+        const response = await withApiRetry(() => axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() }), {
+            label: "getSessionDetails",
+        });
         logger.info(`[API] Session details: ${JSON.stringify(response.data)}`);
     } catch (error) {
         logger.error("[api.js][API] Session details error:", error.response?.data || error.message);
     }
 };
 
-async function withSessionRetry(fn, ...args) {
-    try {
-        return await fn(...args);
-    } catch (error) {
-        const status = error.response?.status;
-        const errorCode = error.response?.data?.errorCode || "";
-        if (
-            status === 401 ||
-            status === 403 ||
-            errorCode === "error.invalid.session.token" ||
-            (typeof errorCode === "string" && errorCode.toLowerCase().includes("session"))
-        ) {
-            logger.warn("[API] Session error detected. Refreshing session and retrying...");
-            await refreshSession();
-            return await fn(...args); // Retry once
-        }
-        throw error;
-    }
-}
-
 export const getAccountInfo = async () =>
-    withSessionRetry(async () => {
+    withApiRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/accounts`, { headers: getHeaders() });
         return response.data;
-    });
+    }, { label: "getAccountInfo" });
 
 export const getMarkets = async () =>
-    withSessionRetry(async () => {
+    withApiRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
         return Array.isArray(response.data.markets) ? response.data.markets : [];
-    });
+    }, { label: "getMarkets" });
 
 export async function getMarketDetails(symbol) {
-    return await withSessionRetry(async () => {
+    return await withApiRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
         // logger.info(`Market details for ${symbol}: ${JSON.stringify(response.data)}`);
         return response.data;
-    });
+    }, { label: `getMarketDetails ${symbol}` });
 }
 
 export const getOpenPositions = async () =>
-    withSessionRetry(async () => {
+    withApiRetry(async () => {
         const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
         // logger.info("<========= open positions =========>\n" + JSON.stringify(response.data, null, 2) + "\n\n");
         return response.data;
-    });
+    }, { label: "getOpenPositions" });
 
 export async function getHistorical(symbol, resolution, count) {
     const key = historicalCacheKey(symbol, resolution, count);
@@ -320,7 +377,10 @@ export async function getHistorical(symbol, resolution, count) {
         return cached.promise;
     }
 
-    const requestPromise = withSessionRetry(() => fetchHistoricalWithRetry(symbol, resolution, count));
+    const requestPromise = withApiRetry(() => fetchHistoricalWithRetry(symbol, resolution, count), {
+        label: `getHistorical ${symbol} ${resolution}`,
+        retryHttpStatus: false,
+    });
     historicalCache.set(key, { promise: requestPromise, expiresAt: now + HISTORICAL_CACHE_TTL_MS });
 
     try {
@@ -334,7 +394,7 @@ export async function getHistorical(symbol, resolution, count) {
 }
 
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
-    return await withSessionRetry(async () => {
+    return await withApiRetry(async () => {
         logger.info(`[API] Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
         const order = {
             epic: symbol,
@@ -348,7 +408,7 @@ export async function placeOrder(symbol, direction, size, level, orderType = "LI
         });
         logger.info("[API] Order response:", response.data);
         return response.data;
-    });
+    }, { label: `placeOrder ${symbol}` });
 }
 
 export async function updateTrailingStop(positionId, currentPrice, entryPrice, takeProfit, direction, symbol) {
@@ -390,13 +450,17 @@ export async function updateTrailingStop(positionId, currentPrice, entryPrice, t
     }
 
     try {
-        const response = await axios.put(
-            `${API.BASE_URL}/positions/${positionId}`,
-            {
-                trailingStop: true,
-                stopDistance: Number(trailingDistance.toFixed(6)), // round safely
-            },
-            { headers: getHeaders(true) }
+        const response = await withApiRetry(
+            () =>
+                axios.put(
+                    `${API.BASE_URL}/positions/${positionId}`,
+                    {
+                        trailingStop: true,
+                        stopDistance: Number(trailingDistance.toFixed(6)), // round safely
+                    },
+                    { headers: getHeaders(true) },
+                ),
+            { label: `updateTrailingStop ${positionId}` },
         );
         logger.info(`[API] Trailing stop for ${positionId} set to distance ${trailingDistance}`);
         return response.data;
@@ -422,7 +486,7 @@ function toRoundedNumber(value, decimals = 5) {
 }
 
 export async function placePosition(symbol, direction, size, price, SL, TP) {
-    return await withSessionRetry(async () => {
+    return await withApiRetry(async () => {
         try {
             const range = await getAllowedTPRange(symbol);
             const decimals = Number.isInteger(range.decimals) ? range.decimals : symbol.includes("JPY") ? 3 : 5;
@@ -457,11 +521,11 @@ export async function placePosition(symbol, direction, size, price, SL, TP) {
             }
             throw error;
         }
-    });
+    }, { label: `placePosition ${symbol}` });
 }
 
 export async function updatePositionProtection(dealId, stopLevelInput, profitLevelInput, symbol = "") {
-    return await withSessionRetry(async () => {
+    return await withApiRetry(async () => {
         const range = symbol ? await getAllowedTPRange(symbol) : { decimals: 5 };
         const decimals = Number.isInteger(range.decimals) ? range.decimals : 5;
         const stopLevel = toRoundedNumber(stopLevelInput, decimals);
@@ -481,21 +545,21 @@ export async function updatePositionProtection(dealId, stopLevelInput, profitLev
         });
         logger.info(`[API] Position protection updated for ${dealId}: ${JSON.stringify(response.data)}`);
         return response.data;
-    });
+    }, { label: `updatePositionProtection ${dealId}` });
 }
 
 export async function gevtDealConfirmation(dealReference) {
-    return await withSessionRetry(async () => {
+    return await withApiRetry(async () => {
         logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
         const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
         logger.info("[API] DealConfirmation", response.data);
         return response.data;
-    });
+    }, { label: `gevtDealConfirmation ${dealReference}` });
 }
 
 // In api.js, update getDealConfirmation method
 export async function getDealConfirmation(dealReference) {
-    return await withSessionRetry(async () => {
+    return await withApiRetry(async () => {
         logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
         const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
 
@@ -505,14 +569,18 @@ export async function getDealConfirmation(dealReference) {
 
         logger.info("[API] DealConfirmation", response.data);
         return response.data;
-    });
+    }, { label: `getDealConfirmation ${dealReference}` });
 }
 
 export async function closePosition(dealId) {
     try {
-        const response = await axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
-            headers: getHeaders(true),
-        });
+        const response = await withApiRetry(
+            () =>
+                axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
+                    headers: getHeaders(true),
+                }),
+            { label: `closePosition ${dealId}` },
+        );
         logger.info(`[API] Position closed:`, response.data);
         return response.data;
     } catch (error) {

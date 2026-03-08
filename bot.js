@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, TRADING_WINDOWS, NEWS_GUARD, LIVE_SYMBOLS } from "./config.js";
+import { DEV, PROD, ANALYSIS, SESSIONS, TRADING_WINDOWS, NEWS_GUARD, LIVE_SYMBOLS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
@@ -44,7 +44,6 @@ class TradingBot {
         );
 
         this.allowedTradingWindows = TRADING_WINDOWS.FOREX.map((window) => ({ ...window }));
-        this.cryptoTradingWindows = TRADING_WINDOWS.CRYPTO.map((window) => ({ ...window }));
         this.rolloverTimeZone = "America/New_York";
         this.rolloverHour = 17;
         this.rolloverMinute = 0;
@@ -270,8 +269,8 @@ class TradingBot {
         return hour * 60 + minute;
     }
 
-    isCryptoSymbol(symbol) {
-        return CRYPTO_SYMBOLS.includes(symbol);
+    isCryptoSymbol() {
+        return false;
     }
 
     isLiveSymbolEnabled(symbol) {
@@ -284,12 +283,6 @@ class TradingBot {
         const activeSessionNames = [];
 
         for (const [name, session] of Object.entries(SESSIONS)) {
-            if (name === "CRYPTO") {
-                if (!Array.isArray(CRYPTO_SYMBOLS) || CRYPTO_SYMBOLS.length === 0) continue;
-                activeSessionNames.push(name);
-                continue;
-            }
-
             const startMinutes = this.parseMinutes(session?.START);
             const endMinutes = this.parseMinutes(session?.END);
             if (this.inSession(currentMinutes, startMinutes, endMinutes)) {
@@ -696,14 +689,13 @@ function startBot() {
     });
 }
 
-const hasAlwaysOnCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.length > 0;
 const now = new Date();
 const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
 const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
 const forexSundayOpenMinutes = 22 * 60;
 const forexWeekendClosed = day === 6 || (day === 0 && currentMinutes < forexSundayOpenMinutes);
 
-if (forexWeekendClosed && !hasAlwaysOnCrypto) {
+if (forexWeekendClosed) {
     const delayMs = computeNextForexOpenDelayMs(now);
     logger.info(`[Bot] Forex weekend is still closed. Scheduling start at Sunday 22:00 UTC in ${Math.round(delayMs / 60000)} minutes.`);
     setTimeout(() => {
@@ -711,9 +703,7 @@ if (forexWeekendClosed && !hasAlwaysOnCrypto) {
         startBot();
     }, delayMs);
 } else {
-    if (forexWeekendClosed && hasAlwaysOnCrypto) {
-        logger.info("[Bot] Forex weekend is closed, but CRYPTO symbols are configured. Starting bot.");
-    } else if (day === 0 && !forexWeekendClosed) {
+    if (day === 0 && !forexWeekendClosed) {
         logger.info("[Bot] Forex market is open again for the new week. Starting bot.");
     }
     startBot();

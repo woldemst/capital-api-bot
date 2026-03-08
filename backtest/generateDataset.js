@@ -34,35 +34,14 @@ const INDICATOR_LOOKBACK = Number.isFinite(Number(process.env.DATASET_INDICATOR_
 const FILE_FORMAT = String(process.env.DATASET_FILE_FORMAT || "jsonl").toLowerCase() === "json" ? "json" : "jsonl";
 
 const DEFAULT_FX_SYMBOLS = [
+    "AUD/USD",
     "EUR/USD",
     "GBP/USD",
-    "USD/JPY",
-    "USD/CHF",
     "USD/CAD",
-    "AUD/USD",
-    "NZD/USD",
-    "EUR/GBP",
-    "EUR/JPY",
-    "GBP/JPY",
-    "AUD/JPY",
-    "NZD/JPY",
-    "EUR/CHF",
-    "GBP/CHF",
-    "CAD/JPY",
-    "CHF/JPY",
-    "EUR/CAD",
-    "GBP/CAD",
-    "EUR/AUD",
-    "EUR/NZD",
-    "GBP/AUD",
-    "AUD/CAD",
-    "AUD/NZD",
-    "NZD/CAD",
-    "NZD/CHF",
-    "AUD/CHF",
+    "USD/JPY",
 ];
 
-const DEFAULT_CRYPTO_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD", "ADA/USD", "LTC/USD", "BCH/USD", "DOT/USD", "LINK/USD"];
+const DEFAULT_CRYPTO_SYMBOLS = [];
 
 const ALL_TIMEFRAMES = {
     M1: "1min",
@@ -108,7 +87,11 @@ function parseSymbols() {
 function parseTimeframes() {
     const envFrames = String(process.env.DATASET_TIMEFRAMES || "")
         .split(",")
-        .map((f) => String(f || "").trim().toUpperCase())
+        .map((f) =>
+            String(f || "")
+                .trim()
+                .toUpperCase(),
+        )
         .filter(Boolean);
     if (!envFrames.length) {
         const defaults = {};
@@ -168,13 +151,7 @@ function mergeCandles(existing, incoming) {
         const row = parseCandleRow(candle);
         if (!row) continue;
         const current = map.get(row.timestamp);
-        if (
-            current &&
-            current.open === row.open &&
-            current.high === row.high &&
-            current.low === row.low &&
-            current.close === row.close
-        ) {
+        if (current && current.open === row.open && current.high === row.high && current.low === row.low && current.close === row.close) {
             map.set(row.timestamp, { ...current, ...row });
             continue;
         }
@@ -315,9 +292,7 @@ async function fetchBackfill(symbol, interval, endAt, maxChunks) {
 
     for (let chunkIndex = 1; chunkIndex <= maxChunks; chunkIndex++) {
         const chunkStart = new Date(cursorEnd.getTime() - chunkSpanMs + intervalMs);
-        logger.info(
-            `📡 [Backfill ${chunkIndex}/${maxChunks}] ${symbol} ${interval} ${toApiDate(chunkStart)} -> ${toApiDate(cursorEnd)}`,
-        );
+        logger.info(`📡 [Backfill ${chunkIndex}/${maxChunks}] ${symbol} ${interval} ${toApiDate(chunkStart)} -> ${toApiDate(cursorEnd)}`);
         const candles = await fetchChunk(symbol, interval, chunkStart, cursorEnd);
         if (!candles.length) {
             logger.info(`ℹ️ [Backfill] ${symbol} ${interval}: no older candles in requested range. Stopping backfill at chunk ${chunkIndex}.`);
@@ -345,9 +320,7 @@ async function fetchForward(symbol, interval, startAt, endAt, maxChunks) {
 
     for (let chunkIndex = 1; chunkIndex <= maxChunks && cursorStart <= limitEnd; chunkIndex++) {
         const chunkEnd = new Date(Math.min(cursorStart.getTime() + chunkSpanMs - intervalMs, limitEnd.getTime()));
-        logger.info(
-            `📡 [Forward ${chunkIndex}/${maxChunks}] ${symbol} ${interval} ${toApiDate(cursorStart)} -> ${toApiDate(chunkEnd)}`,
-        );
+        logger.info(`📡 [Forward ${chunkIndex}/${maxChunks}] ${symbol} ${interval} ${toApiDate(cursorStart)} -> ${toApiDate(chunkEnd)}`);
         const candles = await fetchChunk(symbol, interval, cursorStart, chunkEnd);
         if (!candles.length) {
             logger.info(`ℹ️ [Forward] ${symbol} ${interval}: no newer candles in requested range. Stopping forward sync at chunk ${chunkIndex}.`);

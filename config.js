@@ -40,13 +40,13 @@ const SESSION_SYMBOLS = Object.fromEntries(
 );
 // can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
 
+// Legacy compatibility export; crypto flow is disabled in runtime.
 export const CRYPTO_SYMBOLS = [];
 export const TRADING_WINDOWS = {
     FOREX: [
         // 22:00-12:59 UTC
         { start: 22 * 60, end: 12 * 60 + 59 },
     ],
-    CRYPTO: [],
 };
 
 export const NEWS_GUARD = {
@@ -87,17 +87,12 @@ export const SESSIONS = {
         END: "09:00",
         SYMBOLS: SESSION_SYMBOLS.TOKYO,
     },
-    CRYPTO: {
-        START: "00:00",
-        END: "23:59",
-        SYMBOLS: CRYPTO_SYMBOLS,
-    },
 };
 
 export const RISK = {
     // Conservative defaults for small accounts; can be overridden via env later.
     PER_TRADE: 0.05, // 5% risk per forex trade
-    CRYPTO_PER_TRADE: 0.04, // 4% risk per crypto trade
+    CRYPTO_PER_TRADE: 0.04, // legacy compatibility; crypto runtime disabled
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     GUARDS: {
         MAX_DAILY_LOSS_PCT: 0, // disabled: no daily-loss entry block
@@ -115,117 +110,11 @@ export const RISK = {
     },
 };
 
-const CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_SYMBOLS = [];
-
 export const STRATEGY_SELECTION = {
     FOREX_PRIMARY: ENV.FOREX_PRIMARY_STRATEGY || "INTRADAY_7STEP_V1",
-    CRYPTO_PRIMARY: ENV.CRYPTO_PRIMARY_STRATEGY || ENV.CRYPTO_STRATEGY_NAME || "DISABLED",
 };
 
-export const STRATEGIES = {
-    CRYPTO_LIQUIDITY_WINDOW_MOMENTUM: {
-        id: "CRYPTO_LIQUIDITY_WINDOW_MOMENTUM",
-        enabled: false,
-        symbols: CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_SYMBOLS,
-        timezone: "Europe/Berlin",
-        window: {
-            start: ENV.CLWM_WINDOW_START || "14:00",
-            end: ENV.CLWM_WINDOW_END || "20:00",
-        },
-        data: {
-            minCandles5m: 200,
-            minCandles1h: 50,
-        },
-        spread: {
-            maxSpreadPctDefault: 0.0012,
-        },
-        jump: {
-            lookbackBars5m: 12, // 60m
-            jumpAtrMult: 2.5,
-            cooldownMinutes: 60,
-        },
-        signal: {
-            emaFastPeriod: 9,
-            emaSlowPeriod: 21,
-            slopeLookbackCandles: 3,
-            volumeMult: 1.1,
-            trendFilter1h: {
-                enabled: !isTrue(ENV.CLWM_DISABLE_H1_FILTER),
-                emaPeriod: 50,
-            },
-        },
-        entry: {
-            cooldownMinutes: 30,
-            maxTradesPerSymbolPerDay: 1,
-            maxTradesPerDay: 2,
-        },
-        exits: {
-            tpR: 1.25,
-            moveStopToBreakevenAtR: 0.8,
-            breakevenBufferR: 0.05,
-            timeStopMinutes: 120,
-            timeStopMinR: 0.3,
-            trailing: {
-                enabled: true,
-                atrMult: 1.0,
-                activateAtR: 1.0,
-            },
-        },
-        risk: {
-            riskProfile: ["normal", "aggressive"].includes(String(ENV.CLWM_RISK_PROFILE || "").toLowerCase())
-                ? String(ENV.CLWM_RISK_PROFILE || "").toLowerCase()
-                : "normal",
-            riskPctNormal: 0.04,
-            riskPctAggressive: 0.04,
-            dailyLossLimitPctNormal: 0.01,
-            dailyLossLimitPctAggressive: 0.03,
-            maxLeverageCrypto: 2.0,
-        },
-        perSymbolOverrides: {
-            BTCUSD: {
-                maxSpreadPct: 0.0008,
-                jumpThresholdPct: 0.009,
-                stopAtrMult: 1.0,
-                minStopPct: 0.0025,
-                filters: {
-                    allowedSides: ["LONG"],
-                    allowedWeekdays: ["SUN"],
-                },
-            },
-            ETHUSD: {
-                maxSpreadPct: 0.0008,
-                jumpThresholdPct: 0.009,
-                stopAtrMult: 1.0,
-                minStopPct: 0.0025,
-                filters: {
-                    allowedSides: ["LONG"],
-                    allowedWeekdays: ["SUN"],
-                },
-            },
-            SOLUSD: {
-                maxSpreadPct: 0.0012,
-                jumpThresholdPct: 0.013,
-                stopAtrMult: 1.2,
-                minStopPct: 0.0035,
-            },
-            XRPUSD: {
-                maxSpreadPct: 0.0012,
-                jumpThresholdPct: 0.013,
-                stopAtrMult: 1.2,
-                minStopPct: 0.0035,
-            },
-            DOGEUSD: {
-                maxSpreadPct: 0.0012,
-                jumpThresholdPct: 0.013,
-                stopAtrMult: 1.2,
-                minStopPct: 0.0035,
-            },
-        },
-        logging: {
-            enabled: true,
-        },
-    },
-};
+export const STRATEGIES = {};
 
 const TIMEFRAMES = {
     D1: "DAY", // Daily trend direction
