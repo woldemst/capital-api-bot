@@ -65,6 +65,10 @@ export default function Overview() {
   const dashboard = plannerQuery.data;
   const monthlyTemplateRows = dashboard?.monthlyPlan.rows || [];
   const annualSummary = dashboard?.annualSummary || null;
+  const plannerErrorMessage =
+    plannerQuery.error instanceof Error && plannerQuery.error.message
+      ? `${plannerQuery.error.message}. Prüfe den Hub-Server, den Vite-/API-Proxy und den Referenzreport für das Forex-Desk.`
+      : "Prüfe den Hub-Server, den Vite-/API-Proxy und den Referenzreport für das Forex-Desk.";
 
   const plannedMonthlyRows = useMemo(() => {
     if (!dashboard || !annualSummary) return [];
@@ -154,7 +158,7 @@ export default function Overview() {
     return (
       <ErrorState
         title="Forex-Dashboard konnte nicht geladen werden"
-        message="Prüfe den Hub-Server und den Referenzreport für das Forex-Desk."
+        message={plannerErrorMessage}
         onRetry={() => plannerQuery.refetch()}
       />
     );
