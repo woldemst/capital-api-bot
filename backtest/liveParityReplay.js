@@ -38,11 +38,13 @@ const MAX_POSITIONS = Number.isFinite(Number(process.env.LIVE_PARITY_MAX_POSITIO
 const GUARDS = RISK?.GUARDS || {};
 const EXITS = RISK?.EXITS || {};
 const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0;
+const MAX_DAILY_LOSS_R = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_R)) ? Number(GUARDS.MAX_DAILY_LOSS_R) : 0;
 const MAX_OPEN_RISK_PCT = Number.isFinite(Number(process.env.LIVE_PARITY_MAX_OPEN_RISK_PCT))
     ? Number(process.env.LIVE_PARITY_MAX_OPEN_RISK_PCT)
     : Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT))
       ? Number(GUARDS.MAX_OPEN_RISK_PCT)
     : Math.max(PHASE1_RISK_PCT, Number(RISK?.CRYPTO_PER_TRADE) || PHASE1_RISK_PCT) * 2;
+const MAX_SYMBOL_LOSSES_PER_DAY = Number.isFinite(Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY)) ? Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY) : 0;
 const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
 const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
     ? Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES)
@@ -1152,10 +1154,20 @@ async function run() {
     function shouldBlockNewTrade(symbol, tsMs, nextRiskPct) {
         const dayKey = utcDayKey(tsMs);
         const periodClosed = closedTrades.filter((t) => utcDayKey(t.closeTsMs) === dayKey);
+        const symbolLossesToday = periodClosed.filter((t) => t.symbol === symbol && t.r < 0).length;
+        const todayNetR = periodClosed.reduce((sum, t) => sum + (Number(t.r) || 0), 0);
         const todayEstimatedPnlPct = periodClosed.reduce((sum, t) => sum + t.r * (Number(t.riskPct) || 0), 0);
         const todayEstimatedLossPctAbs = Math.abs(Math.min(0, todayEstimatedPnlPct));
         if (MAX_DAILY_LOSS_PCT > 0 && todayEstimatedLossPctAbs >= MAX_DAILY_LOSS_PCT) {
             return { blocked: true, reason: "daily_loss_limit" };
+        }
+
+        if (MAX_DAILY_LOSS_R > 0 && todayNetR <= -MAX_DAILY_LOSS_R) {
+            return { blocked: true, reason: "daily_loss_r_limit" };
+        }
+
+        if (MAX_SYMBOL_LOSSES_PER_DAY > 0 && symbolLossesToday >= MAX_SYMBOL_LOSSES_PER_DAY) {
+            return { blocked: true, reason: "symbol_daily_loss_limit" };
         }
 
         const { currentLossStreak, lastLossAtMs } = computeTradeSummaryForGuards(closedTrades);
@@ -1458,6 +1470,8 @@ async function run() {
     const trades = closedTrades.length;
     const wins = closedTrades.filter((t) => t.r > 0).length;
     const losses = closedTrades.filter((t) => t.r < 0).length;
+    const rolloverCloses = closedTrades.filter((t) => t.reason === "rollover").length;
+    const periodEndCloses = closedTrades.filter((t) => t.reason === "period_end").length;
     const netR = closedTrades.reduce((sum, t) => sum + t.r, 0);
     const grossWinR = closedTrades.reduce((sum, t) => sum + (t.r > 0 ? t.r : 0), 0);
     const grossLossR = closedTrades.reduce((sum, t) => sum + (t.r < 0 ? Math.abs(t.r) : 0), 0);
@@ -1495,7 +1509,10 @@ async function run() {
             ["Avg Hold Time", Number.isFinite(avgHoldMinutes) ? `${num(avgHoldMinutes)} min` : "n/a"],
             ["Median Hold Time", Number.isFinite(medianHoldMinutes) ? `${num(medianHoldMinutes)} min` : "n/a"],
             ["Max Drawdown", `${num(maxDdAbs)} EUR (${pct(maxDdPct)})`],
-            ["Guards", `maxPos=${MAX_POSITIONS}, openRiskCap=${pct(MAX_OPEN_RISK_PCT)}, dailyLoss=${MAX_DAILY_LOSS_PCT > 0 ? pct(MAX_DAILY_LOSS_PCT) : "disabled"}`],
+            [
+                "Guards",
+                `maxPos=${MAX_POSITIONS}, openRiskCap=${pct(MAX_OPEN_RISK_PCT)}, dailyLossPct=${MAX_DAILY_LOSS_PCT > 0 ? pct(MAX_DAILY_LOSS_PCT) : "disabled"}, dailyLossR=${MAX_DAILY_LOSS_R > 0 ? num(MAX_DAILY_LOSS_R, 2) : "disabled"}, symbolLossesPerDay=${MAX_SYMBOL_LOSSES_PER_DAY > 0 ? String(MAX_SYMBOL_LOSSES_PER_DAY) : "disabled"}`,
+            ],
             [
                 "Execution Model",
                 COST_MODEL_ENABLED
@@ -1508,6 +1525,7 @@ async function run() {
                     ? `enabled (${ACCOUNT_CURRENCY}, util=${pct(MARGIN_UTILIZATION)}, majorFX=${LEVERAGE_FX_MAJOR}:1, nonMajorFX=${LEVERAGE_FX_NON_MAJOR}:1)`
                     : "disabled",
             ],
+            ["Forced Flat Closes", `rollover=${rolloverCloses}, period_end=${periodEndCloses}`],
             [
                 "Risk Plan",
                 describeRiskPlan(riskPhases),

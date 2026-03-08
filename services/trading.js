@@ -38,7 +38,9 @@ const GUARDS = RISK.GUARDS || {};
 const EXITS = RISK.EXITS || {};
 const CRYPTO_PER_TRADE = CRYPTO_RISK_PCT;
 const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0.02;
+const MAX_DAILY_LOSS_R = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_R)) ? Number(GUARDS.MAX_DAILY_LOSS_R) : 0;
 const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT)) ? Number(GUARDS.MAX_OPEN_RISK_PCT) : Math.max(PER_TRADE, CRYPTO_PER_TRADE) * 2;
+const MAX_SYMBOL_LOSSES_PER_DAY = Number.isFinite(Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY)) ? Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY) : 0;
 const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
 const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
     ? Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES)
@@ -1082,7 +1084,10 @@ class TradingService {
     async shouldBlockNewTrade(symbol) {
         const summary = await this.refreshRiskGuardSummary();
         const period = summary?.period || {};
+        const bySymbol = summary?.bySymbol || {};
         const global = summary?.all || {};
+        const symbolKey = String(symbol || "").toUpperCase();
+        const symbolPeriod = bySymbol?.[symbolKey] || {};
 
         const todayEstimatedPnlPct = Number(period.estimatedPnlPct) || 0;
         const todayEstimatedLossPctAbs = Math.abs(Math.min(0, todayEstimatedPnlPct));
@@ -1092,6 +1097,24 @@ class TradingService {
                 `[RiskGuard] Daily loss limit reached (${this.pctText(todayEstimatedLossPctAbs)} >= ${this.pctText(this.dailyLossLimitPct)}). Blocking new entries.`,
             );
             return { blocked: true, reason: "daily_loss_limit" };
+        }
+
+        const todayNetR = Number(period.netR) || 0;
+        if (MAX_DAILY_LOSS_R > 0 && todayNetR <= -MAX_DAILY_LOSS_R) {
+            this.logGuardBlock(
+                "daily_loss_r_limit",
+                `[RiskGuard] Daily R stop reached (${todayNetR.toFixed(2)}R <= -${MAX_DAILY_LOSS_R.toFixed(2)}R). Blocking new entries for today.`,
+            );
+            return { blocked: true, reason: "daily_loss_r_limit" };
+        }
+
+        const symbolDailyLosses = Number(symbolPeriod.losses) || 0;
+        if (MAX_SYMBOL_LOSSES_PER_DAY > 0 && symbolDailyLosses >= MAX_SYMBOL_LOSSES_PER_DAY) {
+            this.logGuardBlock(
+                `symbol_daily_loss_limit:${symbolKey}`,
+                `[RiskGuard] ${symbolKey} reached ${symbolDailyLosses} losses today (limit=${MAX_SYMBOL_LOSSES_PER_DAY}). Blocking symbol for the rest of the day.`,
+            );
+            return { blocked: true, reason: "symbol_daily_loss_limit" };
         }
 
         const currentLossStreak = Number(global.currentLossStreak) || 0;
@@ -1123,6 +1146,8 @@ class TradingService {
             reason: null,
             snapshot: {
                 todayEstimatedPnlPct,
+                todayNetR,
+                symbolDailyLosses,
                 currentLossStreak,
                 currentOpenRiskPct,
             },

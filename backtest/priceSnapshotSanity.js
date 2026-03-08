@@ -1,4 +1,5 @@
 import { CRYPTO_SYMBOLS } from "../config.js";
+import { toUpperSymbolSet } from "../utils/symbols.js";
 
 const CANDLE_LAG_SANITY_MINUTES = {
     m1: { min: -3, max: 20 },
@@ -14,6 +15,7 @@ const TF_CLOSE_TARGET_LAG_MINUTES = {
     m15: 22.5,
     h1: 90,
 };
+const CRYPTO_SYMBOL_SET = toUpperSymbolSet(CRYPTO_SYMBOLS);
 
 function toNumber(value) {
     if (value === null || value === undefined || value === "") return null;
@@ -32,6 +34,15 @@ function toTimestampMs(value) {
 function cloneRow(row) {
     if (!row || typeof row !== "object") return row;
     return JSON.parse(JSON.stringify(row));
+}
+
+function addShiftedTimestampCandidates(candidates, timestampMs) {
+    if (!Number.isFinite(timestampMs)) return;
+    candidates.add(timestampMs);
+    candidates.add(timestampMs - 60 * 60000);
+    candidates.add(timestampMs + 60 * 60000);
+    candidates.add(timestampMs - 24 * 60 * 60000);
+    candidates.add(timestampMs + 24 * 60 * 60000);
 }
 
 function swapMonthDayIso(value) {
@@ -116,23 +127,11 @@ export function repairPriceSnapshotRow(row) {
         const rawValue = candle?.t;
         const candidates = new Set();
         const directTs = toTimestampMs(rawValue);
-        if (Number.isFinite(directTs)) {
-            candidates.add(directTs);
-            candidates.add(directTs - 60 * 60000);
-            candidates.add(directTs + 60 * 60000);
-            candidates.add(directTs - 24 * 60 * 60000);
-            candidates.add(directTs + 24 * 60 * 60000);
-        }
+        addShiftedTimestampCandidates(candidates, directTs);
 
         const swappedIso = swapMonthDayIso(rawValue);
         const swappedTs = toTimestampMs(swappedIso);
-        if (Number.isFinite(swappedTs)) {
-            candidates.add(swappedTs);
-            candidates.add(swappedTs - 60 * 60000);
-            candidates.add(swappedTs + 60 * 60000);
-            candidates.add(swappedTs - 24 * 60 * 60000);
-            candidates.add(swappedTs + 24 * 60 * 60000);
-        }
+        addShiftedTimestampCandidates(candidates, swappedTs);
 
         const inferredTs = inferClosedCandleTimestamp(snapshotTs, tf);
         if (Number.isFinite(inferredTs)) {
@@ -164,7 +163,7 @@ function getPipValue(symbol) {
 
 function isForexLikeSymbol(symbol) {
     const upper = String(symbol || "").toUpperCase();
-    if ((CRYPTO_SYMBOLS || []).map((s) => String(s).toUpperCase()).includes(upper)) return false;
+    if (CRYPTO_SYMBOL_SET.has(upper)) return false;
     return /^[A-Z]{6}$/.test(upper);
 }
 

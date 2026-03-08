@@ -258,21 +258,62 @@ export const getHeaders = (includeContentType = false) => {
     return includeContentType ? { ...baseHeaders, "Content-Type": "application/json" } : baseHeaders;
 };
 
+async function apiRequest(method, path, { data, headers, label = `${String(method).toUpperCase()} ${path}`, ...retryOptions } = {}) {
+    return withApiRetry(
+        () =>
+            axios({
+                method,
+                url: `${API.BASE_URL}${path}`,
+                data,
+                headers,
+            }),
+        { label, ...retryOptions },
+    );
+}
+
+function apiGet(path, options = {}) {
+    return apiRequest("get", path, {
+        headers: getHeaders(),
+        ...options,
+    });
+}
+
+function apiPost(path, data, options = {}) {
+    return apiRequest("post", path, {
+        data,
+        headers: getHeaders(true),
+        ...options,
+    });
+}
+
+function apiPut(path, data, options = {}) {
+    return apiRequest("put", path, {
+        data,
+        headers: getHeaders(true),
+        ...options,
+    });
+}
+
+function apiDelete(path, options = {}) {
+    return apiRequest("delete", path, {
+        headers: getHeaders(true),
+        ...options,
+    });
+}
+
+function getSessionResponse(options = {}) {
+    return apiGet("/session", options);
+}
+
 export const startSession = async () => {
     try {
-        const response = await withApiRetry(
-            () =>
-                axios.post(
-                    `${API.BASE_URL}/session`,
-                    {
-                        identifier: API.IDENTIFIER,
-                        password: API.PASSWORD,
-                        encryptedPassword: false,
-                    },
-                    {
-                        headers: getHeaders(true),
-                    },
-                ),
+        const response = await apiPost(
+            "/session",
+            {
+                identifier: API.IDENTIFIER,
+                password: API.PASSWORD,
+                encryptedPassword: false,
+            },
             { label: "startSession", refreshOnSession: false },
         );
 
@@ -299,7 +340,7 @@ export const startSession = async () => {
 
 export const pingSession = async () => {
     try {
-        const response = await withApiRetry(() => axios.get(`${API.BASE_URL}/ping`, { headers: getHeaders() }), {
+        const response = await apiGet("/ping", {
             label: "pingSession",
         });
         const status = response?.data?.status || "OK";
@@ -313,7 +354,7 @@ export const pingSession = async () => {
 export const refreshSession = async ({ force = false } = {}) => {
     if (!force && Date.now() - sessionStartTime < 8.5 * 60 * 1000) return;
     try {
-        const response = await withApiRetry(() => axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() }), {
+        const response = await getSessionResponse({
             label: "refreshSession",
             refreshOnSession: false,
         });
@@ -329,7 +370,7 @@ export const refreshSession = async ({ force = false } = {}) => {
 
 export const getSessionDetails = async () => {
     try {
-        const response = await withApiRetry(() => axios.get(`${API.BASE_URL}/session`, { headers: getHeaders() }), {
+        const response = await getSessionResponse({
             label: "getSessionDetails",
         });
         logger.info(`[API] Session details: ${JSON.stringify(response.data)}`);
@@ -338,32 +379,19 @@ export const getSessionDetails = async () => {
     }
 };
 
-export const getAccountInfo = async () =>
-    withApiRetry(async () => {
-        const response = await axios.get(`${API.BASE_URL}/accounts`, { headers: getHeaders() });
-        return response.data;
-    }, { label: "getAccountInfo" });
+export const getAccountInfo = async () => (await apiGet("/accounts", { label: "getAccountInfo" })).data;
 
-export const getMarkets = async () =>
-    withApiRetry(async () => {
-        const response = await axios.get(`${API.BASE_URL}/markets?searchTerm=EURUSD`, { headers: getHeaders() });
-        return Array.isArray(response.data.markets) ? response.data.markets : [];
-    }, { label: "getMarkets" });
+export const getMarkets = async () => {
+    const response = await apiGet("/markets?searchTerm=EURUSD", { label: "getMarkets" });
+    return Array.isArray(response.data.markets) ? response.data.markets : [];
+};
 
 export async function getMarketDetails(symbol) {
-    return await withApiRetry(async () => {
-        const response = await axios.get(`${API.BASE_URL}/markets/${symbol}`, { headers: getHeaders() });
-        // logger.info(`Market details for ${symbol}: ${JSON.stringify(response.data)}`);
-        return response.data;
-    }, { label: `getMarketDetails ${symbol}` });
+    const response = await apiGet(`/markets/${symbol}`, { label: `getMarketDetails ${symbol}` });
+    return response.data;
 }
 
-export const getOpenPositions = async () =>
-    withApiRetry(async () => {
-        const response = await axios.get(`${API.BASE_URL}/positions`, { headers: getHeaders() });
-        // logger.info("<========= open positions =========>\n" + JSON.stringify(response.data, null, 2) + "\n\n");
-        return response.data;
-    }, { label: "getOpenPositions" });
+export const getOpenPositions = async () => (await apiGet("/positions", { label: "getOpenPositions" })).data;
 
 export async function getHistorical(symbol, resolution, count) {
     const key = historicalCacheKey(symbol, resolution, count);
@@ -394,21 +422,17 @@ export async function getHistorical(symbol, resolution, count) {
 }
 
 export async function placeOrder(symbol, direction, size, level, orderType = "LIMIT") {
-    return await withApiRetry(async () => {
-        logger.info(`[API] Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
-        const order = {
-            epic: symbol,
-            direction: direction.toUpperCase(),
-            size: size,
-            level: level,
-            type: orderType,
-        };
-        const response = await axios.post(`${API.BASE_URL}/workingorders`, order, {
-            headers: getHeaders(true),
-        });
-        logger.info("[API] Order response:", response.data);
-        return response.data;
-    }, { label: `placeOrder ${symbol}` });
+    logger.info(`[API] Placing ${direction} order for ${symbol} at ${level}, size: ${size}`);
+    const order = {
+        epic: symbol,
+        direction: direction.toUpperCase(),
+        size,
+        level,
+        type: orderType,
+    };
+    const response = await apiPost("/workingorders", order, { label: `placeOrder ${symbol}` });
+    logger.info("[API] Order response:", response.data);
+    return response.data;
 }
 
 export async function updateTrailingStop(positionId, currentPrice, entryPrice, takeProfit, direction, symbol) {
@@ -450,16 +474,12 @@ export async function updateTrailingStop(positionId, currentPrice, entryPrice, t
     }
 
     try {
-        const response = await withApiRetry(
-            () =>
-                axios.put(
-                    `${API.BASE_URL}/positions/${positionId}`,
-                    {
-                        trailingStop: true,
-                        stopDistance: Number(trailingDistance.toFixed(6)), // round safely
-                    },
-                    { headers: getHeaders(true) },
-                ),
+        const response = await apiPut(
+            `/positions/${positionId}`,
+            {
+                trailingStop: true,
+                stopDistance: Number(trailingDistance.toFixed(6)),
+            },
             { label: `updateTrailingStop ${positionId}` },
         );
         logger.info(`[API] Trailing stop for ${positionId} set to distance ${trailingDistance}`);
@@ -486,101 +506,85 @@ function toRoundedNumber(value, decimals = 5) {
 }
 
 export async function placePosition(symbol, direction, size, price, SL, TP) {
-    return await withApiRetry(async () => {
-        try {
-            const range = await getAllowedTPRange(symbol);
-            const decimals = Number.isInteger(range.decimals) ? range.decimals : symbol.includes("JPY") ? 3 : 5;
-            const stopLevel = toRoundedNumber(SL, decimals);
-            const profitLevel = toRoundedNumber(TP, decimals);
+    try {
+        const range = await getAllowedTPRange(symbol);
+        const decimals = Number.isInteger(range.decimals) ? range.decimals : symbol.includes("JPY") ? 3 : 5;
+        const stopLevel = toRoundedNumber(SL, decimals);
+        const profitLevel = toRoundedNumber(TP, decimals);
 
-            if (!Number.isFinite(stopLevel) || !Number.isFinite(profitLevel)) {
-                throw new Error(`Invalid stop/profit levels for ${symbol}. stop=${SL} profit=${TP}`);
-            }
-
-            logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${stopLevel}, TP: ${profitLevel}`);
-            const position = {
-                epic: symbol,
-                direction: direction.toUpperCase(),
-                size: Number(size),
-                orderType: "MARKET",
-                guaranteedStop: false,
-                stopLevel,
-                profitLevel,
-            };
-            logger.info(`[API] Sending position request: ${JSON.stringify(position)}`);
-
-            const response = await axios.post(`${API.BASE_URL}/positions`, position, { headers: getHeaders(true) });
-
-            logger.info(`[API] Position created successfully: ${JSON.stringify(response.data)}`);
-            return response.data;
-        } catch (error) {
-            logger.error(`[API] Error placing position for ${symbol}:`, error.response ? JSON.stringify(error.response.data) : error.message);
-            if (error.response) {
-                logger.error(`[API] Response status:`, error.response.status);
-                logger.error(`[API] Response headers:`, JSON.stringify(error.response.headers));
-            }
-            throw error;
+        if (!Number.isFinite(stopLevel) || !Number.isFinite(profitLevel)) {
+            throw new Error(`Invalid stop/profit levels for ${symbol}. stop=${SL} profit=${TP}`);
         }
-    }, { label: `placePosition ${symbol}` });
+
+        logger.info(`[API] Placing ${direction} position for ${symbol} at market price. Size: ${size}, SL: ${stopLevel}, TP: ${profitLevel}`);
+        const position = {
+            epic: symbol,
+            direction: direction.toUpperCase(),
+            size: Number(size),
+            orderType: "MARKET",
+            guaranteedStop: false,
+            stopLevel,
+            profitLevel,
+        };
+        logger.info(`[API] Sending position request: ${JSON.stringify(position)}`);
+
+        const response = await apiPost("/positions", position, { label: `placePosition ${symbol}` });
+
+        logger.info(`[API] Position created successfully: ${JSON.stringify(response.data)}`);
+        return response.data;
+    } catch (error) {
+        logger.error(`[API] Error placing position for ${symbol}:`, error.response ? JSON.stringify(error.response.data) : error.message);
+        if (error.response) {
+            logger.error(`[API] Response status:`, error.response.status);
+            logger.error(`[API] Response headers:`, JSON.stringify(error.response.headers));
+        }
+        throw error;
+    }
 }
 
 export async function updatePositionProtection(dealId, stopLevelInput, profitLevelInput, symbol = "") {
-    return await withApiRetry(async () => {
-        const range = symbol ? await getAllowedTPRange(symbol) : { decimals: 5 };
-        const decimals = Number.isInteger(range.decimals) ? range.decimals : 5;
-        const stopLevel = toRoundedNumber(stopLevelInput, decimals);
-        const profitLevel = toRoundedNumber(profitLevelInput, decimals);
-        const payload = {};
+    const range = symbol ? await getAllowedTPRange(symbol) : { decimals: 5 };
+    const decimals = Number.isInteger(range.decimals) ? range.decimals : 5;
+    const stopLevel = toRoundedNumber(stopLevelInput, decimals);
+    const profitLevel = toRoundedNumber(profitLevelInput, decimals);
+    const payload = {};
 
-        if (Number.isFinite(stopLevel)) payload.stopLevel = stopLevel;
-        if (Number.isFinite(profitLevel)) payload.profitLevel = profitLevel;
+    if (Number.isFinite(stopLevel)) payload.stopLevel = stopLevel;
+    if (Number.isFinite(profitLevel)) payload.profitLevel = profitLevel;
 
-        if (!Object.keys(payload).length) {
-            throw new Error(`No valid SL/TP values provided for ${dealId}`);
-        }
+    if (!Object.keys(payload).length) {
+        throw new Error(`No valid SL/TP values provided for ${dealId}`);
+    }
 
-        logger.info(`[API] Updating position protection for ${dealId}: ${JSON.stringify(payload)}`);
-        const response = await axios.put(`${API.BASE_URL}/positions/${dealId}`, payload, {
-            headers: getHeaders(true),
-        });
-        logger.info(`[API] Position protection updated for ${dealId}: ${JSON.stringify(response.data)}`);
-        return response.data;
-    }, { label: `updatePositionProtection ${dealId}` });
+    logger.info(`[API] Updating position protection for ${dealId}: ${JSON.stringify(payload)}`);
+    const response = await apiPut(`/positions/${dealId}`, payload, { label: `updatePositionProtection ${dealId}` });
+    logger.info(`[API] Position protection updated for ${dealId}: ${JSON.stringify(response.data)}`);
+    return response.data;
 }
 
 export async function gevtDealConfirmation(dealReference) {
-    return await withApiRetry(async () => {
-        logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
-        const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
-        logger.info("[API] DealConfirmation", response.data);
-        return response.data;
-    }, { label: `gevtDealConfirmation ${dealReference}` });
+    logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
+    const response = await apiGet(`/confirms/${dealReference}`, { label: `gevtDealConfirmation ${dealReference}` });
+    logger.info("[API] DealConfirmation", response.data);
+    return response.data;
 }
 
 // In api.js, update getDealConfirmation method
 export async function getDealConfirmation(dealReference) {
-    return await withApiRetry(async () => {
-        logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
-        const response = await axios.get(`${API.BASE_URL}/confirms/${dealReference}`, { headers: getHeaders() });
+    logger.info(`[API] Getting confirmation for deal: ${dealReference}`);
+    const response = await apiGet(`/confirms/${dealReference}`, { label: `getDealConfirmation ${dealReference}` });
 
-        if (!response.data || !response.data.status) {
-            throw new Error("Invalid deal confirmation data received");
-        }
+    if (!response.data || !response.data.status) {
+        throw new Error("Invalid deal confirmation data received");
+    }
 
-        logger.info("[API] DealConfirmation", response.data);
-        return response.data;
-    }, { label: `getDealConfirmation ${dealReference}` });
+    logger.info("[API] DealConfirmation", response.data);
+    return response.data;
 }
 
 export async function closePosition(dealId) {
     try {
-        const response = await withApiRetry(
-            () =>
-                axios.delete(`${API.BASE_URL}/positions/${dealId}`, {
-                    headers: getHeaders(true),
-                }),
-            { label: `closePosition ${dealId}` },
-        );
+        const response = await apiDelete(`/positions/${dealId}`, { label: `closePosition ${dealId}` });
         logger.info(`[API] Position closed:`, response.data);
         return response.data;
     } catch (error) {

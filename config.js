@@ -1,14 +1,8 @@
 import "dotenv/config";
+import { normalizeSymbolList, parseSymbolCsv } from "./utils/symbols.js";
 
 const ENV = process.env;
 const isTrue = (value) => ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
-
-function parseSymbolCsv(value) {
-    return String(value || "")
-        .split(",")
-        .map((s) => String(s || "").trim().toUpperCase())
-        .filter(Boolean);
-}
 
 // API Configuration
 export const API = {
@@ -33,8 +27,7 @@ const FOREX_SYMBOL_BLOCKLIST = new Set(parseSymbolCsv(FOREX_SYMBOL_BLOCKLIST_RAW
 const SESSION_SYMBOLS = Object.fromEntries(
     Object.entries(RAW_SESSION_SYMBOLS).map(([session, symbols]) => [
         session,
-        (Array.isArray(symbols) ? symbols : [])
-            .map((symbol) => String(symbol || "").trim().toUpperCase())
+        normalizeSymbolList(symbols)
             .filter((symbol) => symbol && !FOREX_SYMBOL_BLOCKLIST.has(symbol)),
     ]),
 );
@@ -96,7 +89,9 @@ export const RISK = {
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     GUARDS: {
         MAX_DAILY_LOSS_PCT: 0, // disabled: no daily-loss entry block
+        MAX_DAILY_LOSS_R: 2, // stop trading for the day once realized daily net R reaches -2R
         MAX_OPEN_RISK_PCT: 0.25, // cap estimated total open risk across all positions
+        MAX_SYMBOL_LOSSES_PER_DAY: 2, // block symbol for the rest of the UTC day after 2 realized losses
         MAX_LOSS_STREAK: 3, // consecutive losing closes before cooldown
         LOSS_STREAK_COOLDOWN_MINUTES: 0, // disabled
         SUMMARY_CACHE_MS: 15000,

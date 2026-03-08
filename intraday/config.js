@@ -1,11 +1,6 @@
-const ENV = process.env;
+import { normalizeSymbol, normalizeSymbolList, parseSymbolCsv, toUpperSymbolSet } from "../utils/symbols.js";
 
-function parseSymbolCsv(value) {
-    return String(value || "")
-        .split(",")
-        .map((s) => String(s || "").trim().toUpperCase())
-        .filter(Boolean);
-}
+const ENV = process.env;
 
 function parseSymbolSessionFilter(value) {
     const parsed = {};
@@ -43,13 +38,13 @@ const FOREX_SYMBOL_BLOCKLIST = new Set(parseSymbolCsv(FOREX_SYMBOL_BLOCKLIST_RAW
 export const SESSION_SYMBOLS = Object.fromEntries(
     Object.entries(RAW_SESSION_SYMBOLS).map(([session, symbols]) => [
         session,
-        (Array.isArray(symbols) ? symbols : [])
-            .map((symbol) => String(symbol || "").trim().toUpperCase())
+        normalizeSymbolList(symbols)
             .filter((symbol) => symbol && !FOREX_SYMBOL_BLOCKLIST.has(symbol)),
     ]),
 );
 
 export const CRYPTO_SYMBOLS = [];
+const CRYPTO_SYMBOL_SET = toUpperSymbolSet(CRYPTO_SYMBOLS);
 const DEFAULT_SYMBOL_SESSIONS = {
     EURUSD: ["LONDON", "NY"],
     GBPUSD: ["LONDON", "NY"],
@@ -327,7 +322,7 @@ export function resolveIntradayConfigForSymbol(config = DEFAULT_INTRADAY_CONFIG,
 }
 
 export function isCryptoSymbol(symbol) {
-    return CRYPTO_SYMBOLS.includes(String(symbol || "").toUpperCase());
+    return CRYPTO_SYMBOL_SET.has(normalizeSymbol(symbol));
 }
 
 export function assetClassOfSymbol(symbol) {

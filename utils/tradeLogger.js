@@ -259,20 +259,49 @@ export function summarizeClosedTrades({ sinceMs = null, untilMs = null } = {}) {
     let estimatedPnlPct = 0;
     let estimatedLossPct = 0;
     let estimatedGainPct = 0;
+    let netR = 0;
     let wins = 0;
     let losses = 0;
     let breakeven = 0;
+    const bySymbol = {};
 
     for (const trade of inPeriod) {
+        const symbol = String(trade.symbol || "").toUpperCase() || "UNKNOWN";
+        if (!bySymbol[symbol]) {
+            bySymbol[symbol] = {
+                closedCount: 0,
+                wins: 0,
+                losses: 0,
+                breakeven: 0,
+                estimatedPnlPct: 0,
+                netR: 0,
+            };
+        }
+        const symbolSummary = bySymbol[symbol];
+        symbolSummary.closedCount += 1;
+
         const ep = trade.estimatedPnlPct;
         if (Number.isFinite(ep)) {
             estimatedPnlPct += ep;
+            symbolSummary.estimatedPnlPct += ep;
             if (ep < 0) estimatedLossPct += ep;
             if (ep > 0) estimatedGainPct += ep;
         }
-        if (trade.isWin) wins += 1;
-        else if (trade.isLoss) losses += 1;
-        else breakeven += 1;
+        const rMultiple = Number(trade.rMultiple);
+        if (Number.isFinite(rMultiple)) {
+            netR += rMultiple;
+            symbolSummary.netR += rMultiple;
+        }
+        if (trade.isWin) {
+            wins += 1;
+            symbolSummary.wins += 1;
+        } else if (trade.isLoss) {
+            losses += 1;
+            symbolSummary.losses += 1;
+        } else {
+            breakeven += 1;
+            symbolSummary.breakeven += 1;
+        }
     }
 
     return {
@@ -287,11 +316,13 @@ export function summarizeClosedTrades({ sinceMs = null, untilMs = null } = {}) {
             wins,
             losses,
             breakeven,
+            netR,
             estimatedPnlPct,
             estimatedLossPct, // negative value
             estimatedGainPct,
             winRate: inPeriod.length ? wins / inPeriod.length : null,
         },
+        bySymbol,
     };
 }
 
