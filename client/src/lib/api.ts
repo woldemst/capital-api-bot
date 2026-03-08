@@ -16,6 +16,7 @@ import type {
   BacktestCompareResponse,
   BacktestCompareFilters,
   RuntimeConfigResponse,
+  ForexPlannerResponse,
 } from "@/types/trading";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -98,6 +99,10 @@ export async function getBacktestOptions(): Promise<BacktestOptionsResponse> {
 
 export async function getRuntimeConfig(): Promise<RuntimeConfigResponse> {
   return fetchApi<RuntimeConfigResponse>("/runtime/config");
+}
+
+export async function getForexPlannerDashboard(): Promise<ForexPlannerResponse> {
+  return fetchApi<ForexPlannerResponse>("/forex/planner");
 }
 
 export async function runBacktestCompare(filters: BacktestCompareFilters): Promise<BacktestCompareResponse> {

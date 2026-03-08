@@ -9,7 +9,7 @@ export function DashboardLayout() {
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         <div className="flex flex-1 flex-col">
-          <Header />
+          <Header title="Forex Desk" />
           <main className="flex-1 overflow-auto p-4 lg:p-6">
             <Outlet />
           </main>

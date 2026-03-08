@@ -383,6 +383,115 @@ export interface RuntimeConfigResponse {
   };
 }
 
+export interface ForexPlannerSession {
+  name: string;
+  start: string | null;
+  end: string | null;
+  symbols: string[];
+}
+
+export interface ForexPlannerWeekRow {
+  week: string;
+  risk: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  winrate: number;
+  netR: number;
+  rawPnl: number;
+  startEquity: number;
+  endEquity: number;
+  maxDrawdownPct: number;
+}
+
+export interface ForexPlannerPhaseRow {
+  phase: string;
+  risk: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  winrate: number;
+  netR: number;
+  profitFactor: number;
+  rawPnl: number;
+  startBalance: number;
+  endBalance: number;
+}
+
+export interface ForexPlannerMonthRow {
+  month: string;
+  risk: string;
+  startBroker: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  winrate: number;
+  netR: number;
+  rawPnl: number;
+  taxTransfer: number;
+  startTaxReserve: number;
+  taxReserveBalance: number;
+  plannedPayout: number;
+  actualPayout: number;
+  endBroker: number;
+}
+
+export interface ForexPlannerResponse {
+  mode: "FOREX_ONLY";
+  generatedAt: string;
+  report: {
+    file: string | null;
+    generatedAt: string | null;
+    rangeStartIso: string | null;
+    rangeEndIso: string | null;
+  };
+  live: {
+    environment: "DEMO" | "LIVE";
+    baseUrl: string | null;
+    symbols: string[];
+    strategy: string;
+    sessions: ForexPlannerSession[];
+    risk: {
+      perTradePct: number;
+      maxOpenTrades: number;
+      maxOpenRiskPct: number;
+      maxDailyLossR: number;
+      maxSymbolLossesPerDay: number;
+    };
+    guards: {
+      symbolLossBlockEnabled: boolean;
+      dailyLossStopEnabled: boolean;
+      lossStreakCooldownEnabled: boolean;
+    };
+  };
+  annualSummary: {
+    startCapital: number;
+    endCapital: number;
+    rawPnl: number;
+    returnPct: number;
+    trades: number;
+    winrate: number;
+    profitFactor: number;
+    avgHoldMinutes: number;
+    medianHoldMinutes: number;
+    maxDrawdownPct: number;
+  } | null;
+  phaseRows: ForexPlannerPhaseRow[];
+  weekRows: ForexPlannerWeekRow[];
+  monthlyPlan: {
+    assumptions: {
+      taxReservePct: number;
+      firstPayoutMonthIndex: number;
+      initialPayout: number;
+      monthlyPayoutStep: number;
+      maxMonthlyPayout: number;
+      minBrokerBalance: number;
+    } | null;
+    rows: ForexPlannerMonthRow[];
+  };
+  operatingRules: string[];
+}
+
 // Utility type for computed trade data
 export interface ComputedTrade extends Trade {
   pnl?: number;

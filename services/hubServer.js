@@ -2,11 +2,12 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import logger from "../utils/logger.js";
-import { SESSIONS, CRYPTO_SYMBOLS, RISK, TRADING_WINDOWS, NEWS_GUARD } from "../config.js";
+import { API, LIVE_SYMBOLS, SESSIONS, CRYPTO_SYMBOLS, RISK, TRADING_WINDOWS, NEWS_GUARD, STRATEGY_SELECTION } from "../config.js";
 
 const HUB_PORT = Number(process.env.HUB_PORT || process.env.DASHBOARD_PORT || 3001);
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
 const PRICE_LOG_DIR = path.join(process.cwd(), "backtest", "prices");
+const REPORT_DIR = path.join(process.cwd(), "backtest", "reports", "compare");
 const CLIENT_DIST_DIR = path.join(process.cwd(), "client", "dist");
 const API_PREFIX = "/api";
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
@@ -16,6 +17,7 @@ const DEFAULT_FOREX_RISK_PCT = Number.isFinite(Number(RISK.PER_TRADE)) ? Number(
 const DEFAULT_CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : DEFAULT_FOREX_RISK_PCT;
 const BACKTEST_MAX_OPEN_TRADES =
     Number.isFinite(Number(RISK.MAX_POSITIONS)) && Number(RISK.MAX_POSITIONS) > 0 ? Number(RISK.MAX_POSITIONS) : 5;
+const DEFAULT_FOREX_PLANNER_REPORT = process.env.FOREX_PLANNER_REPORT || "fx5_2025_phased_5_3_2_1.json";
 
 const CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -107,6 +109,15 @@ function readJsonlFile(filePath) {
         }
     }
     return out;
+}
+
+function readJsonFile(filePath) {
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    } catch {
+        return null;
+    }
 }
 
 function loadTrades() {
@@ -400,6 +411,243 @@ function parseBooleanParam(value, defaultValue = true) {
     if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
     if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
     return defaultValue;
+}
+
+function formatRiskLabel(riskPct) {
+    return Number.isFinite(Number(riskPct)) ? `${(Number(riskPct) * 100).toFixed(Number(riskPct) >= 0.1 ? 0 : 2)}%` : "n/a";
+}
+
+function formatMonthKey(dateLike) {
+    const date = new Date(dateLike);
+    return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 7) : null;
+}
+
+function resolveForexPlannerReportPath() {
+    const configured = String(DEFAULT_FOREX_PLANNER_REPORT || "").trim();
+    if (!configured) return null;
+    return path.isAbsolute(configured) ? configured : path.join(REPORT_DIR, configured);
+}
+
+function loadForexPlannerReport() {
+    const reportPath = resolveForexPlannerReportPath();
+    if (!reportPath) return { reportPath: null, report: null };
+    return {
+        reportPath,
+        report: readJsonFile(reportPath),
+    };
+}
+
+function getRiskLabelForTimestamp(tsMs, riskPhases = []) {
+    const timestampMs = Number(tsMs);
+    if (!Number.isFinite(timestampMs)) return "n/a";
+    for (const phase of Array.isArray(riskPhases) ? riskPhases : []) {
+        const startMs = Number(phase?.startMs);
+        const endMs = phase?.endMs === null || phase?.endMs === undefined ? null : Number(phase?.endMs);
+        if (!Number.isFinite(startMs)) continue;
+        if (timestampMs < startMs) continue;
+        if (Number.isFinite(endMs) && timestampMs >= endMs) continue;
+        return formatRiskLabel(phase?.riskPct);
+    }
+    return "n/a";
+}
+
+function buildPhaseBalanceRows(report) {
+    const phaseRows = Array.isArray(report?.phaseRows) ? report.phaseRows : [];
+    const detailed = [];
+    let runningBalance = Number(report?.summary?.startCapital) || 0;
+    for (const phase of phaseRows) {
+        const startBalance = runningBalance;
+        const rawPnl = Number(phase?.rawPnl) || 0;
+        const endBalance = startBalance + rawPnl;
+        detailed.push({
+            phase: String(phase?.phase || "UNKNOWN"),
+            risk: phase?.phase ? String(phase.phase).replace(/^PHASE_\d+_/, "") : "n/a",
+            trades: Number(phase?.trades) || 0,
+            wins: Number(phase?.wins) || 0,
+            losses: Number(phase?.losses) || 0,
+            winrate: Number(phase?.trades) ? (Number(phase?.wins) || 0) / Number(phase.trades) : 0,
+            netR: Number(phase?.netR) || 0,
+            profitFactor: Number(phase?.grossLossR) > 0 ? (Number(phase?.grossWinR) || 0) / Number(phase.grossLossR) : Number(phase?.grossWinR) > 0 ? 999 : 0,
+            rawPnl,
+            startBalance,
+            endBalance,
+        });
+        runningBalance = endBalance;
+    }
+    return detailed;
+}
+
+function buildWeeklyPlannerRows(report) {
+    const riskPhases = report?.config?.riskPhases || [];
+    return (Array.isArray(report?.weekRows) ? report.weekRows : []).map((week) => ({
+        week: String(week?.week || ""),
+        risk: getRiskLabelForTimestamp(week?.weekStartMs, riskPhases),
+        trades: Number(week?.trades) || 0,
+        wins: Number(week?.wins) || 0,
+        losses: Number(week?.losses) || 0,
+        winrate: Number(week?.trades) ? (Number(week?.wins) || 0) / Number(week.trades) : 0,
+        netR: Number(week?.netR) || 0,
+        rawPnl: Number(week?.rawPnl) || 0,
+        startEquity: Number(week?.startEquity) || 0,
+        endEquity: Number(week?.endEquity) || 0,
+        maxDrawdownPct: Number(week?.maxDdPct) || 0,
+    }));
+}
+
+function buildMonthlyWithdrawalPlan(report, assumptions = {}) {
+    const taxReservePct = Number.isFinite(Number(assumptions.taxReservePct)) ? Number(assumptions.taxReservePct) : 0.4;
+    const firstPayoutMonthIndex = Number.isFinite(Number(assumptions.firstPayoutMonthIndex)) ? Number(assumptions.firstPayoutMonthIndex) : 3;
+    const initialPayout = Number.isFinite(Number(assumptions.initialPayout)) ? Number(assumptions.initialPayout) : 2000;
+    const monthlyPayoutStep = Number.isFinite(Number(assumptions.monthlyPayoutStep)) ? Number(assumptions.monthlyPayoutStep) : 1000;
+    const maxMonthlyPayout = Number.isFinite(Number(assumptions.maxMonthlyPayout)) ? Number(assumptions.maxMonthlyPayout) : 10000;
+    const minBrokerBalance = Number.isFinite(Number(assumptions.minBrokerBalance)) ? Number(assumptions.minBrokerBalance) : Number(report?.summary?.startCapital) || 500;
+
+    const closedTrades = Array.isArray(report?.closedTrades) ? report.closedTrades : [];
+    const byMonth = new Map();
+    for (const trade of closedTrades) {
+        const closedTs = Number(trade?.closeTsMs);
+        const month = formatMonthKey(closedTs);
+        if (!month) continue;
+        const row = byMonth.get(month) ?? {
+            month,
+            startMs: closedTs,
+            trades: 0,
+            wins: 0,
+            losses: 0,
+            netR: 0,
+            rawPnl: 0,
+            riskLabels: new Set(),
+        };
+        row.startMs = Math.min(row.startMs, closedTs);
+        row.trades += 1;
+        const r = Number(trade?.r) || 0;
+        const rawPnl = Number(trade?.rawPnl) || 0;
+        if (rawPnl > 0) row.wins += 1;
+        else if (rawPnl < 0) row.losses += 1;
+        row.netR += r;
+        row.rawPnl += rawPnl;
+        row.riskLabels.add(getRiskLabelForTimestamp(closedTs, report?.config?.riskPhases || []));
+        byMonth.set(month, row);
+    }
+
+    const months = [...byMonth.values()].sort((a, b) => a.startMs - b.startMs);
+    let brokerBalance = Number(report?.summary?.startCapital) || 0;
+    let taxReserveBalance = 0;
+    let payoutIndex = 0;
+
+    return {
+        assumptions: {
+            taxReservePct,
+            firstPayoutMonthIndex,
+            initialPayout,
+            monthlyPayoutStep,
+            maxMonthlyPayout,
+            minBrokerBalance,
+        },
+        rows: months.map((monthRow, index) => {
+            const startBroker = brokerBalance;
+            const startTaxReserve = taxReserveBalance;
+            const taxTransfer = monthRow.rawPnl > 0 ? monthRow.rawPnl * taxReservePct : 0;
+            taxReserveBalance += taxTransfer;
+            brokerBalance += monthRow.rawPnl - taxTransfer;
+
+            let plannedPayout = 0;
+            if (index + 1 >= firstPayoutMonthIndex) {
+                plannedPayout = Math.min(initialPayout + payoutIndex * monthlyPayoutStep, maxMonthlyPayout);
+                payoutIndex += 1;
+            }
+
+            const maxWithdrawable = Math.max(0, brokerBalance - minBrokerBalance);
+            const actualPayout = Math.min(plannedPayout, maxWithdrawable);
+            brokerBalance -= actualPayout;
+
+            return {
+                month: monthRow.month,
+                risk: monthRow.riskLabels.size ? [...monthRow.riskLabels].join("/") : "n/a",
+                startBroker,
+                trades: monthRow.trades,
+                wins: monthRow.wins,
+                losses: monthRow.losses,
+                winrate: monthRow.trades ? monthRow.wins / monthRow.trades : 0,
+                netR: monthRow.netR,
+                rawPnl: monthRow.rawPnl,
+                taxTransfer,
+                startTaxReserve,
+                taxReserveBalance,
+                plannedPayout,
+                actualPayout,
+                endBroker: brokerBalance,
+            };
+        }),
+    };
+}
+
+function buildForexOperationsDashboard() {
+    const { reportPath, report } = loadForexPlannerReport();
+    const runtimeRiskPct = Number(RISK?.PER_TRADE) || DEFAULT_FOREX_RISK_PCT;
+    const summary = report?.summary || null;
+    const weekRows = report ? buildWeeklyPlannerRows(report) : [];
+    const phaseRows = report ? buildPhaseBalanceRows(report) : [];
+    const monthlyPlan = report ? buildMonthlyWithdrawalPlan(report) : { assumptions: null, rows: [] };
+
+    return {
+        mode: "FOREX_ONLY",
+        generatedAt: new Date().toISOString(),
+        report: {
+            file: reportPath ? path.basename(reportPath) : null,
+            generatedAt: report?.generatedAt || null,
+            rangeStartIso: summary?.rangeStartIso || null,
+            rangeEndIso: summary?.rangeEndIso || null,
+        },
+        live: {
+            environment: API?.BASE_URL?.includes("demo") ? "DEMO" : "LIVE",
+            baseUrl: API?.BASE_URL || null,
+            symbols: LIVE_SYMBOLS,
+            strategy: STRATEGY_SELECTION?.FOREX_PRIMARY || "INTRADAY_7STEP_V1",
+            sessions: Object.entries(SESSIONS || {}).map(([name, session]) => ({
+                name,
+                start: session?.START || null,
+                end: session?.END || null,
+                symbols: Array.isArray(session?.SYMBOLS) ? session.SYMBOLS : [],
+            })),
+            risk: {
+                perTradePct: runtimeRiskPct,
+                maxOpenTrades: Number(RISK?.MAX_POSITIONS) || BACKTEST_MAX_OPEN_TRADES,
+                maxOpenRiskPct: Number(RISK?.GUARDS?.MAX_OPEN_RISK_PCT) || 0,
+                maxDailyLossR: Number(RISK?.GUARDS?.MAX_DAILY_LOSS_R) || 0,
+                maxSymbolLossesPerDay: Number(RISK?.GUARDS?.MAX_SYMBOL_LOSSES_PER_DAY) || 0,
+            },
+            guards: {
+                symbolLossBlockEnabled: Number(RISK?.GUARDS?.MAX_SYMBOL_LOSSES_PER_DAY) > 0,
+                dailyLossStopEnabled: Number(RISK?.GUARDS?.MAX_DAILY_LOSS_R) > 0,
+                lossStreakCooldownEnabled: Number(RISK?.GUARDS?.LOSS_STREAK_COOLDOWN_MINUTES) > 0,
+            },
+        },
+        annualSummary: summary
+            ? {
+                  startCapital: Number(summary?.startCapital) || 0,
+                  endCapital: Number(summary?.endCapital) || 0,
+                  rawPnl: Number(summary?.rawPnl) || 0,
+                  returnPct: Number(summary?.returnPct) || 0,
+                  trades: Number(summary?.trades) || 0,
+                  winrate: Number(summary?.winrate) || 0,
+                  profitFactor: Number(summary?.profitFactor) || 0,
+                  avgHoldMinutes: Number(summary?.avgHoldMinutes) || 0,
+                  medianHoldMinutes: Number(summary?.medianHoldMinutes) || 0,
+                  maxDrawdownPct: Number(summary?.maxDrawdownPct) || 0,
+              }
+            : null,
+        phaseRows,
+        weekRows,
+        monthlyPlan,
+        operatingRules: [
+            "40% jedes positiven Monatsgewinns zuerst auf Steuerreserve buchen.",
+            "Privatentnahmen erst nach Steuerreserve und nur oberhalb des Broker-Mindeststands.",
+            "Live nur mit AUDUSD, EURUSD, GBPUSD, USDCAD, USDJPY laufen lassen.",
+            "Nach 2 Verlusten auf demselben Symbol am UTC-Tag ist das Symbol für den Rest des Tages blockiert.",
+            "Bei -2R realisiertem Tagesergebnis werden keine neuen Trades mehr eröffnet.",
+        ],
+    };
 }
 
 function parseMinutes(hhmm) {
@@ -986,6 +1234,11 @@ export function startHubServer() {
 
             if (apiPath === "/runtime/config") {
                 sendJson(res, 200, buildRuntimeConfig());
+                return;
+            }
+
+            if (apiPath === "/forex/planner") {
+                sendJson(res, 200, buildForexOperationsDashboard());
                 return;
             }
 

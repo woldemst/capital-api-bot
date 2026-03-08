@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom";
 import {
-  FlaskConical,
+  Wallet,
   TrendingUp,
   PanelLeftClose,
   PanelLeft,
@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { title: "Backtesting", url: "/", icon: FlaskConical },
+  { title: "Forex Desk", url: "/", icon: Wallet },
 ];
 
 export function AppSidebar() {
@@ -46,7 +46,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div className="flex flex-col">
               <span className="text-sm font-semibold gradient-text">Trading Bot</span>
-              <span className="text-xs text-muted-foreground">Backtest Hub</span>
+              <span className="text-xs text-muted-foreground">Forex Operations</span>
             </div>
           )}
         </div>

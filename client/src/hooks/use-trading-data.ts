@@ -13,6 +13,7 @@ import {
   getBacktestOptions,
   runBacktestCompare,
   getRuntimeConfig,
+  getForexPlannerDashboard,
 } from "@/lib/api";
 import type { TradeFilters, MetricFilters, PriceFilters, BacktestCompareFilters } from "@/types/trading";
 
@@ -126,5 +127,13 @@ export function useBacktestCompare(filters: BacktestCompareFilters, enabled = tr
     queryKey: ["backtest", "compare", filters],
     queryFn: () => runBacktestCompare(filters),
     enabled,
+  });
+}
+
+export function useForexPlannerDashboard() {
+  return useQuery({
+    queryKey: ["forex", "planner"],
+    queryFn: getForexPlannerDashboard,
+    staleTime: 60 * 1000,
   });
 }
