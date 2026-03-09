@@ -1,5 +1,5 @@
 import { getOpenPositions, getHistorical } from "../api.js";
-import { CRYPTO_SYMBOLS, SESSIONS, LIVE_SYMBOLS, PRICE_LOGGER as PRICE_LOGGER_CONFIG } from "../config.js";
+import { SESSIONS, LIVE_SYMBOLS, PRICE_LOGGER as PRICE_LOGGER_CONFIG } from "../config.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import tradingService from "../services/trading.js";
 import webSocketService from "../services/websocket.js";
@@ -45,11 +45,7 @@ function isForexMarketOpenUtc(now = new Date()) {
 }
 
 function getPriceLoggingSymbols(now = new Date()) {
-    const forexSymbols = isForexMarketOpenUtc(now) ? getConfiguredForexSymbols() : [];
-    const cryptoSymbols = (CRYPTO_SYMBOLS || [])
-        .map((symbol) => String(symbol || "").toUpperCase())
-        .filter((symbol) => isLiveSymbolEnabled(symbol));
-    return [...new Set([...forexSymbols, ...cryptoSymbols])];
+    return isForexMarketOpenUtc(now) ? getConfiguredForexSymbols() : [];
 }
 
 export async function startMonitorOpenTrades(bot, intervalMs = 20 * 1000) {
@@ -99,10 +95,6 @@ export async function rolloverCloseCheck(bot) {
         for (const pos of positions.positions) {
             const dealId = pos?.position?.dealId ?? pos?.dealId;
             const symbol = pos?.market?.epic ?? pos?.position?.epic ?? "unknown";
-            if (CRYPTO_SYMBOLS.includes(symbol)) {
-                logger.info(`[Rollover] Skip close for crypto ${symbol}.`);
-                continue;
-            }
             if (!dealId) {
                 logger.warn(`[Rollover] Missing dealId for ${symbol}, cannot close.`);
                 continue;
@@ -124,14 +116,6 @@ export async function trailingStopCheck(bot) {
         for (const pos of positions.positions) {
             const symbol = pos.market ? pos.market.epic : pos.position.epic;
             const dealId = pos?.position?.dealId ?? pos?.dealId;
-
-            if (
-                typeof tradingService.shouldUseCryptoLiquidityWindowMomentumForOpenDeal === "function" &&
-                tradingService.shouldUseCryptoLiquidityWindowMomentumForOpenDeal(dealId, symbol)
-            ) {
-                logger.debug(`[Monitoring] Skipping legacy trailing stop logic for ${symbol} (${dealId}) - managed by ${"CRYPTO_LIQUIDITY_WINDOW_MOMENTUM"}.`);
-                continue;
-            }
 
             let indicators;
             try {

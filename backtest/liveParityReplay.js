@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_CRYPTO_INTRADAY_CONFIG, DEFAULT_INTRADAY_CONFIG, assetClassOfSymbol, mergeIntradayConfig } from "../intraday/config.js";
+import { DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import { RISK, SESSIONS } from "../config.js";
 
@@ -43,7 +43,7 @@ const MAX_OPEN_RISK_PCT = Number.isFinite(Number(process.env.LIVE_PARITY_MAX_OPE
     ? Number(process.env.LIVE_PARITY_MAX_OPEN_RISK_PCT)
     : Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT))
       ? Number(GUARDS.MAX_OPEN_RISK_PCT)
-    : Math.max(PHASE1_RISK_PCT, Number(RISK?.CRYPTO_PER_TRADE) || PHASE1_RISK_PCT) * 2;
+    : PHASE1_RISK_PCT * 2;
 const MAX_SYMBOL_LOSSES_PER_DAY = Number.isFinite(Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY)) ? Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY) : 0;
 const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
 const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
@@ -206,18 +206,6 @@ function describeRiskPlan(phases) {
             return `${phase.key} ${startIso} -> ${endIso}`;
         })
         .join("; ");
-}
-
-function cryptoPairOverridesForSymbols(symbols = []) {
-    const overrides = {};
-    for (const rawSymbol of Array.isArray(symbols) ? symbols : []) {
-        const symbol = String(rawSymbol || "").trim().toUpperCase();
-        if (!symbol || assetClassOfSymbol(symbol) !== "crypto") continue;
-        overrides[symbol] = mergeIntradayConfig(DEFAULT_CRYPTO_INTRADAY_CONFIG, {
-            strategyId: DEFAULT_CRYPTO_INTRADAY_CONFIG.strategyId,
-        });
-    }
-    return overrides;
 }
 
 function utcDayKey(tsMs) {
@@ -423,7 +411,6 @@ function getActiveSessionNames(tsMs) {
     const currentMinutes = d.getUTCHours() * 60 + d.getUTCMinutes();
     const names = [];
     for (const [name, session] of Object.entries(SESSIONS || {})) {
-        if (String(name).toUpperCase() === "CRYPTO") continue;
         const start = parseMinutes(session?.START);
         const end = parseMinutes(session?.END);
         if (inSession(currentMinutes, start, end)) names.push(name);
@@ -918,12 +905,7 @@ async function run() {
     if (!timeline.length) throw new Error("Empty timeline in selected period.");
 
     const configOverrides = parseConfigOverrides();
-    const replayConfigBase = mergeIntradayConfig(
-        {
-            pairOverrides: cryptoPairOverridesForSymbols(targetSymbols),
-        },
-        configOverrides,
-    );
+    const replayConfigBase = mergeIntradayConfig({}, configOverrides);
     const engine = createIntradaySevenStepEngine(
         mergeIntradayConfig(replayConfigBase, {
             risk: {

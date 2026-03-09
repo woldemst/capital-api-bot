@@ -272,7 +272,6 @@ export interface BacktestCompareFilters {
   sampleLimit?: number;
   startBalance?: number;
   forexRiskPct?: number;
-  cryptoRiskPct?: number;
   respectNewsGuard?: boolean;
 }
 
@@ -291,7 +290,6 @@ export interface BacktestCompareResponse {
   portfolioAssumptions?: {
     startBalance: number;
     forexRiskPct: number;
-    cryptoRiskPct: number;
   };
   portfolioSummary?: {
     startBalance: number;
@@ -308,13 +306,6 @@ export interface BacktestCompareResponse {
     profitFactorR: number;
     byAsset: {
       forex: {
-        trades: number;
-        wins: number;
-        totalR: number;
-        pnlMoney: number;
-        winRate: number;
-      };
-      crypto: {
         trades: number;
         wins: number;
         totalR: number;
@@ -361,12 +352,10 @@ export interface RuntimeConfigResponse {
   timezone: string;
   risk: {
     forexRiskPct: number;
-    cryptoRiskPct: number;
     maxOpenTrades: number;
   };
   tradingWindows: {
     forex: RuntimeWindow[];
-    crypto: RuntimeWindow[];
   };
   newsGuard: {
     forexOnly: boolean;

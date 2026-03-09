@@ -56,14 +56,14 @@ function formatSessionWindow(start: string | null, end: string | null) {
 export default function Overview() {
   const plannerQuery = useForexPlannerDashboard();
   const [taxReservePctInput, setTaxReservePctInput] = useState(40);
-  const [firstPayoutMonthInput, setFirstPayoutMonthInput] = useState(3);
-  const [initialPayoutInput, setInitialPayoutInput] = useState(2000);
+  const [firstPayoutMonthInput, setFirstPayoutMonthInput] = useState(4);
+  const [initialPayoutInput, setInitialPayoutInput] = useState(3000);
   const [monthlyPayoutStepInput, setMonthlyPayoutStepInput] = useState(1000);
   const [maxPayoutInput, setMaxPayoutInput] = useState(10000);
   const [minBrokerBalanceInput, setMinBrokerBalanceInput] = useState(500);
 
   const dashboard = plannerQuery.data;
-  const monthlyTemplateRows = dashboard?.monthlyPlan.rows || [];
+  const monthlyTemplateRows = useMemo(() => dashboard?.monthlyPlan.rows || [], [dashboard?.monthlyPlan.rows]);
   const annualSummary = dashboard?.annualSummary || null;
   const plannerErrorMessage =
     plannerQuery.error instanceof Error && plannerQuery.error.message
@@ -169,8 +169,8 @@ export default function Overview() {
       <div className="space-y-1">
         <h1 className="text-xl font-bold gradient-text sm:text-2xl">Forex Desk</h1>
         <p className="text-sm text-muted-foreground">
-          Live-Setup, Guardrails und Cashflow-Planer für dein 5er-Forex-Set. Keine Compare-UI mehr, nur Operations und
-          Auszahlungshilfe.
+          Live-Setup, Guardrails und Cashflow-Planer fuer dein Kern-Setup mit AUDUSD, EURUSD und GBPUSD. Keine
+          Compare-UI mehr, nur Operations und Auszahlungshilfe.
         </p>
       </div>
 

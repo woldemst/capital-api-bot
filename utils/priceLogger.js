@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { getHistorical, getMarketDetails } from "../api.js";
 import { calcIndicators } from "../indicators/indicators.js";
-import { ANALYSIS, SESSIONS, CRYPTO_SYMBOLS, NEWS_GUARD } from "../config.js";
+import { ANALYSIS, SESSIONS, NEWS_GUARD } from "../config.js";
 import logger from "./logger.js";
 
 const { TIMEFRAMES } = ANALYSIS;
@@ -517,8 +517,7 @@ class PriceLogger {
     checkMarketPriceSanity(payload) {
         const issues = [];
         const symbol = String(payload?.symbol || "").toUpperCase();
-        const isCrypto = Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.map((s) => String(s).toUpperCase()).includes(symbol);
-        const isForexLike = /^[A-Z]{6}$/.test(symbol) && !isCrypto;
+        const isForexLike = /^[A-Z]{6}$/.test(symbol);
         const bid = this.toNumber(payload?.bid);
         const ask = this.toNumber(payload?.ask);
         const mid = this.toNumber(payload?.mid);

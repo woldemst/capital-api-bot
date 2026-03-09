@@ -123,7 +123,6 @@ function getActiveSessionNames(tsMs) {
     const names = [];
     for (const [name, session] of Object.entries(SESSIONS || {})) {
         const upper = String(name).toUpperCase();
-        if (upper === "CRYPTO") continue;
         const start = parseMinutes(session?.START);
         const end = parseMinutes(session?.END);
         if (inSession(currentMinutes, start, end)) names.push(upper);

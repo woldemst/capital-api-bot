@@ -2,7 +2,7 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import logger from "../utils/logger.js";
-import { API, LIVE_SYMBOLS, SESSIONS, CRYPTO_SYMBOLS, RISK, TRADING_WINDOWS, NEWS_GUARD, STRATEGY_SELECTION } from "../config.js";
+import { API, LIVE_SYMBOLS, SESSIONS, RISK, TRADING_WINDOWS, NEWS_GUARD, STRATEGY_SELECTION } from "../config.js";
 
 const HUB_PORT = Number(process.env.HUB_PORT || process.env.DASHBOARD_PORT || 3001);
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
@@ -11,10 +11,8 @@ const REPORT_DIR = path.join(process.cwd(), "backtest", "reports", "compare");
 const CLIENT_DIST_DIR = path.join(process.cwd(), "client", "dist");
 const API_PREFIX = "/api";
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
-const CRYPTO_SYMBOL_SET = new Set((CRYPTO_SYMBOLS || []).map((symbol) => String(symbol).toUpperCase()));
 const DEFAULT_BACKTEST_START_BALANCE = 500;
 const DEFAULT_FOREX_RISK_PCT = Number.isFinite(Number(RISK.PER_TRADE)) ? Number(RISK.PER_TRADE) : 0.01;
-const DEFAULT_CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : DEFAULT_FOREX_RISK_PCT;
 const BACKTEST_MAX_OPEN_TRADES =
     Number.isFinite(Number(RISK.MAX_POSITIONS)) && Number(RISK.MAX_POSITIONS) > 0 ? Number(RISK.MAX_POSITIONS) : 5;
 const DEFAULT_FOREX_PLANNER_REPORT = process.env.FOREX_PLANNER_REPORT || "fx5_2025_phased_5_3_2_1.json";
@@ -496,8 +494,8 @@ function buildWeeklyPlannerRows(report) {
 
 function buildMonthlyWithdrawalPlan(report, assumptions = {}) {
     const taxReservePct = Number.isFinite(Number(assumptions.taxReservePct)) ? Number(assumptions.taxReservePct) : 0.4;
-    const firstPayoutMonthIndex = Number.isFinite(Number(assumptions.firstPayoutMonthIndex)) ? Number(assumptions.firstPayoutMonthIndex) : 3;
-    const initialPayout = Number.isFinite(Number(assumptions.initialPayout)) ? Number(assumptions.initialPayout) : 2000;
+    const firstPayoutMonthIndex = Number.isFinite(Number(assumptions.firstPayoutMonthIndex)) ? Number(assumptions.firstPayoutMonthIndex) : 4;
+    const initialPayout = Number.isFinite(Number(assumptions.initialPayout)) ? Number(assumptions.initialPayout) : 3000;
     const monthlyPayoutStep = Number.isFinite(Number(assumptions.monthlyPayoutStep)) ? Number(assumptions.monthlyPayoutStep) : 1000;
     const maxMonthlyPayout = Number.isFinite(Number(assumptions.maxMonthlyPayout)) ? Number(assumptions.maxMonthlyPayout) : 10000;
     const minBrokerBalance = Number.isFinite(Number(assumptions.minBrokerBalance)) ? Number(assumptions.minBrokerBalance) : Number(report?.summary?.startCapital) || 500;
@@ -589,6 +587,7 @@ function buildForexOperationsDashboard() {
     const weekRows = report ? buildWeeklyPlannerRows(report) : [];
     const phaseRows = report ? buildPhaseBalanceRows(report) : [];
     const monthlyPlan = report ? buildMonthlyWithdrawalPlan(report) : { assumptions: null, rows: [] };
+    const liveSymbolSet = new Set((Array.isArray(LIVE_SYMBOLS) ? LIVE_SYMBOLS : []).map((symbol) => String(symbol || "").toUpperCase()));
 
     return {
         mode: "FOREX_ONLY",
@@ -608,7 +607,9 @@ function buildForexOperationsDashboard() {
                 name,
                 start: session?.START || null,
                 end: session?.END || null,
-                symbols: Array.isArray(session?.SYMBOLS) ? session.SYMBOLS : [],
+                symbols: Array.isArray(session?.SYMBOLS)
+                    ? session.SYMBOLS.filter((symbol) => !liveSymbolSet.size || liveSymbolSet.has(String(symbol || "").toUpperCase()))
+                    : [],
             })),
             risk: {
                 perTradePct: runtimeRiskPct,
@@ -643,7 +644,7 @@ function buildForexOperationsDashboard() {
         operatingRules: [
             "40% jedes positiven Monatsgewinns zuerst auf Steuerreserve buchen.",
             "Privatentnahmen erst nach Steuerreserve und nur oberhalb des Broker-Mindeststands.",
-            "Live nur mit AUDUSD, EURUSD, GBPUSD, USDCAD, USDJPY laufen lassen.",
+            "Live nur mit AUDUSD, EURUSD, GBPUSD laufen lassen.",
             "Nach 2 Verlusten auf demselben Symbol am UTC-Tag ist das Symbol für den Rest des Tages blockiert.",
             "Bei -2R realisiertem Tagesergebnis werden keine neuen Trades mehr eröffnet.",
         ],
@@ -692,7 +693,7 @@ function matchesTradingWindows(timestamp, assetClass) {
     if (!Number.isFinite(tsMs)) return false;
     const date = new Date(tsMs);
     const currentMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
-    const windows = assetClass === "crypto" ? TRADING_WINDOWS?.CRYPTO : TRADING_WINDOWS?.FOREX;
+    const windows = TRADING_WINDOWS?.FOREX;
     if (!Array.isArray(windows) || !windows.length) return true;
 
     return windows.some((window) => {
@@ -709,7 +710,7 @@ function getPipSize(symbol) {
 }
 
 function isCryptoSymbol(symbol) {
-    return CRYPTO_SYMBOL_SET.has(String(symbol || "").toUpperCase());
+    return false;
 }
 
 function getEntryPrice(direction, snapshot) {
@@ -875,7 +876,7 @@ function summarizeTrades(strategyId, source, trades, sampleLimit = 200) {
     };
 }
 
-function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALANCE, forexRiskPct = DEFAULT_FOREX_RISK_PCT, cryptoRiskPct = DEFAULT_CRYPTO_RISK_PCT } = {}) {
+function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALANCE, forexRiskPct = DEFAULT_FOREX_RISK_PCT } = {}) {
     const prepared = trades
         .filter((trade) => trade.status === "closed" && Number.isFinite(trade.entryPrice) && Number.isFinite(trade.closePrice))
         .map((trade, index) => {
@@ -884,22 +885,19 @@ function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALA
             const riskPoints = Math.abs(Number(trade.entryPrice) - Number(trade.stopLoss));
             const pnlPoints = computePnL(trade);
             const rMultiple = riskPoints > 0 ? pnlPoints / riskPoints : 0;
-            const assetClass = trade.assetClass === "crypto" || isCryptoSymbol(trade.symbol) ? "crypto" : "forex";
-            const riskPct = assetClass === "crypto" ? cryptoRiskPct : forexRiskPct;
             return {
                 key: trade.dealId ? String(trade.dealId) : `portfolio_${index}`,
-                assetClass,
+                assetClass: "forex",
                 openedAtMs,
                 closedAtMs,
                 rMultiple,
-                riskPct,
+                riskPct: forexRiskPct,
             };
         })
         .filter((trade) => Number.isFinite(trade.openedAtMs) && Number.isFinite(trade.closedAtMs));
 
     const byAsset = {
         forex: { trades: 0, wins: 0, totalR: 0, pnlMoney: 0, winRate: 0 },
-        crypto: { trades: 0, wins: 0, totalR: 0, pnlMoney: 0, winRate: 0 },
     };
 
     if (!prepared.length) {
@@ -976,7 +974,6 @@ function summarizePortfolio(trades, { startBalance = DEFAULT_BACKTEST_START_BALA
     }
 
     byAsset.forex.winRate = byAsset.forex.trades ? byAsset.forex.wins / byAsset.forex.trades : 0;
-    byAsset.crypto.winRate = byAsset.crypto.trades ? byAsset.crypto.wins / byAsset.crypto.trades : 0;
     const closeTimes = prepared.map((trade) => trade.closedAtMs).filter((ts) => Number.isFinite(ts)).sort((a, b) => a - b);
     const timespanDays = closeTimes.length >= 2 ? Math.max(1, (closeTimes[closeTimes.length - 1] - closeTimes[0]) / 86400000) : 1;
 
@@ -1106,24 +1103,24 @@ function buildBacktestDataCoverage({ symbols = [], fromMs = null, toMs = null } 
 
 function buildRuntimeConfig() {
     const defaultStrategies = ["INTRADAY_7STEP_V1"];
-    const defaultSessions = ["TOKYO", "LONDON", "SYDNEY", "CRYPTO"];
-    const defaultSymbols = [...new Set([
-        ...(SESSIONS.TOKYO?.SYMBOLS || []),
-        ...(SESSIONS.LONDON?.SYMBOLS || []),
-        ...(SESSIONS.SYDNEY?.SYMBOLS || []),
-        ...CRYPTO_SYMBOLS,
-    ])];
+    const defaultSessions = ["TOKYO", "LONDON", "SYDNEY", "NY"];
+    const defaultSymbols = Array.isArray(LIVE_SYMBOLS) && LIVE_SYMBOLS.length
+        ? [...LIVE_SYMBOLS]
+        : [...new Set([
+              ...(SESSIONS.TOKYO?.SYMBOLS || []),
+              ...(SESSIONS.LONDON?.SYMBOLS || []),
+              ...(SESSIONS.SYDNEY?.SYMBOLS || []),
+              ...(SESSIONS.NY?.SYMBOLS || []),
+          ])];
 
     return {
         timezone: "UTC",
         risk: {
             forexRiskPct: DEFAULT_FOREX_RISK_PCT,
-            cryptoRiskPct: DEFAULT_CRYPTO_RISK_PCT,
             maxOpenTrades: BACKTEST_MAX_OPEN_TRADES,
         },
         tradingWindows: {
             forex: TRADING_WINDOWS.FOREX,
-            crypto: TRADING_WINDOWS.CRYPTO,
         },
         newsGuard: {
             forexOnly: Boolean(NEWS_GUARD.FOREX_ONLY),

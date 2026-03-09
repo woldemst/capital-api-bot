@@ -1,6 +1,3 @@
-import { CRYPTO_SYMBOLS } from "../config.js";
-import { toUpperSymbolSet } from "../utils/symbols.js";
-
 const CANDLE_LAG_SANITY_MINUTES = {
     m1: { min: -3, max: 20 },
     m5: { min: -10, max: 40 },
@@ -15,8 +12,6 @@ const TF_CLOSE_TARGET_LAG_MINUTES = {
     m15: 22.5,
     h1: 90,
 };
-const CRYPTO_SYMBOL_SET = toUpperSymbolSet(CRYPTO_SYMBOLS);
-
 function toNumber(value) {
     if (value === null || value === undefined || value === "") return null;
     const n = Number(value);
@@ -162,9 +157,7 @@ function getPipValue(symbol) {
 }
 
 function isForexLikeSymbol(symbol) {
-    const upper = String(symbol || "").toUpperCase();
-    if (CRYPTO_SYMBOL_SET.has(upper)) return false;
-    return /^[A-Z]{6}$/.test(upper);
+    return /^[A-Z]{6}$/.test(String(symbol || "").toUpperCase());
 }
 
 export function evaluatePriceSnapshotSanity(row, { symbol = "" } = {}) {

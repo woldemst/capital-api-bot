@@ -9,7 +9,9 @@
     "backtest:live-parity": "node backtest/liveParityReplay.js",
     "dataset:generate": "node backtest/generateDataset.js",
     "dataset:convert:jsonl": "DATASET_CONVERT_ONLY=true DATASET_FILE_FORMAT=jsonl node backtest/generateDataset.js",
-    "start": "nodemon bot.js"
+    "start": "node bot.js",
+    "start:dev": "nodemon bot.js",
+    "smoke:broker": "node scripts/brokerPreflight.js"
   },
   "keywords": [],
   "author": "",

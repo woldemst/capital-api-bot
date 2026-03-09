@@ -1,4 +1,4 @@
-import { CRYPTO_SYMBOLS, DEFAULT_INTRADAY_CONFIG, SESSION_SYMBOLS, assetClassOfSymbol } from "./config.js";
+import { DEFAULT_INTRADAY_CONFIG, SESSION_SYMBOLS } from "./config.js";
 
 export const STEP1_NAME = "MARKET_TIME_WINDOW";
 
@@ -85,22 +85,19 @@ export function isPastFlatPositionsCutoff(nowUtc, assetClass, config = DEFAULT_I
     const date = toUtcDate(nowUtc);
     const currentMin = minutesOfDayUtc(date);
     const intradayOnly = config.intradayOnly || {};
-    const selected = assetClass === "crypto" ? intradayOnly.flatPositionsCutoffUtcCrypto : intradayOnly.flatPositionsCutoffUtcForex;
+    const selected = intradayOnly.flatPositionsCutoffUtcForex;
     const cutoffMin = cutoffMinutes(selected);
     if (!Number.isFinite(cutoffMin)) return false;
-    if (assetClass === "forex") {
-        const windowMinutes = Number(intradayOnly.flatPositionsCutoffWindowMinutesForex || 65);
-        if (!Number.isFinite(windowMinutes) || windowMinutes <= 0) return currentMin >= cutoffMin;
-        const windowEndMin = (cutoffMin + windowMinutes) % 1440;
-        return inWindow(currentMin, cutoffMin, windowEndMin);
-    }
-    return currentMin >= cutoffMin;
+    const windowMinutes = Number(intradayOnly.flatPositionsCutoffWindowMinutesForex || 65);
+    if (!Number.isFinite(windowMinutes) || windowMinutes <= 0) return currentMin >= cutoffMin;
+    const windowEndMin = (cutoffMin + windowMinutes) % 1440;
+    return inWindow(currentMin, cutoffMin, windowEndMin);
 }
 
 export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
     const nowUtc = toUtcDate(input?.nowUtc || Date.now());
     const symbol = String(input?.symbol || "").toUpperCase();
-    const assetClass = assetClassOfSymbol(symbol);
+    const assetClass = "forex";
     const hourBucket = utcHourBucket(nowUtc);
     const activeSessions = determineActiveSessions(nowUtc, config);
     const activeSession = determineActiveSession(nowUtc, config);
@@ -112,11 +109,8 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
         (!allowedHourBuckets.length || allowedHourBuckets.includes(hourBucket)) &&
         !blockedHourBuckets.includes(hourBucket);
     const sessionAllowedBySymbolFilter = !preferredSymbolSessions || (activeSession ? preferredSymbolSessions.includes(activeSession) : false);
-    const allowedSymbols = [...new Set([...sessionAllowedSymbols, ...CRYPTO_SYMBOLS])];
-    const symbolAllowed =
-        assetClass === "crypto"
-            ? CRYPTO_SYMBOLS.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed
-            : sessionAllowedSymbols.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed;
+    const allowedSymbols = [...new Set(sessionAllowedSymbols)];
+    const symbolAllowed = sessionAllowedSymbols.includes(symbol) && sessionAllowedBySymbolFilter && hourAllowed;
     const forceFlatNow = isPastFlatPositionsCutoff(nowUtc, assetClass, config);
 
     const reasons = [];
@@ -141,10 +135,7 @@ export function step1MarketTimeWindow(input, config = DEFAULT_INTRADAY_CONFIG) {
         intradayOnly: true,
         forceFlatNow,
         hourBucketUtc: hourBucket,
-        flatCutoffUtc:
-            assetClass === "crypto"
-                ? config.intradayOnly?.flatPositionsCutoffUtcCrypto || null
-                : config.intradayOnly?.flatPositionsCutoffUtcForex || null,
+        flatCutoffUtc: config.intradayOnly?.flatPositionsCutoffUtcForex || null,
         step1Reasons: reasons,
         logFields: {
             session: activeSession,

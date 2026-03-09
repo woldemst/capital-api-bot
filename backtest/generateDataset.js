@@ -41,13 +41,6 @@ const DEFAULT_FX_SYMBOLS = [
     "USD/JPY",
 ];
 
-const DEFAULT_CRYPTO_SYMBOLS = [
-    "BTC/USD",
-    "ETH/USD",
-    "SOL/USD",
-    "XRP/USD",
-];
-
 const DEFAULT_STOCK_SYMBOLS = [
     "AAPL",
     "AMZN",
@@ -95,7 +88,7 @@ function parseSymbols() {
         .map((s) => normalizeSymbol(s))
         .filter(Boolean);
     if (envSymbols.length) return [...new Set(envSymbols)];
-    return [...new Set([...DEFAULT_FX_SYMBOLS, ...DEFAULT_CRYPTO_SYMBOLS, ...DEFAULT_STOCK_SYMBOLS])];
+    return [...new Set([...DEFAULT_FX_SYMBOLS, ...DEFAULT_STOCK_SYMBOLS])];
 }
 
 function parseTimeframes() {

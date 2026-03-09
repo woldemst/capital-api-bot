@@ -28,13 +28,13 @@ const DASHBOARD_ENABLED =
 const DASHBOARD_WIDTH_MIN = 110;
 const DASHBOARD_WIDTH_MAX = 168;
 const TABLE_COLUMNS = [
-    { key: "symbol", label: "SYM", width: 8, align: "left" },
+    { key: "symbol", label: "SYMBOL", width: 8, align: "left" },
     { key: "status", label: "STATUS", width: 14, align: "left" },
-    { key: "session", label: "SES", width: 9, align: "left" },
+    { key: "session", label: "SESSION", width: 9, align: "left" },
     { key: "regime", label: "REGIME", width: 9, align: "left" },
     { key: "adx", label: "ADX", width: 7, align: "right" },
     { key: "setup", label: "SETUP", width: 14, align: "left" },
-    { key: "trigger", label: "TRG", width: 5, align: "left" },
+    { key: "trigger", label: "TRIGGER", width: 7, align: "left" },
 ];
 const ANSI = {
     reset: "\u001b[0m",

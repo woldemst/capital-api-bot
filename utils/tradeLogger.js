@@ -4,7 +4,7 @@ import { getMarketDetails, getHistorical } from "../api.js";
 import { calcIndicators } from "../indicators/indicators.js";
 import logger from "./logger.js";
 
-import { ANALYSIS, CRYPTO_SYMBOLS, RISK } from "../config.js";
+import { ANALYSIS, RISK } from "../config.js";
 const { TIMEFRAMES } = ANALYSIS;
 
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
@@ -149,18 +149,13 @@ function getPipSize(symbol) {
         : 0.0001;
 }
 
-function isCryptoSymbol(symbol) {
-    const s = String(symbol || "").toUpperCase();
-    return Array.isArray(CRYPTO_SYMBOLS) && CRYPTO_SYMBOLS.map((x) => String(x).toUpperCase()).includes(s);
-}
-
 function estimateRiskPctForEntry(entry) {
     const explicit =
         toNumber(entry?.riskMeta?.riskPct) ??
         toNumber(entry?.riskPctConfigured) ??
         toNumber(entry?.riskPct);
     if (explicit !== null) return explicit;
-    return isCryptoSymbol(entry?.symbol) ? Number(RISK?.CRYPTO_PER_TRADE) || Number(RISK?.PER_TRADE) || null : Number(RISK?.PER_TRADE) || null;
+    return Number(RISK?.PER_TRADE) || null;
 }
 
 function computeRMultiple(entry) {

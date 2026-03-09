@@ -1,4 +1,4 @@
-import { normalizeSymbol, normalizeSymbolList, parseSymbolCsv, toUpperSymbolSet } from "../utils/symbols.js";
+import { normalizeSymbolList, parseSymbolCsv } from "../utils/symbols.js";
 
 const ENV = process.env;
 
@@ -43,8 +43,6 @@ export const SESSION_SYMBOLS = Object.fromEntries(
     ]),
 );
 
-export const CRYPTO_SYMBOLS = [];
-const CRYPTO_SYMBOL_SET = toUpperSymbolSet(CRYPTO_SYMBOLS);
 const DEFAULT_SYMBOL_SESSIONS = {
     EURUSD: ["LONDON", "NY"],
     GBPUSD: ["LONDON", "NY"],
@@ -106,33 +104,6 @@ export const NEWS_MODE = {
     TRADE: "TRADE",
 };
 
-export const DEFAULT_CRYPTO_INTRADAY_CONFIG = {
-    strategyId: "INTRADAY_7STEP_CRYPTO",
-    context: {
-        adxTrendMin: 18,
-        adxRangeMax: 18,
-    },
-    setup: {
-        trendPullbackZonePct: 0.0023,
-        maxH1AdxForTrendSetup: 45,
-        trendRsiMin: 38,
-        trendRsiMax: 62,
-        rangeBbPbLow: 0.2,
-        rangeBbPbHigh: 0.8,
-        rangeRsiLow: 40,
-        rangeRsiHigh: 60,
-    },
-    trigger: {
-        displacementAtrMultiplier: 1.0,
-        requireStructureBreak: false,
-        requireFvg: true,
-        useFvgBonus: true,
-    },
-    guardrails: {
-        allowRangeContrarian: true,
-    },
-};
-
 export const DEFAULT_INTRADAY_CONFIG = {
     strategyId: "INTRADAY_7STEP_V1",
     sessionPriority: ["NY", "LONDON", "TOKYO", "SYDNEY"],
@@ -147,8 +118,6 @@ export const DEFAULT_INTRADAY_CONFIG = {
     intradayOnly: {
         flatPositionsCutoffUtcForex: { hour: 20, minute: 55 },
         flatPositionsCutoffWindowMinutesForex: 65,
-        flatPositionsCutoffUtcCrypto: { hour: 23, minute: 55 },
-        cryptoDayBoundaryExit: true,
     },
     schedule: {},
     guardrails: {
@@ -195,12 +164,10 @@ export const DEFAULT_INTRADAY_CONFIG = {
     },
     risk: {
         forexRiskPct: 0.05,
-        cryptoRiskPct: 0.04,
         rr: 2,
         atrStopMultiplier: 1.2,
         spreadStopMultiplier: 2.5,
         minStopPctForex: 0.00025,
-        minStopPctCrypto: 0.003,
         minSize: 0,
         contractPointValue: 1,
     },
@@ -215,8 +182,6 @@ export const DEFAULT_INTRADAY_CONFIG = {
             model: "bps",
             entryBpsForex: 0.2,
             exitBpsForex: 0.2,
-            entryBpsCrypto: 1.5,
-            exitBpsCrypto: 1.5,
         },
         sameBarFillPriority: "STOP_FIRST",
     },
@@ -323,9 +288,9 @@ export function resolveIntradayConfigForSymbol(config = DEFAULT_INTRADAY_CONFIG,
 }
 
 export function isCryptoSymbol(symbol) {
-    return CRYPTO_SYMBOL_SET.has(normalizeSymbol(symbol));
+    return false;
 }
 
 export function assetClassOfSymbol(symbol) {
-    return isCryptoSymbol(symbol) ? "crypto" : "forex";
+    return "forex";
 }

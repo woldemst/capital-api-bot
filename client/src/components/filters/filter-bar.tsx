@@ -80,7 +80,7 @@ interface SymbolSelectProps {
 }
 
 export function SymbolSelect({ value, onChange, symbols = [] }: SymbolSelectProps) {
-  const defaultSymbols = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF"];
+  const defaultSymbols = ["AUDUSD", "EURUSD", "GBPUSD"];
   const allSymbols = symbols.length > 0 ? symbols : defaultSymbols;
 
   return (

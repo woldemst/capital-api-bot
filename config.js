@@ -31,10 +31,8 @@ const SESSION_SYMBOLS = Object.fromEntries(
             .filter((symbol) => symbol && !FOREX_SYMBOL_BLOCKLIST.has(symbol)),
     ]),
 );
-// can take them later as well AUDUSD, EURUSD, GBPUSD, USDCAD
+// Core live universe aligned with the latest core backtest.
 
-// Legacy compatibility export; crypto flow is disabled in runtime.
-export const CRYPTO_SYMBOLS = [];
 export const TRADING_WINDOWS = {
     FOREX: [
         // 22:00-12:59 UTC
@@ -55,7 +53,7 @@ export const PRICE_LOGGER = {
     ENABLED: isTrue(ENV.PRICE_LOGGER_ENABLED),
 };
 
-const DEFAULT_LIVE_SYMBOLS = ["AUDUSD", "EURUSD", "GBPUSD", "USDCAD", "USDJPY"];
+const DEFAULT_LIVE_SYMBOLS = ["AUDUSD", "EURUSD", "GBPUSD"];
 
 export const LIVE_SYMBOLS = parseSymbolCsv(String(ENV.LIVE_SYMBOLS || DEFAULT_LIVE_SYMBOLS.join(",")));
 
@@ -85,7 +83,6 @@ export const SESSIONS = {
 export const RISK = {
     // Conservative defaults for small accounts; can be overridden via env later.
     PER_TRADE: 0.05, // 5% risk per forex trade
-    CRYPTO_PER_TRADE: 0.04, // legacy compatibility; crypto runtime disabled
     MAX_POSITIONS: 5, // Maximum simultaneous positions
     GUARDS: {
         MAX_DAILY_LOSS_PCT: 0, // disabled: no daily-loss entry block
@@ -134,7 +131,7 @@ const EMA = {
 // Technical Analysis Configuration
 export const ANALYSIS = {
     TIMEFRAMES,
-    SYMBOLS: ["AUDUSD", "EURUSD", "GBPUSD", "USDCAD", "USDJPY"],
+    SYMBOLS: ["AUDUSD", "EURUSD", "GBPUSD"],
     EMA,
 };
 

@@ -17,7 +17,6 @@ function round(value, decimals = 6) {
 export function step5EntryRisk(input, config = DEFAULT_INTRADAY_CONFIG) {
     const side = String(input?.side || "").toUpperCase();
     const symbol = String(input?.symbol || "").toUpperCase();
-    const assetClass = input?.assetClass === "crypto" ? "crypto" : "forex";
     const equity = toNum(input?.equity);
     const bid = toNum(input?.bid);
     const ask = toNum(input?.ask);
@@ -37,9 +36,9 @@ export function step5EntryRisk(input, config = DEFAULT_INTRADAY_CONFIG) {
     if (!Number.isFinite(equity) || equity <= 0) invalidReasons.push("invalid_equity");
     if (!Number.isFinite(entryPrice) || entryPrice <= 0) invalidReasons.push("invalid_entry_price");
 
-    const riskPct = assetClass === "crypto" ? Number(params.cryptoRiskPct || 0.004) : Number(params.forexRiskPct || 0.005);
+    const riskPct = Number(params.forexRiskPct || 0.005);
     const riskAmount = Number.isFinite(equity) ? equity * riskPct : null;
-    const minStopPct = assetClass === "crypto" ? Number(params.minStopPctCrypto || 0.003) : Number(params.minStopPctForex || 0.00025);
+    const minStopPct = Number(params.minStopPctForex || 0.00025);
     const atrStop = Number.isFinite(atr) ? atr * Number(params.atrStopMultiplier || 1.2) : 0;
     const spreadStop = Number.isFinite(spread) ? spread * Number(params.spreadStopMultiplier || 2.5) : 0;
     const pctStop = Number.isFinite(entryPrice) ? entryPrice * minStopPct : 0;

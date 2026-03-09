@@ -1,4 +1,3 @@
-import fs from "fs";
 import {
     placePosition,
     getDealConfirmation,
@@ -8,7 +7,7 @@ import {
     getMarketDetails,
     updatePositionProtection,
 } from "../api.js";
-import { RISK, ANALYSIS, CRYPTO_SYMBOLS, STRATEGIES, STRATEGY_SELECTION } from "../config.js";
+import { RISK, ANALYSIS, STRATEGY_SELECTION } from "../config.js";
 import logger from "../utils/logger.js";
 import {
     logTradeClose,
@@ -16,42 +15,29 @@ import {
     logTradeTrailingStop,
     tradeTracker,
     summarizeClosedTrades,
-    getSymbolLogPath,
-    getTradeEntry,
 } from "../utils/tradeLogger.js";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_CRYPTO_INTRADAY_CONFIG, DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
+import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
 import { step1MarketTimeWindow } from "../intraday/step1MarketTimeWindow.js";
-import {
-    CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID,
-    evaluateCryptoLiquidityWindowMomentum,
-    getDateKeyInTimeZone,
-    normalizeBar,
-} from "../strategies/cryptoLiquidityWindowMomentum.js";
 import { computeConfigHash } from "../utils/configHash.js";
 import { logStrategyDecision } from "../utils/strategyDecisionLogger.js";
 
 const { PER_TRADE, MAX_POSITIONS } = RISK;
-const CRYPTO_RISK_PCT = Number.isFinite(Number(RISK.CRYPTO_PER_TRADE)) ? Number(RISK.CRYPTO_PER_TRADE) : PER_TRADE;
 const GUARDS = RISK.GUARDS || {};
 const EXITS = RISK.EXITS || {};
-const CRYPTO_PER_TRADE = CRYPTO_RISK_PCT;
 const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0.02;
 const MAX_DAILY_LOSS_R = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_R)) ? Number(GUARDS.MAX_DAILY_LOSS_R) : 0;
-const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT)) ? Number(GUARDS.MAX_OPEN_RISK_PCT) : Math.max(PER_TRADE, CRYPTO_PER_TRADE) * 2;
+const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT)) ? Number(GUARDS.MAX_OPEN_RISK_PCT) : PER_TRADE * 2;
 const MAX_SYMBOL_LOSSES_PER_DAY = Number.isFinite(Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY)) ? Number(GUARDS.MAX_SYMBOL_LOSSES_PER_DAY) : 0;
 const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
 const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
     ? Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES)
     : 180;
 const RISK_SUMMARY_CACHE_MS = Number.isFinite(Number(GUARDS.SUMMARY_CACHE_MS)) ? Number(GUARDS.SUMMARY_CACHE_MS) : 15000;
-const CRYPTO_LWM_CONFIG = STRATEGIES?.CRYPTO_LIQUIDITY_WINDOW_MOMENTUM || null;
 const INTRADAY_DEFAULT_STRATEGY_ID = "INTRADAY_7STEP_V1";
 const INTRADAY_FOREX_STRATEGY_ID = "INTRADAY_7STEP_FOREX";
-const INTRADAY_CRYPTO_STRATEGY_ID = "INTRADAY_7STEP_CRYPTO";
 const FOREX_PRIMARY_STRATEGY_NAME = String(STRATEGY_SELECTION?.FOREX_PRIMARY || INTRADAY_DEFAULT_STRATEGY_ID).toUpperCase();
-const CRYPTO_PRIMARY_STRATEGY_NAME = String(STRATEGY_SELECTION?.CRYPTO_PRIMARY || INTRADAY_DEFAULT_STRATEGY_ID).toUpperCase();
 const SNAPSHOT_CANDLE_LAG_BOUNDS_MINUTES = {
     m1: { min: -3, max: 20 },
     m5: { min: -10, max: 40 },
@@ -70,6 +56,29 @@ const ANSI = {
     white: "\u001b[97m",
 };
 
+function toBarNumber(value) {
+    if (value === undefined || value === null || value === "") return null;
+    const num = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function normalizeBar(row) {
+    if (!row || typeof row !== "object") return null;
+    const tsMs =
+        toBarNumber(row.tsMs)
+        ?? (typeof row.t === "string" ? Date.parse(row.t) : null)
+        ?? (typeof row.timestamp === "string" ? Date.parse(row.timestamp) : null);
+    return {
+        t: Number.isFinite(tsMs) ? new Date(tsMs).toISOString() : typeof row.t === "string" ? row.t : typeof row.timestamp === "string" ? row.timestamp : null,
+        tsMs: Number.isFinite(tsMs) ? tsMs : null,
+        o: toBarNumber(row.o) ?? toBarNumber(row.open),
+        h: toBarNumber(row.h) ?? toBarNumber(row.high),
+        l: toBarNumber(row.l) ?? toBarNumber(row.low),
+        c: toBarNumber(row.c) ?? toBarNumber(row.close),
+        v: toBarNumber(row.v) ?? toBarNumber(row.volume),
+    };
+}
+
 class TradingService {
     constructor() {
         this.openTrades = [];
@@ -85,7 +94,6 @@ class TradingService {
         };
         this.guardLogThrottle = new Map();
         this.noSignalLogState = new Map();
-        this.cryptoLwmLastClosedM5KeyBySymbol = new Map();
         this.marketDetailsCache = new Map();
         this.fxRateCache = new Map();
 
@@ -99,15 +107,8 @@ class TradingService {
             guardrails: { ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}) },
             backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
         };
-        this.intradayCryptoConfig = mergeIntradayConfig(DEFAULT_INTRADAY_CONFIG, {
-            ...DEFAULT_CRYPTO_INTRADAY_CONFIG,
-            strategyId: INTRADAY_CRYPTO_STRATEGY_ID,
-        });
         this.intradayForexEngine = createIntradaySevenStepEngine(this.intradayForexConfig);
-        this.intradayCryptoEngine = createIntradaySevenStepEngine(this.intradayCryptoConfig);
         this.intradayForexState = createIntradayRuntimeState({ strategyId: INTRADAY_FOREX_STRATEGY_ID });
-        this.intradayCryptoState = createIntradayRuntimeState({ strategyId: INTRADAY_CRYPTO_STRATEGY_ID });
-        this.cryptoLwmConfigHash = computeConfigHash(CRYPTO_LWM_CONFIG);
 
         logger.info(`[Strategy] ForexPrimary=${FOREX_PRIMARY_STRATEGY_NAME} IntradayDefault=${INTRADAY_DEFAULT_STRATEGY_ID} Mode=FOREX_ONLY`);
     }
@@ -134,19 +135,17 @@ class TradingService {
         }
     }
 
-    buildIntradayStrategyMeta({ symbol, isCrypto, intradayEngine }) {
-        const strategyId = isCrypto ? INTRADAY_CRYPTO_STRATEGY_ID : INTRADAY_FOREX_STRATEGY_ID;
-        const baseConfig = isCrypto ? this.intradayCryptoConfig : this.intradayForexConfig;
-        let resolvedConfig = baseConfig;
+    buildIntradayStrategyMeta({ symbol, intradayEngine }) {
+        let resolvedConfig = this.intradayForexConfig;
         try {
             if (intradayEngine && typeof intradayEngine.getResolvedConfigForSymbol === "function") {
-                resolvedConfig = intradayEngine.getResolvedConfigForSymbol(symbol) || baseConfig;
+                resolvedConfig = intradayEngine.getResolvedConfigForSymbol(symbol) || this.intradayForexConfig;
             }
         } catch {
-            resolvedConfig = baseConfig;
+            resolvedConfig = this.intradayForexConfig;
         }
         return {
-            id: strategyId,
+            id: INTRADAY_FOREX_STRATEGY_ID,
             name: INTRADAY_DEFAULT_STRATEGY_ID,
             configHash: computeConfigHash(resolvedConfig),
         };
@@ -370,7 +369,7 @@ class TradingService {
             const quoteToAccountRate = await this.getCurrencyToAccountRate(quoteCurrency);
             const baseToAccountRate = await this.getCurrencyToAccountRate(baseCurrency);
             const openBrokerPosition = this.getOpenBrokerPositionBySymbol(symbol);
-            const leverage = this.firstNumber(openBrokerPosition?.leverage, this.isCryptoSymbol(symbol) ? 2 : 30);
+            const leverage = this.firstNumber(openBrokerPosition?.leverage, 30);
             const availableMargin =
                 Number.isFinite(this.availableMargin) && this.availableMargin > 0
                     ? this.availableMargin
@@ -412,14 +411,7 @@ class TradingService {
             }
 
             if (Number.isFinite(marginBudget) && marginBudget > 0 && Number.isFinite(leverage) && leverage > 0 && Number.isFinite(contractSize) && contractSize > 0) {
-                let notionalPerUnitAccount = null;
-                if (this.isCryptoSymbol(symbol)) {
-                    if (Number.isFinite(entryPrice) && entryPrice > 0 && Number.isFinite(quoteToAccountRate) && quoteToAccountRate > 0) {
-                        notionalPerUnitAccount = entryPrice * quoteToAccountRate * contractSize;
-                    }
-                } else if (Number.isFinite(baseToAccountRate) && baseToAccountRate > 0) {
-                    notionalPerUnitAccount = baseToAccountRate * contractSize;
-                }
+                const notionalPerUnitAccount = Number.isFinite(baseToAccountRate) && baseToAccountRate > 0 ? baseToAccountRate * contractSize : null;
 
                 if (Number.isFinite(notionalPerUnitAccount) && notionalPerUnitAccount > 0) {
                     const marginPerUnit = notionalPerUnitAccount / leverage;
@@ -713,15 +705,15 @@ class TradingService {
                 : [],
         );
         const primaryHeader = [
-            { text: "SYM", width: 8 },
+            { text: "SYMBOL", width: 8 },
             { text: "BLOCKER", width: 13 },
-            { text: "SES", width: 7 },
+            { text: "SESSION", width: 7 },
             { text: "ACTIVE", width: 14 },
-            { text: "PREF", width: 14 },
+            { text: "PREFERRED", width: 14 },
             { text: "REGIME", width: 8 },
             { text: "ADX", width: 6, align: "right" },
             { text: "SETUP", width: 8 },
-            { text: "TRG", width: 4 },
+            { text: "TRIGGER", width: 7 },
         ];
         const primaryRow = [
             { text: upperSymbol, width: 8 },
@@ -949,26 +941,24 @@ class TradingService {
     }
 
     isCryptoSymbol(symbol) {
-        return CRYPTO_SYMBOLS.includes(symbol);
+        return false;
     }
 
     isCryptoLiquidityWindowMomentumEnabled() {
-        return Boolean(CRYPTO_LWM_CONFIG?.enabled) && CRYPTO_PRIMARY_STRATEGY_NAME === CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID;
+        return false;
     }
 
     isCryptoLiquidityWindowMomentumSymbol(symbol) {
-        if (!this.isCryptoLiquidityWindowMomentumEnabled()) return false;
-        const allowed = Array.isArray(CRYPTO_LWM_CONFIG?.symbols) ? CRYPTO_LWM_CONFIG.symbols : [];
-        return allowed.map((s) => String(s).toUpperCase()).includes(String(symbol || "").toUpperCase());
+        return false;
     }
 
     shouldAlwaysEvaluateCryptoSymbol(symbol) {
-        return this.isCryptoLiquidityWindowMomentumSymbol(symbol);
+        return false;
     }
 
     shouldEvaluateForexSymbolNow(symbol, now = new Date()) {
         const upperSymbol = String(symbol || "").toUpperCase();
-        if (!upperSymbol || this.isCryptoSymbol(upperSymbol)) return true;
+        if (!upperSymbol) return true;
         const config =
             this.intradayForexEngine && typeof this.intradayForexEngine.getResolvedConfigForSymbol === "function"
                 ? this.intradayForexEngine.getResolvedConfigForSymbol(upperSymbol) || this.intradayForexConfig
@@ -984,116 +974,35 @@ class TradingService {
     }
 
     shouldUseCryptoLiquidityWindowMomentumForOpenDeal(dealId, symbol) {
-        if (!this.isCryptoLiquidityWindowMomentumEnabled()) return false;
-        if (!dealId && !symbol) return false;
-        const { entry } = getTradeEntry(dealId, symbol);
-        return this.isCryptoLwmLogEntry(entry);
+        return false;
     }
 
     isCryptoLwmLogEntry(entry) {
-        if (!entry || typeof entry !== "object") return false;
-        const entryStrategyId =
-            String(entry?.strategyId || entry?.strategyMeta?.id || entry?.riskMeta?.strategyId || entry?.riskMeta?.strategyMeta?.id || "").toUpperCase();
-        return entryStrategyId === CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID;
+        return false;
     }
 
     readSymbolTradeLogEntries(symbol) {
-        try {
-            const logPath = getSymbolLogPath(symbol);
-            if (!fs.existsSync(logPath)) return [];
-            const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean);
-            const rows = [];
-            for (const line of lines) {
-                try {
-                    rows.push(JSON.parse(line));
-                } catch {
-                    // ignore malformed line
-                }
-            }
-            return rows;
-        } catch (error) {
-            logger.warn(`[CryptoLWM] Failed to read trade log for ${symbol}: ${error.message}`);
-            return [];
-        }
+        return [];
     }
 
     estimateLoggedTradePnl(entry) {
-        if (!entry || String(entry.status || "").toLowerCase() !== "closed") return null;
-        const signal = String(entry?.signal || entry?.side || "").toUpperCase();
-        const entryPrice = this.firstNumber(entry?.entryPrice, entry?.level);
-        const closePrice = this.firstNumber(entry?.closePrice, entry?.closeLevel, entry?.levelOnClose);
-        const size = this.firstNumber(entry?.riskMeta?.size, entry?.size);
-        if (!["BUY", "SELL"].includes(signal)) return null;
-        if (![entryPrice, closePrice, size].every((v) => Number.isFinite(v))) return null;
-        const points = signal === "BUY" ? closePrice - entryPrice : entryPrice - closePrice;
-        return points * size;
+        return null;
     }
 
     getCryptoLwmDaySummary(timestamp) {
-        const dayKey = getDateKeyInTimeZone(timestamp, CRYPTO_LWM_CONFIG?.timezone || "Europe/Berlin");
-        const symbols = Array.isArray(CRYPTO_LWM_CONFIG?.symbols) ? CRYPTO_LWM_CONFIG.symbols : [];
-        let realizedPnlToday = 0;
-        let hasPnl = false;
-        let tradesTodayTotal = 0;
-
-        for (const symbol of symbols) {
-            const entries = this.readSymbolTradeLogEntries(symbol);
-            for (const entry of entries) {
-                if (!this.isCryptoLwmLogEntry(entry)) continue;
-                const openedAt = entry?.openedAt ?? entry?.timestamp;
-                if (openedAt && getDateKeyInTimeZone(openedAt, CRYPTO_LWM_CONFIG?.timezone || "Europe/Berlin") === dayKey) {
-                    tradesTodayTotal += 1;
-                }
-                const closedAt = entry?.closedAt;
-                if (String(entry?.status || "").toLowerCase() !== "closed" || !closedAt) continue;
-                if (getDateKeyInTimeZone(closedAt, CRYPTO_LWM_CONFIG?.timezone || "Europe/Berlin") !== dayKey) continue;
-                const pnl = this.estimateLoggedTradePnl(entry);
-                if (Number.isFinite(pnl)) {
-                    realizedPnlToday += pnl;
-                    hasPnl = true;
-                }
-            }
-        }
-
-        const accountBalance = this.toNumber(this.accountBalance);
-        const startOfDayEquity =
-            Number.isFinite(accountBalance) && Number.isFinite(realizedPnlToday) ? accountBalance - realizedPnlToday : Number.isFinite(accountBalance) ? accountBalance : null;
-
         return {
-            dayKey,
-            realizedPnlToday: hasPnl ? realizedPnlToday : 0,
-            tradesTodayTotal,
-            startOfDayEquity,
+            dayKey: null,
+            realizedPnlToday: 0,
+            tradesTodayTotal: 0,
+            startOfDayEquity: this.toNumber(this.accountBalance),
         };
     }
 
     getCryptoLwmSymbolCounters(symbol, timestamp) {
-        const upper = String(symbol || "").toUpperCase();
-        const dayKey = getDateKeyInTimeZone(timestamp, CRYPTO_LWM_CONFIG?.timezone || "Europe/Berlin");
-        let tradesTodaySymbol = 0;
-        let lastExitAt = null;
-        const entries = this.readSymbolTradeLogEntries(upper);
-
-        for (const entry of entries) {
-            if (!this.isCryptoLwmLogEntry(entry)) continue;
-            const openedAt = entry?.openedAt ?? entry?.timestamp;
-            if (openedAt && getDateKeyInTimeZone(openedAt, CRYPTO_LWM_CONFIG?.timezone || "Europe/Berlin") === dayKey) {
-                tradesTodaySymbol += 1;
-            }
-            const closedAt = entry?.closedAt;
-            if (!closedAt || String(entry?.status || "").toLowerCase() !== "closed") continue;
-            const closedDayKey = getDateKeyInTimeZone(closedAt, CRYPTO_LWM_CONFIG?.timezone || "Europe/Berlin");
-            if (closedDayKey !== dayKey) continue;
-            const closedTsMs = Date.parse(String(closedAt));
-            if (Number.isFinite(closedTsMs) && (!Number.isFinite(lastExitAt) || closedTsMs > lastExitAt)) {
-                lastExitAt = closedTsMs;
-            }
-        }
-
         return {
-            tradesTodaySymbol,
-            lastExitAtMs: Number.isFinite(lastExitAt) ? lastExitAt : null,
-            entries,
+            tradesTodaySymbol: 0,
+            lastExitAtMs: null,
+            entries: [],
         };
     }
 
@@ -1110,11 +1019,7 @@ class TradingService {
     }
 
     logCryptoLwmDecision(payload) {
-        try {
-            logger.info(JSON.stringify({ ...payload, strategyId: CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID }));
-        } catch (error) {
-            logger.warn(`[CryptoLWM] Failed to serialize decision log: ${error.message}`);
-        }
+        return null;
     }
 
     isSymbolTraded(symbol) {
@@ -1122,7 +1027,7 @@ class TradingService {
     }
 
     getConfiguredRiskPct(symbol) {
-        return this.isCryptoSymbol(symbol) ? CRYPTO_PER_TRADE : PER_TRADE;
+        return PER_TRADE;
     }
 
     pickTrend(indicator) {
@@ -1254,11 +1159,6 @@ class TradingService {
     }
 
     roundPrice(price, symbol) {
-        if (this.isCryptoSymbol(symbol)) {
-            if (price >= 1000) return Number(price).toFixed(2) * 1;
-            if (price >= 100) return Number(price).toFixed(3) * 1;
-            return Number(price).toFixed(4) * 1;
-        }
         const decimals = symbol.includes("JPY") ? 3 : 5;
         return Number(price).toFixed(decimals) * 1;
     }
@@ -1327,27 +1227,10 @@ class TradingService {
                     Number.isFinite(this.availableMargin) ? this.availableMargin : "n/a"
                 }€`,
             );
-
-            if (this.isCryptoLiquidityWindowMomentumSymbol(upperSymbol)) {
-                await this.processCryptoLiquidityWindowMomentum({
-                    symbol: upperSymbol,
-                    indicators,
-                    candles,
-                    bid,
-                    ask,
-                    timestamp: signalTimestamp,
-                    sessions,
-                    guard,
-                });
-                return;
-            }
-
-            const isCrypto = this.isCryptoSymbol(upperSymbol);
-            const intradayState = isCrypto ? this.intradayCryptoState : this.intradayForexState;
-            const intradayEngine = isCrypto ? this.intradayCryptoEngine : this.intradayForexEngine;
+            const intradayState = this.intradayForexState;
+            const intradayEngine = this.intradayForexEngine;
             const strategyMeta = this.buildIntradayStrategyMeta({
                 symbol: upperSymbol,
-                isCrypto,
                 intradayEngine,
             });
             const decisionContext = {
@@ -1410,7 +1293,7 @@ class TradingService {
                     takeProfit: this.toNumber(position?.takeProfit),
                     size: this.toNumber(position?.size),
                     entryTimestamp: signalTimestamp,
-                    assetClass: this.isCryptoSymbol(symbolKey) ? "crypto" : "forex",
+                    assetClass: "forex",
                 });
             }
 
@@ -1469,7 +1352,7 @@ class TradingService {
             const snapshotValidation = this.validateIntradaySnapshot({
                 symbol: upperSymbol,
                 snapshot,
-                isCrypto,
+                isCrypto: false,
             });
             if (!snapshotValidation.ok) {
                 const reason = `snapshot_invalid:${snapshotValidation.issues.join("|")}`;
@@ -1652,7 +1535,7 @@ class TradingService {
                     takeProfit: this.firstNumber(execution?.tp, orderPlan.tp),
                     size: this.firstNumber(execution?.size, orderPlan.size),
                     entryTimestamp: signalTimestamp,
-                    assetClass: isCrypto ? "crypto" : "forex",
+                    assetClass: "forex",
                 });
             }
         } catch (error) {
@@ -1686,271 +1569,15 @@ class TradingService {
             const hit = preloadedEntries.find((row) => String(row?.dealId || "") === targetId);
             if (hit) return hit;
         }
-        const { entry } = getTradeEntry(dealId, symbol);
-        return entry || null;
+        return null;
     }
 
     buildCryptoLwmOpenPositionEvalContext(brokerPosition, symbol, symbolLogEntries = []) {
-        if (!brokerPosition) return null;
-        const logEntry = this.getOpenLogEntryForDeal(brokerPosition.dealId, symbol, symbolLogEntries);
-        return {
-            dealId: brokerPosition.dealId,
-            symbol,
-            direction: brokerPosition.direction,
-            side: brokerPosition.direction,
-            size: brokerPosition.size,
-            entryPrice: brokerPosition.entryPrice,
-            stopLoss: brokerPosition.stopLoss,
-            takeProfit: brokerPosition.takeProfit,
-            currentSl: brokerPosition.stopLoss,
-            initialSl: this.firstNumber(logEntry?.stopLoss, logEntry?.riskMeta?.initialStopLoss, brokerPosition.stopLoss),
-            entryTimestamp: logEntry?.openedAt ?? logEntry?.timestamp ?? null,
-            strategyId: logEntry?.strategyId ?? logEntry?.strategyMeta?.id ?? logEntry?.riskMeta?.strategyId ?? null,
-            logEntry,
-        };
+        return null;
     }
 
     async processCryptoLiquidityWindowMomentum({ symbol, candles, bid, ask, timestamp, guard }) {
-        const signalTimestamp = timestamp || new Date().toISOString();
-        const upperSymbol = String(symbol || "").toUpperCase();
-        const strategyMeta = {
-            id: CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID,
-            name: CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID,
-            configHash: this.cryptoLwmConfigHash,
-        };
-        const openBrokerPosition = this.getOpenBrokerPositionBySymbol(upperSymbol);
-        const isSymbolOpen = Boolean(openBrokerPosition);
-        const maxPositionsReached = this.openTrades.length >= MAX_POSITIONS;
-
-        const symbolCounters = this.getCryptoLwmSymbolCounters(upperSymbol, signalTimestamp);
-        const daySummary = this.getCryptoLwmDaySummary(signalTimestamp);
-        const openPositionCtx = this.buildCryptoLwmOpenPositionEvalContext(openBrokerPosition, upperSymbol, symbolCounters.entries);
-        const openPositionIsStrategyOwned = !openPositionCtx ? false : this.isCryptoLwmLogEntry(openPositionCtx.logEntry);
-
-        const m5CandlesRaw = this.getClosedBarsForStrategy(candles?.m5Candles || []);
-        const h1CandlesRaw = this.getClosedBarsForStrategy(candles?.h1Candles || []);
-        const lastClosedM5Raw = Array.isArray(candles?.m5Candles) && candles.m5Candles.length > 1 ? candles.m5Candles[candles.m5Candles.length - 2] : null;
-        const lastClosedM5Key = this.getClosedBarKeyFromCandle(lastClosedM5Raw);
-        const lastSeenM5Key = this.cryptoLwmLastClosedM5KeyBySymbol.get(upperSymbol) || null;
-        const isNewClosedBar = Boolean(lastClosedM5Key) && lastClosedM5Key !== lastSeenM5Key;
-
-        const externalEntryAllowed = !isSymbolOpen && !maxPositionsReached && !guard?.blocked;
-        const externalBlockReason = isSymbolOpen
-            ? "symbol_already_in_position"
-            : maxPositionsReached
-              ? "max_positions_reached"
-              : guard?.blocked
-                ? `risk_guard_${guard.reason}`
-                : null;
-
-        const evaluation = evaluateCryptoLiquidityWindowMomentum({
-            symbol: upperSymbol,
-            timestamp: signalTimestamp,
-            bid,
-            ask,
-            mid: this.resolveMarketPrice("BUY", bid, ask),
-            candles5m: m5CandlesRaw,
-            candles1h: h1CandlesRaw,
-            config: CRYPTO_LWM_CONFIG,
-            equity: this.toNumber(this.accountBalance),
-            openPosition: openPositionIsStrategyOwned ? openPositionCtx : null,
-            counters: {
-                tradesTodaySymbol: symbolCounters.tradesTodaySymbol,
-                tradesTodayTotal: daySummary.tradesTodayTotal,
-                lastExitAtMs: symbolCounters.lastExitAtMs,
-                startOfDayEquity: daySummary.startOfDayEquity,
-                realizedPnlToday: daySummary.realizedPnlToday,
-            },
-            entryContext: {
-                requireNewClosedBar: true,
-                isNewClosedBar,
-                externalEntryAllowed,
-                externalBlockReason,
-            },
-        });
-
-        if (lastClosedM5Key) {
-            this.cryptoLwmLastClosedM5KeyBySymbol.set(upperSymbol, lastClosedM5Key);
-        }
-
-        this.logCryptoLwmDecision({
-            mode: "live",
-            symbol: upperSymbol,
-            guardBlocked: Boolean(guard?.blocked),
-            guardReason: guard?.reason || null,
-            maxPositionsReached,
-            symbolOpen: isSymbolOpen,
-            positionOwnedByStrategy: openPositionIsStrategyOwned,
-            reasonCode: evaluation?.reasonCode || null,
-            ...evaluation?.decisionLog,
-        });
-        this.safeLogStrategyDecision({
-            symbol: upperSymbol,
-            timestamp: signalTimestamp,
-            phase: "evaluate",
-            event: "decision",
-            strategyId: strategyMeta.id,
-            strategyName: strategyMeta.name,
-            configHash: strategyMeta.configHash,
-            signal: evaluation?.action === "OPEN" ? this.toTradeSignalFromStrategySide(evaluation?.orderPlan?.side) : null,
-            side: evaluation?.orderPlan?.side || null,
-            blockReason: externalBlockReason,
-            reason: evaluation?.reasonCode || null,
-            guard,
-            snapshot: {
-                symbol: upperSymbol,
-                timestamp: signalTimestamp,
-                bid: this.toNumber(bid),
-                ask: this.toNumber(ask),
-                mid: this.resolveMarketPrice("BUY", bid, ask),
-                sessions: [],
-            },
-            decision: {
-                action: evaluation?.action || null,
-                reasonCode: evaluation?.reasonCode || null,
-                decisionLog: evaluation?.decisionLog || null,
-                manageAction: evaluation?.manageAction || null,
-            },
-            metadata: {
-                externalEntryAllowed,
-                externalBlockReason,
-                isNewClosedBar,
-                symbolOpen: isSymbolOpen,
-                maxPositionsReached,
-            },
-        });
-
-        if (isSymbolOpen && !openPositionIsStrategyOwned) {
-            logger.debug(`[CryptoLWM] ${upperSymbol}: open position is not tagged with ${CRYPTO_LIQUIDITY_WINDOW_MOMENTUM_ID}; skipping custom management.`);
-            return;
-        }
-
-        if (evaluation?.action === "EXIT" && openPositionCtx?.dealId) {
-            const rAtExit = this.toNumber(evaluation?.metrics?.rMultipleAtExit);
-            this.logCryptoLwmDecision({
-                mode: "live",
-                symbol: upperSymbol,
-                timestamp: signalTimestamp,
-                decision: "EXIT",
-                orderType: "CLOSE_POSITION",
-                requestedPrice: this.toNumber(evaluation?.metrics?.currentMark),
-                filledPrice: null,
-                sl: this.toNumber(openPositionCtx?.currentSl),
-                tp: this.toNumber(openPositionCtx?.takeProfit),
-                size: this.toNumber(openPositionCtx?.size),
-                riskAmount: this.toNumber(openPositionCtx?.logEntry?.riskMeta?.riskAmount),
-                stopDistance: this.toNumber(openPositionCtx?.logEntry?.riskMeta?.stopDistance),
-                RmultipleAtExit: rAtExit,
-                exitReason: evaluation.exitReason || "manage_exit",
-            });
-            await this.closePosition(openPositionCtx.dealId, evaluation.exitReason || "time_stop");
-            return;
-        }
-
-        if (evaluation?.action === "MANAGE" && evaluation?.manageAction?.type === "MOVE_SL" && openPositionCtx?.dealId) {
-            const newSl = this.roundPrice(evaluation.manageAction.newStopLoss, upperSymbol);
-            const tp = this.toNumber(openPositionCtx.takeProfit);
-            const currentSl = this.toNumber(openPositionCtx.currentSl);
-            const improved =
-                !Number.isFinite(currentSl) ||
-                (String(openPositionCtx.direction || "").toUpperCase() === "BUY" ? newSl > currentSl : newSl < currentSl);
-            if (improved && Number.isFinite(newSl)) {
-                try {
-                    await updatePositionProtection(openPositionCtx.dealId, newSl, tp, upperSymbol);
-                    logTradeTrailingStop({
-                        dealId: openPositionCtx.dealId,
-                        symbol: upperSymbol,
-                        price: newSl,
-                        distance: this.toNumber(evaluation?.metrics?.atr14),
-                        reason: evaluation.manageAction.reason || "manage",
-                        timestamp: signalTimestamp,
-                    });
-                    this.logCryptoLwmDecision({
-                        mode: "live",
-                        symbol: upperSymbol,
-                        timestamp: signalTimestamp,
-                        decision: "MANAGE",
-                        orderType: "UPDATE_PROTECTION",
-                        requestedPrice: null,
-                        filledPrice: null,
-                        sl: newSl,
-                        tp,
-                        size: this.toNumber(openPositionCtx.size),
-                        riskAmount: this.toNumber(openPositionCtx?.logEntry?.riskMeta?.riskAmount),
-                        stopDistance: this.toNumber(openPositionCtx?.logEntry?.riskMeta?.stopDistance),
-                    });
-                } catch (error) {
-                    logger.warn(`[CryptoLWM] Failed protection update for ${upperSymbol} ${openPositionCtx.dealId}: ${error.message}`);
-                }
-            }
-            return;
-        }
-
-        if (evaluation?.action !== "OPEN" || !evaluation?.orderPlan) {
-            return;
-        }
-
-        const tradeSignal = this.toTradeSignalFromStrategySide(evaluation.orderPlan.side);
-        if (!tradeSignal) {
-            logger.warn(`[CryptoLWM] Invalid strategy side for ${upperSymbol}: ${evaluation.orderPlan.side}`);
-            return;
-        }
-
-        this.safeLogStrategyDecision({
-            symbol: upperSymbol,
-            timestamp: signalTimestamp,
-            phase: "execution",
-            event: "order_attempt",
-            strategyId: strategyMeta.id,
-            strategyName: strategyMeta.name,
-            configHash: strategyMeta.configHash,
-            signal: tradeSignal,
-            side: evaluation?.orderPlan?.side || null,
-            reason: evaluation.reasonCode || "strategy_signal",
-            orderPlan: evaluation?.orderPlan || null,
-            guard,
-        });
-
-        const execution = await this.executeTradePlanned({
-            symbol: upperSymbol,
-            signal: tradeSignal,
-            orderPlan: evaluation.orderPlan,
-            indicators: { strategy: evaluation?.decisionLog?.indicators || null },
-            reason: evaluation.reasonCode || "strategy_signal",
-            strategyMeta,
-        });
-        this.safeLogStrategyDecision({
-            symbol: upperSymbol,
-            timestamp: signalTimestamp,
-            phase: "execution",
-            event: "order_result",
-            strategyId: strategyMeta.id,
-            strategyName: strategyMeta.name,
-            configHash: strategyMeta.configHash,
-            signal: tradeSignal,
-            side: evaluation?.orderPlan?.side || null,
-            reason: execution?.accepted ? "accepted" : execution?.reason || "rejected",
-            orderPlan: evaluation?.orderPlan || null,
-            execution,
-            guard,
-        });
-
-        this.logCryptoLwmDecision({
-            mode: "live",
-            symbol: upperSymbol,
-            timestamp: signalTimestamp,
-            decision: tradeSignal === "BUY" ? "OPEN_LONG" : "OPEN_SHORT",
-            orderType: "MARKET",
-            requestedPrice: this.toNumber(evaluation.orderPlan.requestedPrice),
-            filledPrice: this.toNumber(execution?.filledPrice),
-            sl: this.toNumber(execution?.sl ?? evaluation.orderPlan.sl),
-            tp: this.toNumber(execution?.tp ?? evaluation.orderPlan.tp),
-            size: this.toNumber(execution?.size ?? evaluation.orderPlan.size),
-            riskAmount: this.toNumber(execution?.riskAmount ?? evaluation.orderPlan.riskAmount),
-            stopDistance: this.toNumber(execution?.stopDistance ?? evaluation.orderPlan.stopDistance),
-            dealId: execution?.dealId || null,
-            orderAccepted: Boolean(execution?.accepted),
-        });
+        return null;
     }
 
     // ============================================================
@@ -1982,9 +1609,6 @@ class TradingService {
     }
 
     async calculateTradeParameters(signal, symbol, bid, ask) {
-        if (this.isCryptoSymbol(symbol)) {
-            return this.calculateTradeParametersCrypto(signal, symbol, bid, ask);
-        }
         return this.calculateTradeParametersForex(signal, symbol, bid, ask);
     }
 
@@ -2016,43 +1640,6 @@ class TradingService {
             takeProfitPrice,
             stopLossPips,
             takeProfitPips,
-            price,
-            riskPctConfigured,
-            riskAmountConfigured,
-            stopDistance: Math.abs(price - stopLossPrice),
-            takeProfitDistance: Math.abs(takeProfitPrice - price),
-        };
-    }
-
-    async calculateTradeParametersCrypto(signal, symbol, bid, ask) {
-        const direction = this.normalizeDirection(signal);
-        if (!["BUY", "SELL"].includes(direction)) {
-            throw new Error(`[Trade Params] Invalid signal for ${symbol}: ${signal}`);
-        }
-
-        const isBuy = direction === "BUY";
-        const price = this.resolveMarketPrice(direction, bid, ask);
-        if (!Number.isFinite(price)) {
-            throw new Error(`[Trade Params] Missing valid market price for ${symbol} (${direction})`);
-        }
-
-        const atr = await this.calculateATR(symbol);
-        const spread = Number.isFinite(bid) && Number.isFinite(ask) ? Math.abs(ask - bid) : 0;
-        const fallbackDistance = Math.max(price * 0.0045, spread * 3);
-        const stopLossDistance = Math.max(2.2 * atr, spread * 3, fallbackDistance);
-        const takeProfitDistance = stopLossDistance * 1.8;
-        const stopLossPrice = isBuy ? price - stopLossDistance : price + stopLossDistance;
-        const takeProfitPrice = isBuy ? price + takeProfitDistance : price - takeProfitDistance;
-        const size = this.positionSizeCrypto(this.accountBalance, price, stopLossPrice, symbol);
-        const riskPctConfigured = this.getConfiguredRiskPct(symbol);
-        const riskAmountConfigured = Number.isFinite(this.accountBalance) ? this.accountBalance * riskPctConfigured : null;
-
-        return {
-            size,
-            stopLossPrice,
-            takeProfitPrice,
-            stopLossPips: stopLossDistance,
-            takeProfitPips: takeProfitDistance,
             price,
             riskPctConfigured,
             riskAmountConfigured,
@@ -2100,31 +1687,6 @@ class TradingService {
         logger.debug(
             `[PositionSize] ${symbol}: raw=${riskAmount / (stopLossPips * pipValue)} final=${size} marginRequired=${marginRequired} maxPerTrade=${maxMarginPerTrade}`,
         );
-        return size;
-    }
-
-    positionSizeCrypto(balance, entryPrice, stopLossPrice, symbol) {
-        const riskAmount = balance * CRYPTO_PER_TRADE;
-        const stopDistance = Math.abs(entryPrice - stopLossPrice);
-        if (!Number.isFinite(stopDistance) || stopDistance <= 0) return 0.1;
-
-        let size = riskAmount / stopDistance;
-        if (!Number.isFinite(size) || size <= 0) return 0.1;
-
-        // Crypto CFDs usually allow fractional size.
-        size = Math.floor(size * 1000) / 1000;
-        if (size < 0.1) size = 0.1;
-
-        const leverage = 2;
-        const marginRequired = (size * entryPrice) / leverage;
-        const availableMargin = Number.isFinite(this.availableMargin) && this.availableMargin > 0 ? this.availableMargin : this.accountBalance;
-        const maxMarginPerTrade = availableMargin / 5;
-        if (marginRequired > maxMarginPerTrade && entryPrice > 0) {
-            size = Math.floor(((maxMarginPerTrade * leverage) / entryPrice) * 1000) / 1000;
-            if (size < 0.1) size = 0.1;
-        }
-
-        logger.debug(`[PositionSize][CRYPTO] ${symbol}: final=${size}`);
         return size;
     }
 
@@ -2245,7 +1807,7 @@ class TradingService {
                         marginPerUnit: this.toNumber(sizingMeta?.marginPerUnit),
                         maxSizeByMargin: this.toNumber(sizingMeta?.maxSizeByMargin),
                         sizingMethod: sizingMeta?.sizingMethod || null,
-                        assetClass: this.isCryptoSymbol(symbol) ? "crypto" : "forex",
+                        assetClass: "forex",
                         strategyId: strategyMeta?.id || null,
                         strategyMeta: strategyMeta && typeof strategyMeta === "object" ? strategyMeta : null,
                         configHash: strategyConfigHash,
@@ -2355,7 +1917,7 @@ class TradingService {
                             size: Number.isFinite(size) ? size : null,
                             accountBalanceAtOpen: Number.isFinite(this.accountBalance) ? this.accountBalance : null,
                             availableMarginAtOpen: Number.isFinite(this.availableMargin) ? this.availableMargin : null,
-                            assetClass: this.isCryptoSymbol(symbol) ? "crypto" : "forex",
+                            assetClass: "forex",
                         },
                     });
 
@@ -2625,12 +2187,6 @@ class TradingService {
                 const symbolKey = String(symbol || "").toUpperCase();
                 if (symbolKey) {
                     registerClosedTrade(this.intradayForexState, {
-                        symbol: symbolKey,
-                        pnl: null,
-                        tradeId: dealId,
-                        timestamp: new Date().toISOString(),
-                    });
-                    registerClosedTrade(this.intradayCryptoState, {
                         symbol: symbolKey,
                         pnl: null,
                         tradeId: dealId,

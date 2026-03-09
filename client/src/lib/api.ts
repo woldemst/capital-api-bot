@@ -115,7 +115,6 @@ export async function runBacktestCompare(filters: BacktestCompareFilters): Promi
     sampleLimit: filters.sampleLimit,
     startBalance: filters.startBalance,
     forexRiskPct: filters.forexRiskPct,
-    cryptoRiskPct: filters.cryptoRiskPct,
     respectNewsGuard: filters.respectNewsGuard,
   };
   return fetchApi<BacktestCompareResponse>("/backtest/compare", params);

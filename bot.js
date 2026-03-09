@@ -1,5 +1,5 @@
 import { startSession, pingSession, getHistorical, getAccountInfo, getSessionTokens, refreshSession, getMarketDetails } from "./api.js";
-import { DEV, PROD, ANALYSIS, SESSIONS, TRADING_WINDOWS, NEWS_GUARD, LIVE_SYMBOLS } from "./config.js";
+import { API, DEV, PROD, ANALYSIS, SESSIONS, TRADING_WINDOWS, NEWS_GUARD, LIVE_SYMBOLS } from "./config.js";
 import webSocketService from "./services/websocket.js";
 import tradingService from "./services/trading.js";
 import { calcIndicators } from "./indicators/indicators.js";
@@ -7,6 +7,7 @@ import logger from "./utils/logger.js";
 import { getNewsStatus } from "./utils/newsChecker.js";
 import { startMonitorOpenTrades, trailingStopCheck, logDeals, startPriceMonitor, startWebSocket } from "./bot/monitors.js";
 import { startHubServer } from "./services/hubServer.js";
+import { assertStartupConfig, runBrokerPreflight, validateStartupConfig } from "./utils/startupValidation.js";
 
 const { TIMEFRAMES } = ANALYSIS;
 const ANALYSIS_REPEAT_MS = 60 * 1000;
@@ -50,6 +51,7 @@ class TradingBot {
         this.rolloverBufferMinutes = 10;
         this.lastRolloverCloseKey = null;
         this.tokens = null;
+        this.startupValidation = null;
 
         if (this.liveSymbolAllowlist.size) {
             logger.info(`[Bot] LIVE_SYMBOLS filter active (${this.liveSymbolAllowlist.size}): ${[...this.liveSymbolAllowlist].join(", ")}`);
@@ -59,13 +61,16 @@ class TradingBot {
     }
 
     async initialize() {
+        this.startupValidation = this.validateStartupConfigOrThrow();
         for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
             try {
                 await startSession();
                 const tokens = getSessionTokens();
                 if (!tokens.cst || !tokens.xsecurity) throw new Error("Invalid session tokens");
                 this.tokens = tokens;
-                await this.startLiveTrading(tokens);
+                const preflight = await this.runBrokerStartupPreflight();
+                this.logBrokerStartupPreflight(preflight);
+                await this.startLiveTrading();
                 this.scheduleMidnightSessionRefresh();
                 return;
             } catch (error) {
@@ -84,6 +89,7 @@ class TradingBot {
 
     async startLiveTrading() {
         try {
+            await this.updateAccountInfo();
             // startWebSocket(this);
             this.startSessionPing();
             this.startAnalysisInterval();
@@ -93,6 +99,61 @@ class TradingBot {
         } catch (error) {
             logger.error("[bot.js][Bot] Error starting live trading:", error);
             throw error;
+        }
+    }
+
+    validateStartupConfigOrThrow() {
+        const result = validateStartupConfig({
+            api: API,
+            liveSymbols: LIVE_SYMBOLS,
+            sessions: SESSIONS,
+            tradingWindows: TRADING_WINDOWS,
+            newsGuard: NEWS_GUARD,
+            env: process.env,
+        });
+        for (const warning of result.warnings) {
+            logger.warn(`[Bot][Startup] ${warning}`);
+        }
+        assertStartupConfig(result);
+        logger.info(
+            `[Bot][Startup] Config OK | env=${result.environment} | api=${result.apiBaseUrl} | symbols=${result.liveSymbols.join(", ")}`,
+        );
+        return result;
+    }
+
+    getPreflightSymbols() {
+        const result = this.startupValidation || this.validateStartupConfigOrThrow();
+        return result.liveSymbols.length ? result.liveSymbols : result.configuredSessionSymbols;
+    }
+
+    applyAccountSnapshot(account) {
+        if (!account || typeof account !== "object") return;
+        if (Number.isFinite(account.balance)) tradingService.setAccountBalance(account.balance);
+        if (Number.isFinite(account.available)) tradingService.setAvailableMargin(account.available);
+        if (account.currency) tradingService.setAccountCurrency(account.currency);
+    }
+
+    async runBrokerStartupPreflight() {
+        const summary = await runBrokerPreflight({
+            symbols: this.getPreflightSymbols(),
+        });
+        this.applyAccountSnapshot(summary.account);
+        return summary;
+    }
+
+    logBrokerStartupPreflight(summary) {
+        const account = summary?.account || {};
+        const symbolParts = Array.isArray(summary?.symbols)
+            ? summary.symbols.map((row) => `${row.symbol}:${row.marketStatus}:min=${row.minDealSize}`)
+            : [];
+        logger.info(
+            `[Bot][Preflight] checkedAt=${summary?.checkedAt || "n/a"} | account=${account.currency || "n/a"} balance=${account.balance ?? "n/a"} available=${account.available ?? "n/a"}`,
+        );
+        if (symbolParts.length) {
+            logger.info(`[Bot][Preflight] symbols=${symbolParts.join(", ")}`);
+        }
+        for (const warning of summary?.warnings || []) {
+            logger.warn(`[Bot][Preflight] ${warning}`);
         }
     }
 
@@ -145,17 +206,21 @@ class TradingBot {
         while (retries > 0) {
             try {
                 const accountData = await getAccountInfo();
-                if (accountData?.accounts?.[0]?.balance?.balance) {
-                    tradingService.setAccountBalance(accountData.accounts[0].balance.balance);
-                    if (typeof accountData.accounts[0].balance.available !== "undefined") {
-                        tradingService.setAvailableMargin(accountData.accounts[0].balance.available);
-                    }
-                    if (accountData.accounts[0].currency) {
-                        tradingService.setAccountCurrency(accountData.accounts[0].currency);
-                    }
-
-                    return; // Success - exit the method
+                const primaryAccount = Array.isArray(accountData?.accounts) ? accountData.accounts[0] : null;
+                const balance = primaryAccount?.balance?.balance;
+                if (!Number.isFinite(Number(balance))) {
+                    throw new Error("Account balance missing or invalid");
                 }
+
+                tradingService.setAccountBalance(Number(balance));
+                if (typeof primaryAccount?.balance?.available !== "undefined") {
+                    tradingService.setAvailableMargin(Number(primaryAccount.balance.available));
+                }
+                if (primaryAccount?.currency) {
+                    tradingService.setAccountCurrency(primaryAccount.currency);
+                }
+
+                return; // Success - exit the method
             } catch (error) {
                 retries--;
                 if (retries === 0) {
@@ -426,12 +491,11 @@ class TradingBot {
         const timestamp = marketTimestamp || this.toIsoTimestamp(latestM1Timestamp) || new Date().toISOString();
         const sessionAnchor = new Date(timestamp);
         const activeSessions = this.getActiveSessionNames(Number.isFinite(sessionAnchor.getTime()) ? sessionAnchor : new Date()).filter((sessionName) => {
-            if (sessionName === "CRYPTO") return this.isCryptoSymbol(symbol);
             const sessionSymbols = SESSIONS?.[sessionName]?.SYMBOLS || [];
             return sessionSymbols.includes(symbol);
         });
         let newsBlocked = false;
-        if (NEWS_GUARD.ENABLED && !this.isCryptoSymbol(symbol)) {
+        if (NEWS_GUARD.ENABLED) {
             try {
                 const news = await getNewsStatus(symbol, {
                     now: new Date(timestamp),
@@ -579,14 +643,6 @@ class TradingBot {
         context.rejectReason = null;
         context.rejectDetail = null;
 
-        if (this.isCryptoSymbol(symbol)) {
-            if (typeof tradingService.shouldAlwaysEvaluateCryptoSymbol === "function" && tradingService.shouldAlwaysEvaluateCryptoSymbol(symbol)) {
-                return true;
-            }
-            // Crypto is traded 24/7.
-            return true;
-        }
-
         const day = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
         const sundayOpenMinutes = 22 * 60;
         const fridayCloseMinutes = 22 * 60;
@@ -651,9 +707,6 @@ class TradingBot {
     }
 
     getHistoryLengthForSymbol(symbol) {
-        if (typeof tradingService.shouldAlwaysEvaluateCryptoSymbol === "function" && tradingService.shouldAlwaysEvaluateCryptoSymbol(symbol)) {
-            return Math.max(this.maxCandleHistory, this.maxCandleHistoryExtended);
-        }
         return this.maxCandleHistory;
     }
 }

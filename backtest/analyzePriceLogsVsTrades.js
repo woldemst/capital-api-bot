@@ -2,9 +2,9 @@ import fs from "fs";
 import path from "path";
 import { sanitizePriceSnapshotRows } from "./priceSnapshotSanity.js";
 import { createIntradaySevenStepEngine } from "../intraday/engine.js";
-import { DEFAULT_CRYPTO_INTRADAY_CONFIG, DEFAULT_INTRADAY_CONFIG, mergeIntradayConfig } from "../intraday/config.js";
+import { DEFAULT_INTRADAY_CONFIG } from "../intraday/config.js";
 import { createIntradayRuntimeState, ensureStateDay, registerClosedTrade, registerOpenedTrade } from "../intraday/state.js";
-import { CRYPTO_SYMBOLS, RISK, SESSIONS } from "../config.js";
+import { RISK, SESSIONS } from "../config.js";
 
 const PRICES_DIR = path.join(process.cwd(), "backtest", "prices");
 const LOGS_DIR = path.join(process.cwd(), "backtest", "logs");
@@ -26,7 +26,6 @@ const MIN_VALID_PRICE_ROW_RATIO = Number.isFinite(Number(process.env.BT_ANALYZE_
     : 0;
 
 const FOREX_RISK_PCT = Number(RISK?.PER_TRADE) || 0.05;
-const CRYPTO_RISK_PCT = Number(RISK?.CRYPTO_PER_TRADE) || 0.04;
 const MAX_POSITIONS = Number(RISK?.MAX_POSITIONS) || 5;
 const GUARDS = RISK?.GUARDS || {};
 const EXITS = RISK?.EXITS || {};
@@ -34,7 +33,7 @@ const EXITS = RISK?.EXITS || {};
 const MAX_DAILY_LOSS_PCT = Number.isFinite(Number(GUARDS.MAX_DAILY_LOSS_PCT)) ? Number(GUARDS.MAX_DAILY_LOSS_PCT) : 0;
 const MAX_OPEN_RISK_PCT = Number.isFinite(Number(GUARDS.MAX_OPEN_RISK_PCT))
     ? Number(GUARDS.MAX_OPEN_RISK_PCT)
-    : Math.max(FOREX_RISK_PCT, CRYPTO_RISK_PCT) * 2;
+    : FOREX_RISK_PCT * 2;
 const MAX_LOSS_STREAK = Number.isFinite(Number(GUARDS.MAX_LOSS_STREAK)) ? Number(GUARDS.MAX_LOSS_STREAK) : 3;
 const LOSS_STREAK_COOLDOWN_MINUTES = Number.isFinite(Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES))
     ? Number(GUARDS.LOSS_STREAK_COOLDOWN_MINUTES)
@@ -55,11 +54,6 @@ const intradayForexConfig = {
     guardrails: { ...(DEFAULT_INTRADAY_CONFIG.guardrails || {}) },
     backtest: { ...(DEFAULT_INTRADAY_CONFIG.backtest || {}) },
 };
-
-const intradayCryptoConfig = mergeIntradayConfig(DEFAULT_INTRADAY_CONFIG, {
-    ...DEFAULT_CRYPTO_INTRADAY_CONFIG,
-    strategyId: "INTRADAY_7STEP_CRYPTO",
-});
 
 function toNum(value) {
     const n = Number(value);
@@ -89,10 +83,6 @@ function normalizeDirection(signalOrSide) {
     if (s === "BUY" || s === "LONG") return "LONG";
     if (s === "SELL" || s === "SHORT") return "SHORT";
     return null;
-}
-
-function isCryptoSymbol(symbol) {
-    return CRYPTO_SYMBOLS.includes(String(symbol || "").toUpperCase());
 }
 
 function getMinutesInTimeZone(timeZone, tsMs) {
@@ -153,7 +143,6 @@ function getActiveSessionNames(tsMs) {
     const names = [];
     for (const [name, session] of Object.entries(SESSIONS || {})) {
         const upper = String(name).toUpperCase();
-        if (upper === "CRYPTO") continue;
         const start = parseMinutes(session?.START);
         const end = parseMinutes(session?.END);
         if (inSession(currentMinutes, start, end)) names.push(upper);
@@ -451,9 +440,7 @@ function main() {
     events.sort((a, b) => (a.tsMs === b.tsMs ? a.symbol.localeCompare(b.symbol) : a.tsMs - b.tsMs));
 
     const forexEngine = createIntradaySevenStepEngine(intradayForexConfig);
-    const cryptoEngine = createIntradaySevenStepEngine(intradayCryptoConfig);
     const forexState = createIntradayRuntimeState({ strategyId: intradayForexConfig.strategyId });
-    const cryptoState = createIntradayRuntimeState({ strategyId: intradayCryptoConfig.strategyId });
 
     const openPositions = new Map();
     const closedTrades = [];
@@ -516,24 +503,20 @@ function main() {
         };
         closedTrades.push(closed);
         openPositions.delete(pos.symbol);
-        if (pos.assetClass === "crypto") registerClosedTrade(cryptoState, { symbol: pos.symbol, pnl: rawPnl });
-        else registerClosedTrade(forexState, { symbol: pos.symbol, pnl: rawPnl });
+        registerClosedTrade(forexState, { symbol: pos.symbol, pnl: rawPnl });
     }
 
     for (const ev of events) {
         const symbol = ev.symbol;
         const tsMs = ev.tsMs;
         const snapshot = ev;
-        const isCrypto = isCryptoSymbol(symbol);
-        const state = isCrypto ? cryptoState : forexState;
-        const engine = isCrypto ? cryptoEngine : forexEngine;
+        const state = forexState;
+        const engine = forexEngine;
 
         ensureStateDay(forexState, tsMs);
-        ensureStateDay(cryptoState, tsMs);
 
         // keep duplicate-symbol guard in sync with global positions
         forexState.openPositions = new Map();
-        cryptoState.openPositions = new Map();
         for (const [s, p] of openPositions.entries()) {
             const mapped = {
                 symbol: s,
@@ -547,7 +530,6 @@ function main() {
                 assetClass: p.assetClass,
             };
             forexState.openPositions.set(s, mapped);
-            cryptoState.openPositions.set(s, mapped);
         }
 
         // rollover close (forex only)
@@ -612,12 +594,10 @@ function main() {
         // simulate bot-level active symbol filter
         const activeSessions = getActiveSessionNames(tsMs);
         let botWouldAnalyze = true;
-        if (!isCrypto) {
-            if (isForexWeekendClosed(tsMs)) botWouldAnalyze = false;
-            if (botWouldAnalyze && !symbolAllowedByActiveSessions(symbol, activeSessions)) botWouldAnalyze = false;
-            if (botWouldAnalyze && isRolloverBuffer(tsMs)) botWouldAnalyze = false;
-            if (botWouldAnalyze && snapshot?.newsBlocked) botWouldAnalyze = false;
-        }
+        if (isForexWeekendClosed(tsMs)) botWouldAnalyze = false;
+        if (botWouldAnalyze && !symbolAllowedByActiveSessions(symbol, activeSessions)) botWouldAnalyze = false;
+        if (botWouldAnalyze && isRolloverBuffer(tsMs)) botWouldAnalyze = false;
+        if (botWouldAnalyze && snapshot?.newsBlocked) botWouldAnalyze = false;
         if (!botWouldAnalyze) continue;
 
         const mid = toNum(snapshot?.mid ?? snapshot?.price ?? snapshot?.bid ?? snapshot?.ask);
@@ -683,7 +663,7 @@ function main() {
             continue;
         }
 
-        const riskPct = Number.isFinite(Number(plan?.riskPct)) ? Number(plan.riskPct) : isCrypto ? CRYPTO_RISK_PCT : FOREX_RISK_PCT;
+        const riskPct = Number.isFinite(Number(plan?.riskPct)) ? Number(plan.riskPct) : FOREX_RISK_PCT;
         const guardSummary = guardSummaryFor(tsMs);
         if (MAX_DAILY_LOSS_PCT > 0 && guardSummary.todayEstimatedLossPctAbs >= MAX_DAILY_LOSS_PCT) {
             blockedSignals.push({ symbol, tsMs, reason: "daily_loss_limit" });
@@ -718,7 +698,7 @@ function main() {
 
         const trade = {
             symbol,
-            assetClass: isCrypto ? "crypto" : "forex",
+            assetClass: "forex",
             side: String(plan.side || "").toUpperCase(),
             entryTsMs: tsMs,
             entryTimestamp: snapshot.timestamp,
