@@ -1514,8 +1514,9 @@ class TradingService {
 
             if (!signal || !orderPlan) {
                 const blocker = this.determineIntradayBlocker(decision);
+                let diagnosticLines = [];
                 if (this.shouldEmitNoSignalLog(upperSymbol, decision, blocker)) {
-                    const diagnosticLines = this.buildIntradayDecisionDiagnosticLines(upperSymbol, decision);
+                    diagnosticLines = this.buildIntradayDecisionDiagnosticLines(upperSymbol, decision);
                     logger.debug(
                         `[Signal] ${upperSymbol}: no intraday signal | blocker=${blocker} | session=${decision?.step1?.activeSession || "-"} | regime=${decision?.step2?.regimeType || "-"} | adx=${this.formatDiagnosticNumber(decision?.step2?.logFields?.h1Adx, 2)} | setup=${decision?.step3?.setupType || "-"} | trigger=${this.formatDiagnosticBoolean(decision?.step4?.triggerOk)}`,
                     );
