@@ -651,32 +651,37 @@ class TradingService {
 
     shouldEmitNoSignalLog(symbol, decision, blocker) {
         const upperSymbol = String(symbol || decision?.symbol || "").toUpperCase() || "UNKNOWN";
+        const step1 = decision?.step1 || {};
+        const step2 = decision?.step2 || {};
+        const step3 = decision?.step3 || {};
+        const step4 = decision?.step4 || {};
+        const guardrails = decision?.guardrails || {};
+        const step5 = decision?.step5 || {};
+        const contextReasons = Array.isArray(step2?.contextReasons)
+            ? step2.contextReasons.filter((reason) => !String(reason).startsWith("ema_set="))
+            : [];
+        const step1Reasons = Array.isArray(step1?.step1Reasons)
+            ? step1.step1Reasons.filter((reason) => !String(reason).startsWith("session=") && !String(reason).startsWith("overlap="))
+            : [];
         const fingerprint = JSON.stringify({
             blocker,
-            session: decision?.step1?.activeSession || "-",
-            activeSessions: decision?.step1?.activeSessions || [],
-            symbolAllowed: Boolean(decision?.step1?.symbolAllowed),
-            forceFlatNow: Boolean(decision?.step1?.forceFlatNow),
-            hourBucketUtc: decision?.step1?.hourBucketUtc || "-",
-            regime: decision?.step2?.regimeType || "-",
-            adx: this.formatDiagnosticNumber(decision?.step2?.logFields?.h1Adx, 2),
-            volatility: decision?.step2?.volatilityRegime || "-",
-            setupType: decision?.step3?.setupType || "-",
-            side: decision?.step3?.side || "-",
-            rsi: this.formatDiagnosticNumber(decision?.step3?.logFields?.m15Rsi, 2),
-            bbpb: this.formatDiagnosticNumber(decision?.step3?.logFields?.m15BbPb, 3),
-            triggerOk: this.formatDiagnosticBoolean(decision?.step4?.triggerOk),
-            guardAllowed: this.formatDiagnosticBoolean(decision?.guardrails?.allowed),
-            riskValid: this.formatDiagnosticBoolean(decision?.step5?.valid),
-            reasons: decision?.reasons || [],
-            step1Reasons: decision?.step1?.step1Reasons || [],
-            step2Reasons: decision?.step2?.contextReasons || [],
-            step4Reasons: decision?.step4?.triggerReasons || [],
-            guardReasons: decision?.guardrails?.blockReasons || [],
-            step5Reasons: decision?.step5?.planReasons || [],
+            session: step1.activeSession || "-",
+            activeSessions: step1.activeSessions || [],
+            symbolAllowed: Boolean(step1.symbolAllowed),
+            forceFlatNow: Boolean(step1.forceFlatNow),
+            hourBucketUtc: step1.hourBucketUtc || "-",
+            regime: step2.regimeType || "-",
+            adx: this.formatDiagnosticNumber(step2.logFields?.h1Adx, 1),
+            volatility: step2.volatilityRegime || "-",
+            setupType: step3.setupType || "-",
+            triggerOk: this.formatDiagnosticBoolean(step4.triggerOk),
+            guardAllowed: this.formatDiagnosticBoolean(guardrails.allowed),
+            riskValid: this.formatDiagnosticBoolean(step5.valid),
+            step1Reasons,
+            contextReasons,
         });
 
-        const repeatMs = 10 * 60 * 1000;
+        const repeatMs = 15 * 60 * 1000;
         const nowMs = Date.now();
         const previous = this.noSignalLogState.get(upperSymbol);
         if (previous && previous.fingerprint === fingerprint && nowMs - previous.loggedAtMs < repeatMs) {

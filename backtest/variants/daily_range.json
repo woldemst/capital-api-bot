@@ -1,0 +1,21 @@
+{
+  "context": {
+    "adxTrendMin": 22,
+    "adxRangeMax": 22
+  },
+  "guardrails": {
+    "allowRangeContrarian": true
+  },
+  "setup": {
+    "trendRsiMin": 35,
+    "trendRsiMax": 65,
+    "rangeBbPbLow": 0.2,
+    "rangeBbPbHigh": 0.8,
+    "rangeRsiLow": 40,
+    "rangeRsiHigh": 60
+  },
+  "trigger": {
+    "requireFvg": false,
+    "displacementAtrMultiplier": 0.7
+  }
+}

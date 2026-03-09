@@ -1,0 +1,10 @@
+{
+  "context": {
+    "adxTrendMin": 24,
+    "adxRangeMax": 20
+  },
+  "setup": {
+    "trendRsiMin": 38,
+    "trendRsiMax": 62
+  }
+}

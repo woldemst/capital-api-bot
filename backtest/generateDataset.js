@@ -41,7 +41,21 @@ const DEFAULT_FX_SYMBOLS = [
     "USD/JPY",
 ];
 
-const DEFAULT_CRYPTO_SYMBOLS = [];
+const DEFAULT_CRYPTO_SYMBOLS = [
+    "BTC/USD",
+    "ETH/USD",
+    "SOL/USD",
+    "XRP/USD",
+];
+
+const DEFAULT_STOCK_SYMBOLS = [
+    "AAPL",
+    "AMZN",
+    "MSFT",
+    "NVDA",
+    "META",
+    "AMD",
+];
 
 const ALL_TIMEFRAMES = {
     M1: "1min",
@@ -81,7 +95,7 @@ function parseSymbols() {
         .map((s) => normalizeSymbol(s))
         .filter(Boolean);
     if (envSymbols.length) return [...new Set(envSymbols)];
-    return [...new Set([...DEFAULT_FX_SYMBOLS, ...DEFAULT_CRYPTO_SYMBOLS])];
+    return [...new Set([...DEFAULT_FX_SYMBOLS, ...DEFAULT_CRYPTO_SYMBOLS, ...DEFAULT_STOCK_SYMBOLS])];
 }
 
 function parseTimeframes() {
@@ -362,7 +376,7 @@ async function buildRowsWithIndicators(candles) {
     }
 
     const recalcStartIndex = Math.max(0, firstMissingIndex - INDICATOR_LOOKBACK + 1);
-    const rows = candles.map((candle) => ({ ...candle }));
+    const rows = candles.slice();
     let processed = 0;
     const totalToProcess = candles.length - recalcStartIndex;
 
@@ -423,8 +437,14 @@ function hasMissingIndicators(rows) {
 function writeDatasetRows(filePath, rows) {
     const ext = fileExt(filePath);
     if (ext === ".jsonl") {
-        const payload = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
-        fs.writeFileSync(filePath, payload);
+        const fd = fs.openSync(filePath, "w");
+        try {
+            for (const row of rows) {
+                fs.writeSync(fd, `${JSON.stringify(row)}\n`);
+            }
+        } finally {
+            fs.closeSync(fd);
+        }
         return;
     }
     fs.writeFileSync(filePath, JSON.stringify(rows, null, 2));
