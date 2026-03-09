@@ -84,6 +84,7 @@ class TradingService {
             summary: null,
         };
         this.guardLogThrottle = new Map();
+        this.noSignalLogState = new Map();
         this.cryptoLwmLastClosedM5KeyBySymbol = new Map();
         this.marketDetailsCache = new Map();
         this.fxRateCache = new Map();
@@ -608,6 +609,36 @@ class TradingService {
         return lines.join("\n");
     }
 
+    buildCliTableRow(columns = [], width = CLI_PANEL_WIDTH) {
+        const innerWidth = Math.max(20, width - 4);
+        const rendered = columns.map((column) => this.padDiagnosticText(column.text, column.width, column.align || "left")).join(" | ");
+        return this.padDiagnosticText(rendered, innerWidth);
+    }
+
+    buildCliTableBlock(title, sections = [], width = CLI_PANEL_WIDTH) {
+        const innerWidth = Math.max(20, width - 4);
+        const topBorder = this.colorize(`+${"=".repeat(innerWidth + 2)}+`, "brightCyan");
+        const divider = this.colorize(`+${"-".repeat(innerWidth + 2)}+`, "cyan");
+        const renderLine = (content = "", color = "white") => {
+            const clipped = this.padDiagnosticText(content, innerWidth);
+            const tinted = this.colorize(clipped, color);
+            const border = this.colorize("|", "cyan");
+            return `${border} ${tinted} ${border}`;
+        };
+
+        const lines = [topBorder, renderLine(title, "brightCyan"), divider];
+        for (const section of sections) {
+            if (section.type === "table") {
+                if (section.header) lines.push(renderLine(this.buildCliTableRow(section.header, width), "brightCyan"));
+                if (section.row) lines.push(renderLine(this.buildCliTableRow(section.row, width), "white"));
+            } else {
+                lines.push(renderLine(section.text || "", section.color || "white"));
+            }
+        }
+        lines.push(topBorder);
+        return lines.join("\n");
+    }
+
     determineIntradayBlocker(decision) {
         if (!decision || typeof decision !== "object") return "UNKNOWN";
         if (!decision?.step1?.symbolAllowed || decision?.step1?.forceFlatNow) return "STEP1_MARKET_WINDOW";
@@ -616,6 +647,43 @@ class TradingService {
         if (!decision?.guardrails?.allowed) return "GUARDRAILS";
         if (!decision?.step5?.valid) return "STEP5_RISK";
         return "UNKNOWN";
+    }
+
+    shouldEmitNoSignalLog(symbol, decision, blocker) {
+        const upperSymbol = String(symbol || decision?.symbol || "").toUpperCase() || "UNKNOWN";
+        const fingerprint = JSON.stringify({
+            blocker,
+            session: decision?.step1?.activeSession || "-",
+            activeSessions: decision?.step1?.activeSessions || [],
+            symbolAllowed: Boolean(decision?.step1?.symbolAllowed),
+            forceFlatNow: Boolean(decision?.step1?.forceFlatNow),
+            hourBucketUtc: decision?.step1?.hourBucketUtc || "-",
+            regime: decision?.step2?.regimeType || "-",
+            adx: this.formatDiagnosticNumber(decision?.step2?.logFields?.h1Adx, 2),
+            volatility: decision?.step2?.volatilityRegime || "-",
+            setupType: decision?.step3?.setupType || "-",
+            side: decision?.step3?.side || "-",
+            rsi: this.formatDiagnosticNumber(decision?.step3?.logFields?.m15Rsi, 2),
+            bbpb: this.formatDiagnosticNumber(decision?.step3?.logFields?.m15BbPb, 3),
+            triggerOk: this.formatDiagnosticBoolean(decision?.step4?.triggerOk),
+            guardAllowed: this.formatDiagnosticBoolean(decision?.guardrails?.allowed),
+            riskValid: this.formatDiagnosticBoolean(decision?.step5?.valid),
+            reasons: decision?.reasons || [],
+            step1Reasons: decision?.step1?.step1Reasons || [],
+            step2Reasons: decision?.step2?.contextReasons || [],
+            step4Reasons: decision?.step4?.triggerReasons || [],
+            guardReasons: decision?.guardrails?.blockReasons || [],
+            step5Reasons: decision?.step5?.planReasons || [],
+        });
+
+        const repeatMs = 10 * 60 * 1000;
+        const nowMs = Date.now();
+        const previous = this.noSignalLogState.get(upperSymbol);
+        if (previous && previous.fingerprint === fingerprint && nowMs - previous.loggedAtMs < repeatMs) {
+            return false;
+        }
+        this.noSignalLogState.set(upperSymbol, { fingerprint, loggedAtMs: nowMs });
+        return true;
     }
 
     buildIntradayDecisionDiagnosticLines(symbol, decision) {
@@ -639,55 +707,81 @@ class TradingService {
                 ? step1.step1Reasons.filter((reason) => !String(reason).startsWith("session=") && !String(reason).startsWith("overlap="))
                 : [],
         );
-        const row1 = [
-            this.formatPanelKv("symbol", upperSymbol, 7, 10),
-            this.formatPanelKv("blocker", blocker, 8, 18),
-            this.formatPanelKv("session", step1.activeSession || "-", 8, 10),
-            this.formatPanelKv("regime", step2.regimeType || "-", 7, 10),
-            this.formatPanelKv("adx", this.formatDiagnosticNumber(step2.logFields?.h1Adx, 2), 4, 6),
-        ].join(" | ");
-        const row2 = [
-            this.formatPanelKv("active", activeSessions, 7, 14),
-            this.formatPanelKv("pref", preferredSessions, 5, 14),
-            this.formatPanelKv("hour", step1.hourBucketUtc || "-", 5, 8),
-            this.formatPanelKv("allow", this.formatDiagnosticBoolean(step1.symbolAllowed), 6, 4),
-            this.formatPanelKv("cutoff", this.formatDiagnosticBoolean(step1.forceFlatNow), 7, 4),
-        ].join(" | ");
-        const row3 = [
-            this.formatPanelKv("setup", step3.setupType || "-", 6, 14),
-            this.formatPanelKv("side", step3.side || "-", 5, 6),
-            this.formatPanelKv("rsi", this.formatDiagnosticNumber(step3.logFields?.m15Rsi, 2), 4, 8),
-            this.formatPanelKv("bbpb", this.formatDiagnosticNumber(step3.logFields?.m15BbPb, 3), 5, 8),
-            this.formatPanelKv("score", this.formatDiagnosticNumber(step3.setupScore, 2), 6, 6),
-        ].join(" | ");
+        const primaryHeader = [
+            { text: "SYM", width: 8 },
+            { text: "BLOCKER", width: 13 },
+            { text: "SES", width: 7 },
+            { text: "ACTIVE", width: 14 },
+            { text: "PREF", width: 14 },
+            { text: "REGIME", width: 8 },
+            { text: "ADX", width: 6, align: "right" },
+            { text: "SETUP", width: 8 },
+            { text: "TRG", width: 4 },
+        ];
+        const primaryRow = [
+            { text: upperSymbol, width: 8 },
+            { text: blocker, width: 13 },
+            { text: step1.activeSession || "-", width: 7 },
+            { text: activeSessions, width: 14 },
+            { text: preferredSessions, width: 14 },
+            { text: step2.regimeType || "-", width: 8 },
+            { text: this.formatDiagnosticNumber(step2.logFields?.h1Adx, 2), width: 6, align: "right" },
+            { text: step3.setupType || "-", width: 8 },
+            { text: this.formatDiagnosticBoolean(step4.triggerOk), width: 4 },
+        ];
+        const secondaryHeader = [
+            { text: "HOUR", width: 7 },
+            { text: "ALLOW", width: 5 },
+            { text: "CUT", width: 3 },
+            { text: "SIDE", width: 5 },
+            { text: "RSI", width: 6, align: "right" },
+            { text: "BBPB", width: 7, align: "right" },
+            { text: "GUARD", width: 5 },
+            { text: "RISK", width: 4 },
+            { text: "NEXT", width: 12 },
+            { text: "VOL", width: 8 },
+        ];
+        const secondaryRow = [
+            { text: step1.hourBucketUtc || "-", width: 7 },
+            { text: this.formatDiagnosticBoolean(step1.symbolAllowed), width: 5 },
+            { text: this.formatDiagnosticBoolean(step1.forceFlatNow), width: 3 },
+            { text: step3.side || "-", width: 5 },
+            { text: this.formatDiagnosticNumber(step3.logFields?.m15Rsi, 2), width: 6, align: "right" },
+            { text: this.formatDiagnosticNumber(step3.logFields?.m15BbPb, 3), width: 7, align: "right" },
+            { text: this.formatDiagnosticBoolean(guardrails.allowed), width: 5 },
+            { text: this.formatDiagnosticBoolean(step5.valid), width: 4 },
+            {
+                text:
+                    blocker === "STEP3_SETUP"
+                        ? "wait_step3"
+                        : blocker === "STEP4_TRIGGER"
+                          ? "wait_trigger"
+                          : blocker === "GUARDRAILS"
+                            ? "guard_block"
+                            : blocker === "STEP5_RISK"
+                              ? "risk_block"
+                              : "review",
+                width: 12,
+            },
+            { text: step2.volatilityRegime || "-", width: 8 },
+        ];
 
-        let row4 = [
-            this.formatPanelKv("next", blocker === "STEP3_SETUP" ? "wait_step3" : blocker === "STEP4_TRIGGER" ? "wait_trigger" : blocker === "GUARDRAILS" ? "guard_block" : blocker === "STEP5_RISK" ? "risk_block" : "review", 5, 14),
-            this.formatPanelKv("trigger", this.formatDiagnosticBoolean(step4.triggerOk), 8, 4),
-            this.formatPanelKv("guard", this.formatDiagnosticBoolean(guardrails.allowed), 6, 4),
-            this.formatPanelKv("risk", this.formatDiagnosticBoolean(step5.valid), 5, 4),
-            this.formatPanelKv("vol", step2.volatilityRegime || "-", 4, 8),
-        ].join(" | ");
-
-        let row5 = `notes   ${this.truncateDiagnosticText(contextReasons !== "-" ? contextReasons : step1Reasons, 92)}`;
+        let noteText = contextReasons !== "-" ? contextReasons : step1Reasons;
         if (blocker === "STEP4_TRIGGER" || blocker === "GUARDRAILS" || blocker === "STEP5_RISK") {
-            row4 = [
-                this.formatPanelKv("trigger", this.formatDiagnosticBoolean(step4.triggerOk), 8, 4),
-                this.formatPanelKv("disp", this.formatDiagnosticBoolean(step4.logFields?.displacementOk), 6, 4),
-                this.formatPanelKv("struct", this.formatDiagnosticBoolean(step4.logFields?.structureBreakOk), 8, 4),
-                this.formatPanelKv("fvg", this.formatDiagnosticBoolean(step4.logFields?.fvgDetected), 5, 4),
-                this.formatPanelKv("m5atr", this.formatDiagnosticNumber(step4.logFields?.m5Atr, 6), 7, 10),
-            ].join(" | ");
-            row5 = `notes   ${this.truncateDiagnosticText(this.formatDiagnosticReasons(step4.triggerReasons), 92)}`;
+            noteText = this.formatDiagnosticReasons(step4.triggerReasons);
         }
         if (blocker === "GUARDRAILS" || blocker === "STEP5_RISK") {
-            row5 = `guard   ${this.truncateDiagnosticText(`blocks=${this.formatDiagnosticReasons(guardrails.blockReasons)} | daily=${this.formatDiagnosticNumber(guardrails.logFields?.dailyTradeCount, 0)} | long=${this.formatDiagnosticNumber(guardrails.logFields?.clientLongPct, 3)} | short=${this.formatDiagnosticNumber(guardrails.logFields?.clientShortPct, 3)}`, 92)}`;
+            noteText = `blocks=${this.formatDiagnosticReasons(guardrails.blockReasons)} | daily=${this.formatDiagnosticNumber(guardrails.logFields?.dailyTradeCount, 0)} | long=${this.formatDiagnosticNumber(guardrails.logFields?.clientLongPct, 3)} | short=${this.formatDiagnosticNumber(guardrails.logFields?.clientShortPct, 3)}`;
         }
         if (blocker === "STEP5_RISK" || step5.valid) {
-            row5 = `risk    ${this.truncateDiagnosticText(`pct=${this.formatDiagnosticNumber(step5.logFields?.riskPct, 4)} | amt=${this.formatDiagnosticNumber(step5.logFields?.riskAmount, 2)} | stop=${this.formatDiagnosticNumber(step5.logFields?.stopDistance, 6)} | rr=${this.formatDiagnosticNumber(step5.logFields?.rr, 2)} | notes=${this.formatDiagnosticReasons(step5.planReasons)}`, 92)}`;
+            noteText = `pct=${this.formatDiagnosticNumber(step5.logFields?.riskPct, 4)} | amt=${this.formatDiagnosticNumber(step5.logFields?.riskAmount, 2)} | stop=${this.formatDiagnosticNumber(step5.logFields?.stopDistance, 6)} | rr=${this.formatDiagnosticNumber(step5.logFields?.rr, 2)} | notes=${this.formatDiagnosticReasons(step5.planReasons)}`;
         }
 
-        const panel = this.buildCliPanel(`TRON SIGNAL // ${upperSymbol} // ${blocker}`, [row1, row2, row3, row4, row5]);
+        const panel = this.buildCliTableBlock(`TRON TABLE // ${upperSymbol} // ${blocker}`, [
+            { type: "table", header: primaryHeader, row: primaryRow },
+            { type: "table", header: secondaryHeader, row: secondaryRow },
+            { type: "text", text: `NOTE  ${this.truncateDiagnosticText(noteText, 94)}` },
+        ]);
         return [panel];
     }
 
@@ -1420,13 +1514,15 @@ class TradingService {
 
             if (!signal || !orderPlan) {
                 const blocker = this.determineIntradayBlocker(decision);
-                const diagnosticLines = this.buildIntradayDecisionDiagnosticLines(upperSymbol, decision);
-                logger.debug(
-                    `[Signal] ${upperSymbol}: no intraday signal | blocker=${blocker} | session=${decision?.step1?.activeSession || "-"} | regime=${decision?.step2?.regimeType || "-"} | adx=${this.formatDiagnosticNumber(decision?.step2?.logFields?.h1Adx, 2)} | setup=${decision?.step3?.setupType || "-"} | trigger=${this.formatDiagnosticBoolean(decision?.step4?.triggerOk)}`,
-                );
-                if (!logger.isDashboardEnabled?.()) {
-                    for (const line of diagnosticLines) {
-                        logger.debug(line);
+                if (this.shouldEmitNoSignalLog(upperSymbol, decision, blocker)) {
+                    const diagnosticLines = this.buildIntradayDecisionDiagnosticLines(upperSymbol, decision);
+                    logger.debug(
+                        `[Signal] ${upperSymbol}: no intraday signal | blocker=${blocker} | session=${decision?.step1?.activeSession || "-"} | regime=${decision?.step2?.regimeType || "-"} | adx=${this.formatDiagnosticNumber(decision?.step2?.logFields?.h1Adx, 2)} | setup=${decision?.step3?.setupType || "-"} | trigger=${this.formatDiagnosticBoolean(decision?.step4?.triggerOk)}`,
+                    );
+                    if (!logger.isDashboardEnabled?.()) {
+                        for (const line of diagnosticLines) {
+                            logger.debug(line);
+                        }
                     }
                 }
                 this.safeLogStrategyDecision({

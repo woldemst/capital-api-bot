@@ -70,6 +70,63 @@ const dashboardState = {
     symbolRows: new Map(),
     initialized: false,
 };
+const repeatLogState = new Map();
+const REPEAT_SUPPRESSION_RULES = [
+    {
+        level: "info",
+        pattern: /^\[DealID Monitor\] tick .* \| openNow=(\d+)$/,
+        key: (match) => `dealid:${match[1]}`,
+        intervalMs: 5 * 60 * 1000,
+    },
+    {
+        level: "info",
+        pattern: /^\[Monitoring\] Trailing stop check .* open positions: (\d+)$/,
+        key: (match) => `trailing:${match[1]}`,
+        intervalMs: 5 * 60 * 1000,
+    },
+    {
+        level: "info",
+        pattern: /^\[Bot\] Active sessions \(UTC\): (.+)$/,
+        key: (match) => `active_sessions:${match[1]}`,
+        intervalMs: 10 * 60 * 1000,
+    },
+    {
+        level: "info",
+        pattern: /^\[Bot\]\[Filter\] Blocked summary: (.+)$/,
+        key: (match) => `blocked_summary:${match[1]}`,
+        intervalMs: 10 * 60 * 1000,
+    },
+    {
+        level: "debug",
+        pattern: /^\[Bot\]\[Filter\] Blocked detail: (.+)$/,
+        key: (match) => `blocked_detail:${match[1]}`,
+        intervalMs: 10 * 60 * 1000,
+    },
+    {
+        level: "warn",
+        pattern: /^\[Bot\]\[Filter\] All session symbols were filtered out this tick\. (.+)$/,
+        key: (match) => `all_filtered:${match[1]}`,
+        intervalMs: 10 * 60 * 1000,
+    },
+    {
+        level: "info",
+        pattern: /^\[Analyze\] Processing ([A-Z0-9]+)$/,
+        key: (match) => `analyze:${match[1]}`,
+        intervalMs: 5 * 60 * 1000,
+    },
+    {
+        level: "debug",
+        pattern: /^\[CandleFetch\] ([A-Z0-9]+): fetched (.+)$/,
+        key: (match) => `candlefetch:${match[1]}:${match[2]}`,
+        intervalMs: 5 * 60 * 1000,
+    },
+    {
+        level: "info",
+        pattern: /^\[ProcessPrice\] Open trades: (\d+\/\d+) \| Balance: ([^|]+) \| AvailMargin: (.+)$/,
+        key: (match) => `process_price:${match[1]}:${match[2].trim()}:${match[3].trim()}`,
+        intervalMs: 5 * 60 * 1000,
+    },
+];
 
 function toConsolePayload(message, error = null) {
     if (typeof message === "object") {
@@ -502,13 +559,32 @@ function emitRaw(level, message, error = null) {
     }
 }
 
+function shouldSuppressRepeat(level, payload) {
+    const text = String(payload || "");
+    const now = Date.now();
+    for (const rule of REPEAT_SUPPRESSION_RULES) {
+        if (rule.level !== level) continue;
+        const match = text.match(rule.pattern);
+        if (!match) continue;
+        const key = rule.key(match, text);
+        const previousAt = repeatLogState.get(key) || 0;
+        if (now - previousAt < rule.intervalMs) return true;
+        repeatLogState.set(key, now);
+        return false;
+    }
+    return false;
+}
+
 function log(level, message, error = null) {
     if (!shouldLog(level)) return;
     const timestamp = new Date().toISOString();
+    const payload = toConsolePayload(message, error);
+
+    if (shouldSuppressRepeat(level, payload)) return;
 
     if (DASHBOARD_ENABLED) {
-        parseMessage(level, toConsolePayload(message, error), timestamp);
-        pushRecentEvent(level, toConsolePayload(message, error), timestamp);
+        parseMessage(level, payload, timestamp);
+        pushRecentEvent(level, payload, timestamp);
         renderDashboard();
         return;
     }
