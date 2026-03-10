@@ -65,6 +65,7 @@ export default function Overview() {
   const dashboard = plannerQuery.data;
   const monthlyTemplateRows = useMemo(() => dashboard?.monthlyPlan.rows || [], [dashboard?.monthlyPlan.rows]);
   const annualSummary = dashboard?.annualSummary || null;
+  const hasReferenceReport = Boolean(annualSummary);
   const plannerErrorMessage =
     plannerQuery.error instanceof Error && plannerQuery.error.message
       ? `${plannerQuery.error.message}. Prüfe den Hub-Server, den Vite-/API-Proxy und den Referenzreport für das Forex-Desk.`
@@ -154,7 +155,7 @@ export default function Overview() {
     );
   }
 
-  if (plannerQuery.isError || !dashboard || !annualSummary) {
+  if (plannerQuery.isError || !dashboard) {
     return (
       <ErrorState
         title="Forex-Dashboard konnte nicht geladen werden"
@@ -197,12 +198,25 @@ export default function Overview() {
         />
         <KPICard
           title="2025 Referenz"
-          value={formatSignedMoney(annualSummary.rawPnl)}
-          subtitle={`PF ${annualSummary.profitFactor.toFixed(2)} | Winrate ${formatPercentage(annualSummary.winrate)}`}
-          trend={annualSummary.rawPnl >= 0 ? "up" : "down"}
+          value={hasReferenceReport ? formatSignedMoney(annualSummary.rawPnl) : "Kein Report"}
+          subtitle={
+            hasReferenceReport
+              ? `PF ${annualSummary.profitFactor.toFixed(2)} | Winrate ${formatPercentage(annualSummary.winrate)}`
+              : `Erwarte ${dashboard.report.file || "einen Referenzreport"} unter backtest/reports/compare`
+          }
+          trend={hasReferenceReport ? (annualSummary.rawPnl >= 0 ? "up" : "down") : "neutral"}
           icon={<BadgeEuro className="h-5 w-5 text-primary" />}
         />
       </div>
+
+      {!hasReferenceReport && (
+        <div className="glass-card border border-destructive/40 p-4 text-sm text-muted-foreground">
+          Referenzreport auf diesem Server nicht gefunden. Live-Setup und Guardrails sind geladen, aber Cashflow-Planer,
+          Phasen und Wochenreferenz bleiben leer, bis{" "}
+          <span className="font-medium text-foreground">{dashboard.report.file || "der Forex-Report"}</span> unter{" "}
+          <span className="font-medium text-foreground">backtest/reports/compare</span> vorhanden ist.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="glass-card p-4">
@@ -259,8 +273,14 @@ export default function Overview() {
           </div>
 
           <div className="mt-4 rounded-lg border border-border/60 bg-background/30 p-3 text-sm text-muted-foreground">
-            Referenzlauf: {new Date(dashboard.report.rangeStartIso || "").toLocaleDateString("de-DE")} bis{" "}
-            {new Date(dashboard.report.rangeEndIso || "").toLocaleDateString("de-DE")} | Report: {dashboard.report.file}
+            {hasReferenceReport ? (
+              <>
+                Referenzlauf: {new Date(dashboard.report.rangeStartIso || "").toLocaleDateString("de-DE")} bis{" "}
+                {new Date(dashboard.report.rangeEndIso || "").toLocaleDateString("de-DE")} | Report: {dashboard.report.file}
+              </>
+            ) : (
+              <>Kein Referenzlauf geladen | Erwarteter Report: {dashboard.report.file || "-"}</>
+            )}
           </div>
         </div>
       </div>
@@ -344,73 +364,81 @@ export default function Overview() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <KPICard
-            title="Gesamt entnehmbar"
-            value={formatMoney(plannerTotals.totalPayout)}
-            subtitle="Über den ganzen Referenzlauf"
-            icon={<ArrowDownToLine className="h-5 w-5 text-primary" />}
-          />
-          <KPICard
-            title="End Broker"
-            value={formatCompactMoney(plannerTotals.finalBroker)}
-            subtitle="Nach Steuerrücklage und Entnahmen"
-            trend={plannerTotals.finalBroker >= annualSummary.startCapital ? "up" : "down"}
-            icon={<Wallet className="h-5 w-5 text-primary" />}
-          />
-          <KPICard
-            title="Steuerkonto"
-            value={formatCompactMoney(plannerTotals.taxReserve)}
-            subtitle="Reserviert, nicht reinvestieren"
-            icon={<BadgeEuro className="h-5 w-5 text-primary" />}
-          />
-          <KPICard
-            title="Max Drawdown"
-            value={formatPercentage(annualSummary.maxDrawdownPct)}
-            subtitle={`Ø Hold ${annualSummary.avgHoldMinutes.toFixed(1)} min`}
-            trend="down"
-            icon={<AlertTriangle className="h-5 w-5 text-primary" />}
-          />
-        </div>
+        {hasReferenceReport ? (
+          <>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <KPICard
+                title="Gesamt entnehmbar"
+                value={formatMoney(plannerTotals.totalPayout)}
+                subtitle="Über den ganzen Referenzlauf"
+                icon={<ArrowDownToLine className="h-5 w-5 text-primary" />}
+              />
+              <KPICard
+                title="End Broker"
+                value={formatCompactMoney(plannerTotals.finalBroker)}
+                subtitle="Nach Steuerrücklage und Entnahmen"
+                trend={plannerTotals.finalBroker >= annualSummary.startCapital ? "up" : "down"}
+                icon={<Wallet className="h-5 w-5 text-primary" />}
+              />
+              <KPICard
+                title="Steuerkonto"
+                value={formatCompactMoney(plannerTotals.taxReserve)}
+                subtitle="Reserviert, nicht reinvestieren"
+                icon={<BadgeEuro className="h-5 w-5 text-primary" />}
+              />
+              <KPICard
+                title="Max Drawdown"
+                value={formatPercentage(annualSummary.maxDrawdownPct)}
+                subtitle={`Ø Hold ${annualSummary.avgHoldMinutes.toFixed(1)} min`}
+                trend="down"
+                icon={<AlertTriangle className="h-5 w-5 text-primary" />}
+              />
+            </div>
 
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Monat</TableHead>
-                <TableHead>Risk</TableHead>
-                <TableHead>Start Broker</TableHead>
-                <TableHead>Trades</TableHead>
-                <TableHead>Winrate</TableHead>
-                <TableHead>Net R</TableHead>
-                <TableHead>PnL</TableHead>
-                <TableHead>Steuerkonto +</TableHead>
-                <TableHead>Geplant</TableHead>
-                <TableHead>Tatsächlich</TableHead>
-                <TableHead>End Broker</TableHead>
-                <TableHead>Steuerkonto gesamt</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {plannedMonthlyRows.map((row) => (
-                <TableRow key={row.month}>
-                  <TableCell>{formatMonth(row.month)}</TableCell>
-                  <TableCell>{row.risk}</TableCell>
-                  <TableCell>{formatMoney(row.startBroker)}</TableCell>
-                  <TableCell>{row.trades}</TableCell>
-                  <TableCell>{row.trades ? formatPercentage(row.winrate) : "n/a"}</TableCell>
-                  <TableCell className={row.netR >= 0 ? "text-profit" : "text-loss"}>{formatSignedR(row.netR)}</TableCell>
-                  <TableCell className={row.rawPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(row.rawPnl)}</TableCell>
-                  <TableCell>{formatMoney(row.taxTransfer)}</TableCell>
-                  <TableCell>{formatMoney(row.plannedPayout)}</TableCell>
-                  <TableCell>{formatMoney(row.actualPayout)}</TableCell>
-                  <TableCell>{formatMoney(row.endBroker)}</TableCell>
-                  <TableCell>{formatMoney(row.taxReserveBalance)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Monat</TableHead>
+                    <TableHead>Risk</TableHead>
+                    <TableHead>Start Broker</TableHead>
+                    <TableHead>Trades</TableHead>
+                    <TableHead>Winrate</TableHead>
+                    <TableHead>Net R</TableHead>
+                    <TableHead>PnL</TableHead>
+                    <TableHead>Steuerkonto +</TableHead>
+                    <TableHead>Geplant</TableHead>
+                    <TableHead>Tatsächlich</TableHead>
+                    <TableHead>End Broker</TableHead>
+                    <TableHead>Steuerkonto gesamt</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {plannedMonthlyRows.map((row) => (
+                    <TableRow key={row.month}>
+                      <TableCell>{formatMonth(row.month)}</TableCell>
+                      <TableCell>{row.risk}</TableCell>
+                      <TableCell>{formatMoney(row.startBroker)}</TableCell>
+                      <TableCell>{row.trades}</TableCell>
+                      <TableCell>{row.trades ? formatPercentage(row.winrate) : "n/a"}</TableCell>
+                      <TableCell className={row.netR >= 0 ? "text-profit" : "text-loss"}>{formatSignedR(row.netR)}</TableCell>
+                      <TableCell className={row.rawPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(row.rawPnl)}</TableCell>
+                      <TableCell>{formatMoney(row.taxTransfer)}</TableCell>
+                      <TableCell>{formatMoney(row.plannedPayout)}</TableCell>
+                      <TableCell>{formatMoney(row.actualPayout)}</TableCell>
+                      <TableCell>{formatMoney(row.endBroker)}</TableCell>
+                      <TableCell>{formatMoney(row.taxReserveBalance)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        ) : (
+          <div className="rounded-lg border border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">
+            Cashflow-Planer ist auf diesem Server deaktiviert, weil der Referenzreport fehlt.
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.9fr_1.1fr]">
@@ -419,34 +447,40 @@ export default function Overview() {
             <h2 className="text-lg font-semibold">Phasenübersicht</h2>
             <p className="text-sm text-muted-foreground">Wie das Referenzjahr nach Risiko-Stufen aufgebaut war.</p>
           </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Phase</TableHead>
-                  <TableHead>Risk</TableHead>
-                  <TableHead>Trades</TableHead>
-                  <TableHead>Winrate</TableHead>
-                  <TableHead>PnL</TableHead>
-                  <TableHead>Start</TableHead>
-                  <TableHead>Ende</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dashboard.phaseRows.map((row) => (
-                  <TableRow key={row.phase}>
-                    <TableCell>{row.phase}</TableCell>
-                    <TableCell>{row.risk}</TableCell>
-                    <TableCell>{row.trades}</TableCell>
-                    <TableCell>{row.trades ? formatPercentage(row.winrate) : "n/a"}</TableCell>
-                    <TableCell className={row.rawPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(row.rawPnl)}</TableCell>
-                    <TableCell>{formatCompactMoney(row.startBalance)}</TableCell>
-                    <TableCell>{formatCompactMoney(row.endBalance)}</TableCell>
+          {hasReferenceReport ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Phase</TableHead>
+                    <TableHead>Risk</TableHead>
+                    <TableHead>Trades</TableHead>
+                    <TableHead>Winrate</TableHead>
+                    <TableHead>PnL</TableHead>
+                    <TableHead>Start</TableHead>
+                    <TableHead>Ende</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {dashboard.phaseRows.map((row) => (
+                    <TableRow key={row.phase}>
+                      <TableCell>{row.phase}</TableCell>
+                      <TableCell>{row.risk}</TableCell>
+                      <TableCell>{row.trades}</TableCell>
+                      <TableCell>{row.trades ? formatPercentage(row.winrate) : "n/a"}</TableCell>
+                      <TableCell className={row.rawPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(row.rawPnl)}</TableCell>
+                      <TableCell>{formatCompactMoney(row.startBalance)}</TableCell>
+                      <TableCell>{formatCompactMoney(row.endBalance)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">
+              Keine Phasenübersicht ohne geladenen Referenzreport.
+            </div>
+          )}
         </div>
 
         <div className="glass-card p-4">
@@ -456,38 +490,44 @@ export default function Overview() {
               Wochenübersicht aus dem 2025er Lauf inklusive aktivem Risiko, Startsaldo und Drawdown.
             </p>
           </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Woche</TableHead>
-                  <TableHead>Risk</TableHead>
-                  <TableHead>Startkonto</TableHead>
-                  <TableHead>Trades</TableHead>
-                  <TableHead>Winrate</TableHead>
-                  <TableHead>Net R</TableHead>
-                  <TableHead>PnL</TableHead>
-                  <TableHead>Endkonto</TableHead>
-                  <TableHead>DD</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dashboard.weekRows.map((row) => (
-                  <TableRow key={row.week}>
-                    <TableCell>{row.week}</TableCell>
-                    <TableCell>{row.risk}</TableCell>
-                    <TableCell>{formatMoney(row.startEquity)}</TableCell>
-                    <TableCell>{row.trades}</TableCell>
-                    <TableCell>{row.trades ? formatPercentage(row.winrate) : "n/a"}</TableCell>
-                    <TableCell className={row.netR >= 0 ? "text-profit" : "text-loss"}>{formatSignedR(row.netR)}</TableCell>
-                    <TableCell className={row.rawPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(row.rawPnl)}</TableCell>
-                    <TableCell>{formatMoney(row.endEquity)}</TableCell>
-                    <TableCell>{formatPercentage(row.maxDrawdownPct)}</TableCell>
+          {hasReferenceReport ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Woche</TableHead>
+                    <TableHead>Risk</TableHead>
+                    <TableHead>Startkonto</TableHead>
+                    <TableHead>Trades</TableHead>
+                    <TableHead>Winrate</TableHead>
+                    <TableHead>Net R</TableHead>
+                    <TableHead>PnL</TableHead>
+                    <TableHead>Endkonto</TableHead>
+                    <TableHead>DD</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {dashboard.weekRows.map((row) => (
+                    <TableRow key={row.week}>
+                      <TableCell>{row.week}</TableCell>
+                      <TableCell>{row.risk}</TableCell>
+                      <TableCell>{formatMoney(row.startEquity)}</TableCell>
+                      <TableCell>{row.trades}</TableCell>
+                      <TableCell>{row.trades ? formatPercentage(row.winrate) : "n/a"}</TableCell>
+                      <TableCell className={row.netR >= 0 ? "text-profit" : "text-loss"}>{formatSignedR(row.netR)}</TableCell>
+                      <TableCell className={row.rawPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(row.rawPnl)}</TableCell>
+                      <TableCell>{formatMoney(row.endEquity)}</TableCell>
+                      <TableCell>{formatPercentage(row.maxDrawdownPct)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">
+              Keine Wochenreferenz ohne geladenen Referenzreport.
+            </div>
+          )}
         </div>
       </div>
     </div>
