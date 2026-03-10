@@ -8,6 +8,7 @@ const HUB_PORT = Number(process.env.HUB_PORT || process.env.DASHBOARD_PORT || 30
 const LOG_DIR = path.join(process.cwd(), "backtest", "logs");
 const PRICE_LOG_DIR = path.join(process.cwd(), "backtest", "prices");
 const REPORT_DIR = path.join(process.cwd(), "backtest", "reports", "compare");
+const REPORT_REFERENCE_PATH = path.join(process.cwd(), "backtest", "reference", "forex-planner-reference.json");
 const CLIENT_DIST_DIR = path.join(process.cwd(), "client", "dist");
 const API_PREFIX = "/api";
 const BACKTEST_SESSIONS = Object.keys(SESSIONS || {});
@@ -428,10 +429,30 @@ function resolveForexPlannerReportPath() {
 
 function loadForexPlannerReport() {
     const reportPath = resolveForexPlannerReportPath();
-    if (!reportPath) return { reportPath: null, report: null };
+    if (reportPath) {
+        const report = readJsonFile(reportPath);
+        if (report) {
+            return {
+                reportPath,
+                report,
+                source: "full_report",
+            };
+        }
+    }
+
+    const referenceReport = readJsonFile(REPORT_REFERENCE_PATH);
+    if (referenceReport) {
+        return {
+            reportPath: REPORT_REFERENCE_PATH,
+            report: referenceReport,
+            source: "reference_snapshot",
+        };
+    }
+
     return {
-        reportPath,
-        report: readJsonFile(reportPath),
+        reportPath: reportPath || REPORT_REFERENCE_PATH,
+        report: null,
+        source: "missing",
     };
 }
 
@@ -581,12 +602,12 @@ function buildMonthlyWithdrawalPlan(report, assumptions = {}) {
 }
 
 function buildForexOperationsDashboard() {
-    const { reportPath, report } = loadForexPlannerReport();
+    const { reportPath, report, source } = loadForexPlannerReport();
     const runtimeRiskPct = Number(RISK?.PER_TRADE) || DEFAULT_FOREX_RISK_PCT;
-    const summary = report?.summary || null;
-    const weekRows = report ? buildWeeklyPlannerRows(report) : [];
-    const phaseRows = report ? buildPhaseBalanceRows(report) : [];
-    const monthlyPlan = report ? buildMonthlyWithdrawalPlan(report) : { assumptions: null, rows: [] };
+    const summary = report?.annualSummary || report?.summary || null;
+    const weekRows = Array.isArray(report?.weekRows) ? report.weekRows : report ? buildWeeklyPlannerRows(report) : [];
+    const phaseRows = Array.isArray(report?.phaseRows) ? report.phaseRows : report ? buildPhaseBalanceRows(report) : [];
+    const monthlyPlan = report?.monthlyPlan?.rows ? report.monthlyPlan : report ? buildMonthlyWithdrawalPlan(report) : { assumptions: null, rows: [] };
     const liveSymbolSet = new Set((Array.isArray(LIVE_SYMBOLS) ? LIVE_SYMBOLS : []).map((symbol) => String(symbol || "").toUpperCase()));
 
     return {
@@ -594,9 +615,10 @@ function buildForexOperationsDashboard() {
         generatedAt: new Date().toISOString(),
         report: {
             file: reportPath ? path.basename(reportPath) : null,
+            source,
             generatedAt: report?.generatedAt || null,
-            rangeStartIso: summary?.rangeStartIso || null,
-            rangeEndIso: summary?.rangeEndIso || null,
+            rangeStartIso: report?.rangeStartIso || summary?.rangeStartIso || null,
+            rangeEndIso: report?.rangeEndIso || summary?.rangeEndIso || null,
         },
         live: {
             environment: API?.BASE_URL?.includes("demo") ? "DEMO" : "LIVE",
